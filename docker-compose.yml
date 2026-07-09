@@ -1,10 +1,29 @@
-# Deploy đơn giản: chạy trên VPS, truy cập qua http://IP_VPS:8080
-# (Muốn dùng tên miền + HTTPS thì thêm nhãn Caddy — xem DEPLOY.md)
+# Deploy: app Next.js + Caddy (reverse proxy, tự cấp HTTPS Let's Encrypt).
+# DNS: finance.biglight.jp -> IP_VPS (đã trỏ). Cần port 80/443 trống trên VPS.
+#   docker compose up -d --build
 services:
-  biglight-financial:
+  app:
     build: .
     image: biglight-financial:latest
     container_name: biglight-financial
     restart: unless-stopped
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: biglight-caddy
+    restart: unless-stopped
     ports:
-      - "8080:3000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
