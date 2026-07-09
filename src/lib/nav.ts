@@ -18,7 +18,7 @@ export const NAV: NavItem[] = [
   { key: "yojitsu",     href: "/yojitsu",     label: "予実管理",       labelVi: "Kế hoạch vs Thực tế",  icon: "target" },
   { key: "sales",       href: "/sales",       label: "売上・回収管理", labelVi: "Doanh thu & thu hồi công nợ", icon: "trending" },
   { key: "expenses",    href: "/expenses",    label: "支出管理",       labelVi: "Chi phí",              icon: "receipt" },
-  { key: "properties",  href: "/properties",  label: "物件・家賃管理", labelVi: "Nhà/ký túc & tiền thuê", icon: "wallet" },
+  { key: "collection",  href: "/collection",  label: "回収管理",       labelVi: "Quản lý thu hồi tiền",  icon: "wallet" },
   { key: "customers",   href: "/customers",   label: "顧客・契約管理", labelVi: "Khách hàng & hợp đồng", icon: "users" },
   { key: "okr",         href: "/okr",         label: "OKR / KPI",      labelVi: "Mục tiêu",             icon: "flag" },
   { key: "users",       href: "/users",       label: "User管理",       labelVi: "Nhân viên",            icon: "id" },

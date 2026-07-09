@@ -7,7 +7,7 @@ import { STORAGE_KEY as K_EXPENSE, sampleExpenses } from "@/lib/expenses";
 import { STORAGE_KEY as K_CUSTOMER, sampleCustomers } from "@/lib/customers";
 import { STORAGE_KEY as K_OKR, sampleOkrs } from "@/lib/okr";
 import { STORAGE_KEY as K_USER, sampleUsers } from "@/lib/users";
-import { STORAGE_KEY as K_PROP, sampleProperties } from "@/lib/property";
+import { STORAGE_KEY as K_COL, sampleCollect } from "@/lib/collection";
 
 // Danh sách module + hàm sinh dữ liệu mẫu + key localStorage.
 const SEEDS: { key: string; label: string; make: () => unknown }[] = [
@@ -17,7 +17,7 @@ const SEEDS: { key: string; label: string; make: () => unknown }[] = [
   { key: K_CUSTOMER, label: "顧客・契約", make: sampleCustomers },
   { key: K_OKR, label: "OKR / KPI", make: sampleOkrs },
   { key: K_USER, label: "User管理", make: sampleUsers },
-  { key: K_PROP, label: "物件・家賃", make: sampleProperties },
+  { key: K_COL, label: "回収管理", make: sampleCollect },
 ];
 
 export default function DemoData() {
