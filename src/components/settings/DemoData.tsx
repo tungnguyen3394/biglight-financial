@@ -8,6 +8,7 @@ import { STORAGE_KEY as K_CUSTOMER, sampleCustomers } from "@/lib/customers";
 import { STORAGE_KEY as K_OKR, sampleOkrs } from "@/lib/okr";
 import { STORAGE_KEY as K_USER, sampleUsers } from "@/lib/users";
 import { STORAGE_KEY as K_COL, sampleCollect } from "@/lib/collection";
+import { STORAGE_KEY as K_ACC, defaultAccounts } from "@/lib/accounts";
 
 // Danh sách module + hàm sinh dữ liệu mẫu + key localStorage.
 const SEEDS: { key: string; label: string; make: () => unknown }[] = [
@@ -18,6 +19,7 @@ const SEEDS: { key: string; label: string; make: () => unknown }[] = [
   { key: K_OKR, label: "OKR / KPI", make: sampleOkrs },
   { key: K_USER, label: "User管理", make: sampleUsers },
   { key: K_COL, label: "回収管理", make: sampleCollect },
+  { key: K_ACC, label: "勘定科目", make: defaultAccounts },
 ];
 
 export default function DemoData() {

@@ -4,9 +4,11 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
 import {
   STORAGE_KEY, PAY_METHODS, sampleCollect, itemReport, leafTargets, nameOfTarget,
-  collectedOfTarget, walk, addChild, patchNode, deleteNode, moveNode, newTarget, uid, yen,
-  type CollectStore, type CollectItem, type Target, type CollectRecord, type PayMethod,
+  collectedOfTarget, addChild, patchNode, deleteNode, moveNode, newTarget, history, uid, yen,
+  type CollectStore, type Target, type CollectRecord, type PayMethod,
 } from "@/lib/collection";
+import { loadAccounts, accountLeaves } from "@/lib/accounts";
+import { fiscalLabel, fiscalYearOf, FY_MONTH_LABELS } from "@/lib/fiscal";
 
 const emptyCol = { itemId: "", targetId: "", amount: "", date: "", method: "振込" as PayMethod, memo: "" };
 
@@ -73,21 +75,28 @@ function ReportTree({ nodes, path, store, ym }: { nodes: Target[]; path: string[
 export default function CollectionManager() {
   const [store, setStore] = useState<CollectStore>({ items: [], records: [] });
   const [ym, setYm] = useState("");
+  const [fy, setFy] = useState(2025);
+  const [accOptions, setAccOptions] = useState<{ keys: string[]; label: string }[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCol, setShowCol] = useState(false);
   const [cDraft, setCDraft] = useState(emptyCol);
-  const [newItem, setNewItem] = useState("");
+  const [newAcc, setNewAcc] = useState("");        // 勘定科目 (index) chọn để thêm項目
+  const [newMonthly, setNewMonthly] = useState(true);
   const ready = useRef(false);
 
   useEffect(() => {
-    setYm(new Date().toISOString().slice(0, 7));
+    const iso = new Date().toISOString().slice(0, 10);
+    setYm(iso.slice(0, 7)); setFy(fiscalYearOf(iso));
     try { const raw = window.localStorage.getItem(STORAGE_KEY); setStore(raw ? JSON.parse(raw) : sampleCollect()); } catch { setStore(sampleCollect()); }
+    setAccOptions(accountLeaves(loadAccounts()));
     ready.current = true;
   }, []);
   useEffect(() => { if (!ready.current) return; try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch { /* ignore */ } }, [store]);
 
   const report = useMemo(() => itemReport(store, ym), [store, ym]);
   const leaves = useMemo(() => leafTargets(store.items), [store.items]);
+  const hist = useMemo(() => history(store, fy), [store, fy]);
+  const selBalance = hist.find((h) => h.targetId === cDraft.targetId)?.balance;
   const tot = report.reduce((t, r) => ({ paidOut: t.paidOut + r.paidOut, expected: t.expected + r.expected, collected: t.collected + r.collected, uncollected: t.uncollected + r.uncollected, net: t.net + r.net }), { paidOut: 0, expected: 0, collected: 0, uncollected: 0, net: 0 });
 
   // ---- master ops ----
@@ -99,7 +108,14 @@ export default function CollectionManager() {
   const onMove = (itemId: string) => (p: string[], d: -1 | 1) => upItem(itemId, (t) => moveNode(t, p, d));
   function addRootTarget(itemId: string) { upItem(itemId, (t) => [...t, newTarget(Math.max(0, ...t.map((x) => x.order)) + 1)]); }
   function renameItem(itemId: string, name: string) { setStore((prev) => ({ ...prev, items: prev.items.map((it) => it.id === itemId ? { ...it, name } : it) })); }
-  function addItem() { if (!newItem.trim()) return; setStore((prev) => ({ ...prev, items: [...prev.items, { id: "it" + uid(), name: newItem.trim(), order: Math.max(0, ...prev.items.map((x) => x.order)) + 1, targets: [] }] })); setNewItem(""); }
+  function addItem() {
+    const acc = accOptions[Number(newAcc)];
+    if (!acc) { alert("勘定科目を選択してください（設定で定義）。"); return; }
+    const name = acc.label.split(" › ").pop() || acc.label;
+    setStore((prev) => ({ ...prev, items: [...prev.items, { id: "it" + uid(), name, accountKeys: acc.keys, monthly: newMonthly, order: Math.max(0, ...prev.items.map((x) => x.order)) + 1, targets: [] }] }));
+    setNewAcc("");
+  }
+  function setItemMonthly(itemId: string, monthly: boolean) { setStore((prev) => ({ ...prev, items: prev.items.map((it) => it.id === itemId ? { ...it, monthly } : it) })); }
   function delItem(itemId: string) { if (!confirm("この回収項目を削除しますか？")) return; setStore((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== itemId) })); }
 
   // ---- collection ----
@@ -191,9 +207,13 @@ export default function CollectionManager() {
         <div className="space-y-4">
           {store.items.sort((a, b) => a.order - b.order).map((it) => (
             <div key={it.id} className="rounded-2xl border border-line p-3.5">
-              <div className="mb-2 flex items-center gap-2">
-                <input value={it.name} onChange={(e) => renameItem(it.id, e.target.value)}
-                  className="w-52 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-black text-ink outline-none hover:border-line focus:border-brand-500 focus:bg-white" />
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-lg bg-brand-50 px-2.5 py-1 text-sm font-black text-brand-700">{it.name}</span>
+                <select value={it.monthly ? "m" : "o"} onChange={(e) => setItemMonthly(it.id, e.target.value === "m")}
+                  className="rounded-lg border border-line px-2 py-1 text-xs font-bold text-ink outline-none focus:border-brand-500">
+                  <option value="m">毎月（予定が毎月）</option>
+                  <option value="o">一括（予定は総額）</option>
+                </select>
                 <button onClick={() => addRootTarget(it.id)} className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-brand-700">＋ 対象追加</button>
                 <button onClick={() => delItem(it.id)} className="ml-auto rounded-lg border border-line px-2 py-1 text-xs text-muted hover:border-rose-400 hover:text-rose-500">項目削除</button>
               </div>
@@ -201,12 +221,58 @@ export default function CollectionManager() {
                 : <NodeRows nodes={it.targets} itemId={it.id} path={[]} onPatch={onPatch(it.id)} onAdd={onAdd(it.id)} onDel={onDel(it.id)} onMove={onMove(it.id)} />}
             </div>
           ))}
-          <div className="flex items-center gap-2">
-            <input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="＋ 回収項目を追加（例：社員貸付・立替金…）"
-              className="w-72 rounded-xl border border-dashed border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
-            <button onClick={addItem} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700">項目追加</button>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-line p-2.5">
+            <span className="text-xs font-bold text-muted">＋ 回収項目を追加：</span>
+            <select value={newAcc} onChange={(e) => setNewAcc(e.target.value)}
+              className="min-w-[220px] rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="">勘定科目を選択（設定で定義）</option>
+              {accOptions.map((a, i) => <option key={i} value={i}>{a.label}</option>)}
+            </select>
+            <select value={newMonthly ? "m" : "o"} onChange={(e) => setNewMonthly(e.target.value === "m")}
+              className="rounded-lg border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="m">毎月</option><option value="o">一括</option>
+            </select>
+            <button onClick={addItem} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white hover:bg-brand-700">追加</button>
           </div>
         </div>
+      </Panel>
+
+      {/* ===== 12ヶ月 回収履歴 + 残高 ===== */}
+      <Panel title="📅 回収履歴・残高（12ヶ月）"
+        action={
+          <div className="flex items-center gap-2">
+            <select value={fy} onChange={(e) => setFy(Number(e.target.value))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-bold outline-none focus:border-brand-500">
+              {[fy - 1, fy, fy + 1].filter((v, i, a) => a.indexOf(v) === i).map((y) => <option key={y} value={y}>{fiscalLabel(y)}</option>)}
+            </select>
+            <span className="text-[11px] text-slate-400">残高 = 予定 − 実回収</span>
+          </div>
+        }>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1040px] text-xs">
+            <thead>
+              <tr className="border-b-2 border-line text-muted">
+                <th className="sticky left-0 z-10 bg-white py-2 pr-2 text-left font-bold">項目 › 対象</th>
+                {FY_MONTH_LABELS.map((l) => <th key={l} className="px-1.5 py-2 text-right font-bold">{l}</th>)}
+                <th className="px-2 py-2 text-right font-bold">予定</th>
+                <th className="px-2 py-2 text-right font-bold text-emerald-600">年間回収</th>
+                <th className="px-2 py-2 text-right font-bold text-amber-600">残高</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {hist.length === 0 && <tr><td colSpan={16} className="py-8 text-center text-muted">対象がありません。</td></tr>}
+              {hist.map((h) => (
+                <tr key={h.targetId} className="hover:bg-surface">
+                  <td className="sticky left-0 z-10 bg-white py-2 pr-2 text-left"><span className="font-bold text-ink">{h.itemName}</span> <span className="text-muted">› {h.label}</span></td>
+                  {h.months.map((m, i) => <td key={i} className={`px-1.5 py-2 text-right tabular-nums ${m ? "text-ink" : "text-slate-300"}`}>{m ? yen(m).replace("¥", "") : "—"}</td>)}
+                  <td className="px-2 py-2 text-right tabular-nums text-muted">{yen(h.expectedYear).replace("¥", "")}{h.monthly ? "" : "*"}</td>
+                  <td className="px-2 py-2 text-right font-bold tabular-nums text-emerald-600">{yen(h.collectedYear).replace("¥", "")}</td>
+                  <td className={`px-2 py-2 text-right font-black tabular-nums ${h.balance > 0 ? "text-amber-600" : h.balance < 0 ? "text-violet-600" : "text-slate-300"}`}>{yen(h.balance).replace("¥", "")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[10px] text-slate-400">単位：円 ・ 「毎月」項目は 予定＝月額×12 ／ 「一括(*)」は予定＝総額 ・ 残高＞0 = まだ回収できていない金額</p>
       </Panel>
 
       {/* ===== 回収記録 ===== */}
@@ -253,6 +319,9 @@ export default function CollectionManager() {
                   <option value="">選択してください</option>
                   {leaves.map((l) => <option key={l.targetId} value={l.targetId}>{l.itemName} › {l.label}{l.expected ? `（予定 ${yen(l.expected)}）` : ""}</option>)}
                 </select>
+                {cDraft.targetId && selBalance !== undefined && (
+                  <p className="mt-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">現在の残高（未回収）：{yen(selBalance)}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="mb-1 block text-xs font-bold text-muted">回収額（円）*</label><input type="number" value={cDraft.amount} onChange={(e) => setCDraft((d) => ({ ...d, amount: e.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" /></div>
