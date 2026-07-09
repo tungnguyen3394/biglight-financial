@@ -1,4 +1,0 @@
-# Tên miền phục vụ app. Nếu domain KHÁC biglight.jp thì sửa dòng dưới.
-finance.biglight.jp {
-    reverse_proxy app:3000
-}
