@@ -1,0 +1,10 @@
+# Deploy đơn giản: chạy trên VPS, truy cập qua http://IP_VPS:8080
+# (Muốn dùng tên miền + HTTPS thì thêm nhãn Caddy — xem DEPLOY.md)
+services:
+  biglight-financial:
+    build: .
+    image: biglight-financial:latest
+    container_name: biglight-financial
+    restart: unless-stopped
+    ports:
+      - "8080:3000"

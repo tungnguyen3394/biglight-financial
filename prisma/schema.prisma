@@ -1,0 +1,225 @@
+// BIGLIGHT Management System — Schema database ban đầu (Giai đoạn 1).
+// Mục tiêu: đặt nền tảng cho các module. Chưa dùng ở Giai đoạn 1 (UI chạy bằng dữ liệu mẫu),
+// nhưng đã sẵn sàng để `prisma db push` khi bước sang Giai đoạn 2.
+//
+// Nguyên tắc: KHÔNG hard-code danh mục — mọi phân loại (loại chi phí, loại doanh thu,
+// nhóm khách hàng…) đều nằm ở bảng `Category` để cấu hình động.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Người dùng / Nhân viên ----------
+enum Role {
+  ADMIN
+  MANAGER
+  STAFF
+  VIEWER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      Role     @default(STAFF)
+  department String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contracts   Contract[]
+  okrs        Okr[]
+}
+
+// ---------- Danh mục động (không hard-code) ----------
+// type: "EXPENSE" | "REVENUE" | "CUSTOMER_GROUP" | "CONTRACT_TYPE" | ...
+model Category {
+  id        String   @id @default(cuid())
+  type      String
+  code      String
+  label     String
+  labelJa   String?
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([type, code])
+  @@index([type])
+}
+
+// ---------- Khách hàng ----------
+model Customer {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  nameKana  String?
+  groupCode String?  // -> Category(type="CUSTOMER_GROUP")
+  contact   String?
+  phone     String?
+  email     String?
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contracts   Contract[]
+  revenues    Revenue[]
+  receivables Receivable[]
+}
+
+// ---------- Hợp đồng ----------
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+model Contract {
+  id         String         @id @default(cuid())
+  code       String         @unique
+  title      String
+  customerId String
+  ownerId    String?
+  typeCode   String?        // -> Category(type="CONTRACT_TYPE")
+  amount     Decimal        @default(0) @db.Decimal(14, 2)
+  startDate  DateTime?
+  endDate    DateTime?
+  status     ContractStatus @default(DRAFT)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+  owner    User?    @relation(fields: [ownerId], references: [id])
+  revenues Revenue[]
+}
+
+// ---------- Doanh thu (売上) ----------
+model Revenue {
+  id           String   @id @default(cuid())
+  customerId   String
+  contractId   String?
+  categoryCode String?  // -> Category(type="REVENUE")
+  amount       Decimal  @db.Decimal(14, 2)
+  bookedAt     DateTime // ngày ghi nhận doanh thu
+  note         String?
+  createdAt    DateTime @default(now())
+
+  customer Customer  @relation(fields: [customerId], references: [id])
+  contract Contract? @relation(fields: [contractId], references: [id])
+
+  @@index([bookedAt])
+}
+
+// ---------- Chi phí (支出) ----------
+model Expense {
+  id           String   @id @default(cuid())
+  categoryCode String?  // -> Category(type="EXPENSE")
+  vendor       String?
+  amount       Decimal  @db.Decimal(14, 2)
+  spentAt      DateTime
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([spentAt])
+}
+
+// ---------- Công nợ & thu hồi (売掛金・回収) ----------
+enum ReceivableStatus {
+  OPEN      // chưa thu
+  PARTIAL   // thu một phần
+  PAID      // đã thu đủ
+  OVERDUE   // quá hạn
+}
+
+model Receivable {
+  id         String           @id @default(cuid())
+  customerId String
+  invoiceNo  String?
+  amount     Decimal          @db.Decimal(14, 2)
+  paidAmount Decimal          @default(0) @db.Decimal(14, 2)
+  dueDate    DateTime
+  status     ReceivableStatus @default(OPEN)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  collections Collection[]
+
+  @@index([dueDate])
+  @@index([status])
+}
+
+model Collection {
+  id           String   @id @default(cuid())
+  receivableId String
+  amount       Decimal  @db.Decimal(14, 2)
+  collectedAt  DateTime
+  method       String?  // bank / cash / ...
+  note         String?
+  createdAt    DateTime @default(now())
+
+  receivable Receivable @relation(fields: [receivableId], references: [id])
+}
+
+// ---------- 予実管理 (Kế hoạch vs Thực tế) ----------
+// metric: "REVENUE" | "EXPENSE" | "PROFIT" | ...
+model BudgetPlan {
+  id        String   @id @default(cuid())
+  year      Int
+  month     Int      // 1-12
+  metric    String
+  planned   Decimal  @db.Decimal(14, 2)
+  actual    Decimal  @default(0) @db.Decimal(14, 2)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month, metric])
+  @@index([year, month])
+}
+
+// ---------- OKR / KPI ----------
+enum OkrStatus {
+  ON_TRACK
+  AT_RISK
+  BEHIND
+  DONE
+}
+
+model Okr {
+  id         String     @id @default(cuid())
+  title      String
+  ownerId    String?
+  quarter    String     // "2026-Q3"
+  progress   Int        @default(0) // 0-100
+  status     OkrStatus  @default(ON_TRACK)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  owner      User?       @relation(fields: [ownerId], references: [id])
+  keyResults KeyResult[]
+}
+
+model KeyResult {
+  id       String  @id @default(cuid())
+  okrId    String
+  title    String
+  target   Float
+  current  Float   @default(0)
+  unit     String?
+
+  okr Okr @relation(fields: [okrId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Cài đặt (key-value động) ----------
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
