@@ -8,12 +8,13 @@ import {
   addChildAt, renameAt, deleteAt, yen,
   type CatNode, type Expense, type ExpenseStore, type PayMethod,
 } from "@/lib/expenses";
+import { STORAGE_KEY as PROP_KEY, isRentPath, type Property } from "@/lib/property";
 
 type RecFilter = "" | "REC" | "ONCE";
 
 const emptyDraft = {
   date: "", path: [] as string[], vendor: "", amount: "",
-  method: "振込" as PayMethod, recurring: false, recurringDay: 25, note: "",
+  method: "振込" as PayMethod, recurring: false, recurringDay: 25, note: "", propertyId: "",
 };
 
 function openPrint(title: string, bodyHtml: string) {
@@ -186,6 +187,7 @@ export default function ExpensesManager() {
   const [showCats, setShowCats] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [properties, setProperties] = useState<Property[]>([]);
   const ready = useRef(false);
 
   useEffect(() => {
@@ -198,8 +200,10 @@ export default function ExpensesManager() {
         setStore(legacy ? migrateV1(JSON.parse(legacy)) : sampleExpenses());
       }
     } catch { setStore(sampleExpenses()); }
+    try { const raw = window.localStorage.getItem(PROP_KEY); if (raw) setProperties((JSON.parse(raw).properties ?? []) as Property[]); } catch { /* ignore */ }
     ready.current = true;
   }, []);
+  const propName = (id?: string) => properties.find((p) => p.id === id)?.name;
   useEffect(() => {
     if (!ready.current) return;
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch { /* ignore */ }
@@ -254,6 +258,7 @@ export default function ExpensesManager() {
         amount: Number(draft.amount) || 0, method: draft.method,
         recurring: draft.recurring, recurringDay: draft.recurring ? draft.recurringDay : undefined,
         note: draft.note.trim(),
+        propertyId: isRentPath(draft.path) ? (draft.propertyId || undefined) : undefined,
       }, ...prev.records],
     }));
     setDraft(emptyDraft); setShowNew(false);
@@ -446,6 +451,7 @@ export default function ExpensesManager() {
                             <span className={i === 0 ? "rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" : `text-xs font-semibold ${i === labels.length - 1 ? "text-ink" : "text-muted"}`}>{l}</span>
                           </span>
                         ))}
+                        {r.propertyId && <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-600">🏠 {propName(r.propertyId) ?? "物件"}</span>}
                       </td>
                       <td className="py-3 font-semibold text-ink">{r.vendor || "—"}</td>
                       <td className="py-3 text-center"><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${METHOD_TONE[r.method]}`}>{r.method}</span></td>
@@ -529,6 +535,22 @@ export default function ExpensesManager() {
                   ))}
                 </div>
               </div>
+
+              {/* 物件 (chỉ khi 地代家賃) — chọn từ master, không tạo mới ở đây */}
+              {isRentPath(draft.path) && (
+                <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3">
+                  <label className="mb-1 block text-xs font-bold text-violet-700">物件 * <span className="font-normal text-slate-400">（物件マスタから選択）</span></label>
+                  {properties.length === 0 ? (
+                    <p className="text-xs text-muted">物件が未登録です。「物件・家賃管理」で登録してください。</p>
+                  ) : (
+                    <select value={draft.propertyId} onChange={(e) => setDraft((d) => ({ ...d, propertyId: e.target.value }))}
+                      className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-brand-500">
+                      <option value="">物件を選択してください</option>
+                      {properties.map((p) => <option key={p.id} value={p.id}>{p.name}（家賃 {yen(p.monthlyRent)}）</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

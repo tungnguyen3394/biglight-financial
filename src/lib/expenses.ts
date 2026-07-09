@@ -27,6 +27,7 @@ export type Expense = {
   recurring: boolean;      // true = 定期 / false = 不定期
   recurringDay?: number;   // 定期支払日 (1〜31) — chỉ khi 定期
   note: string;
+  propertyId?: string;     // 物件マスタ liên kết — chỉ khi 小項目 = 地代家賃
 };
 
 export type ExpenseStore = {
@@ -157,7 +158,10 @@ export function sampleExpenses(): ExpenseStore {
       { id: "e01", date: "2026-07-25", path: ["personnel", "salary", "fulltime"], vendor: "給与振込", amount: 3200000, method: "振込", recurring: true, recurringDay: 25, note: "7月分給与" },
       { id: "e02", date: "2026-07-25", path: ["personnel", "salary", "exec"], vendor: "役員報酬", amount: 800000, method: "振込", recurring: true, recurringDay: 25, note: "" },
       { id: "e03", date: "2026-07-28", path: ["personnel", "welfare", "social"], vendor: "年金事務所", amount: 620000, method: "自動引き落とし", recurring: true, recurringDay: 28, note: "社会保険" },
-      { id: "e08", date: "2026-07-27", path: ["admin", "office", "rent"], vendor: "ビル管理会社", amount: 350000, method: "自動引き落とし", recurring: true, recurringDay: 27, note: "7月家賃" },
+      { id: "e08a", date: "2026-07-27", path: ["admin", "office", "rent"], vendor: "田中不動産(株)", amount: 80000, method: "自動引き落とし", recurring: true, recurringDay: 27, note: "A寮 家賃", propertyId: "prop_a" },
+      { id: "e08b", date: "2026-07-27", path: ["admin", "office", "rent"], vendor: "山田地所", amount: 75000, method: "自動引き落とし", recurring: true, recurringDay: 27, note: "B寮 家賃", propertyId: "prop_b" },
+      { id: "e08c", date: "2026-07-25", path: ["admin", "office", "rent"], vendor: "佐藤ハウジング", amount: 90000, method: "振込", recurring: true, recurringDay: 25, note: "C寮 家賃", propertyId: "prop_c" },
+      { id: "e08d", date: "2026-07-05", path: ["admin", "office", "rent"], vendor: "鈴木不動産", amount: 120000, method: "自動引き落とし", recurring: true, recurringDay: 5, note: "Dマンション 家賃", propertyId: "prop_d" },
       { id: "e09", date: "2026-07-05", path: ["admin", "it", "saas"], vendor: "各種SaaS", amount: 128000, method: "自動引き落とし", recurring: true, recurringDay: 5, note: "システム利用料" },
       { id: "e10", date: "2026-07-08", path: ["admin", "office", "utility"], vendor: "電力会社", amount: 46000, method: "自動引き落とし", recurring: true, recurringDay: 8, note: "" },
       { id: "e16", date: "2026-07-20", path: ["admin", "it", "comm"], vendor: "通信キャリア", amount: 38000, method: "自動引き落とし", recurring: true, recurringDay: 20, note: "携帯・ネット" },
