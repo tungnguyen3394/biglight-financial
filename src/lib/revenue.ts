@@ -13,7 +13,8 @@ import { fiscalMonths, fiscalYearOf } from "./fiscal";
 export type PayMethod = "銀行振込" | "現金" | "その他";
 export type Payment = {
   date: string;          // 入金日（実際に入金された日）
-  amount: number;
+  amount: number;        // 実際に受け取った金額
+  fee?: number;          // 手数料（当社負担）— 差引かれた振込手数料など。残高の消し込みに算入
   by: string;            // 操作者
   note?: string;
   method?: PayMethod;    // 入金方法
@@ -73,8 +74,9 @@ export const STATUS_TONE: Record<CollectStatus, string> = {
 // ---- 税計算 ----
 export const taxIn = (l: RevLine): number => Math.round(l.amount * (1 + l.taxRate / 100)); // 税込（請求額）
 export const grossOf = (l: RevLine): number => l.amount - l.cost;                            // 粗利（税抜）
-export const paidOf = (l: RevLine): number => l.payments.reduce((t, p) => t + p.amount, 0);
-export const balanceOf = (l: RevLine): number => taxIn(l) - paidOf(l);                        // 未回収 (税込基準)
+export const paidOf = (l: RevLine): number => l.payments.reduce((t, p) => t + p.amount, 0);      // 実際の入金額
+export const feeOf = (l: RevLine): number => l.payments.reduce((t, p) => t + (p.fee || 0), 0);   // 当社負担手数料の合計
+export const balanceOf = (l: RevLine): number => taxIn(l) - paidOf(l) - feeOf(l);                // 未回収（入金＋手数料で消し込み）
 export const remainOf = (l: RevLine): number => Math.max(0, balanceOf(l));
 
 export function statusOf(l: RevLine, today: string): CollectStatus {
