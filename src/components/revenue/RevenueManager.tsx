@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
 import {
   STORAGE_KEY, DEFAULT_SETTINGS, STATUS_LABEL, STATUS_TONE,
-  sampleStore, statusOf, taxIn, paidOf, remainOf, balanceOf, daysLate,
+  sampleStore, migrateStore, statusOf, taxIn, paidOf, remainOf, balanceOf, daysLate,
   aggregate, expandRecurring, readBudgetSeries, endOfNextMonth, uid, yen,
-  type RevStore, type RevLine, type Payment,
+  type RevStore, type RevLine, type Payment, type PayMethod,
 } from "@/lib/revenue";
+
+const PAY_METHODS: PayMethod[] = ["銀行振込", "現金", "その他"];
 import { fiscalMonths, fiscalLabel, fiscalYearOf, fiscalMonthIndex, FY_MONTH_LABELS } from "@/lib/fiscal";
 
 const nowIso = () => new Date().toISOString();
@@ -55,8 +57,8 @@ function openPrint(title: string, body: string) {
   setTimeout(() => w.print(), 300);
 }
 
-const emptyDraft = { customer: "", owner: "", category: "", headcount: "", amount: "", cost: "", invoiceNo: "", dueDate: "", recurring: true, taxMode: "ex" as "ex" | "in" };
-type EDraft = { customer: string; owner: string; category: string; headcount: string; amount: string; cost: string; invoiceNo: string; dueDate: string; status: "forecast" | "confirmed" };
+const emptyDraft = { customer: "", owner: "", category: "", amount: "", note: "", invoiceNo: "", recognitionDate: "", recurring: true, taxMode: "ex" as "ex" | "in" };
+type EDraft = { customer: string; owner: string; category: string; amount: string; invoiceNo: string; dueDate: string; status: "forecast" | "confirmed"; recognitionDate: string; note: string };
 
 export default function RevenueManager() {
   const [store, setStore] = useState<RevStore>({ lines: [], settings: DEFAULT_SETTINGS });
@@ -70,6 +72,8 @@ export default function RevenueManager() {
   const [payFor, setPayFor] = useState<RevLine | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payNote, setPayNote] = useState("");
+  const [payDate, setPayDate] = useState("");
+  const [payMethod, setPayMethod] = useState<PayMethod>("銀行振込");
   const [custOpen, setCustOpen] = useState(false);
   const [histFor, setHistFor] = useState<RevLine | null>(null);
   const [editFor, setEditFor] = useState<RevLine | null>(null);
@@ -86,7 +90,7 @@ export default function RevenueManager() {
     setToday(iso); setFy(fiscalYearOf(iso)); setMi(fiscalMonthIndex(iso));
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      setStore(raw ? (JSON.parse(raw) as RevStore) : sampleStore());
+      setStore(raw ? migrateStore(JSON.parse(raw) as RevStore) : sampleStore());
     } catch { setStore(sampleStore()); }
     try {
       const raw = window.localStorage.getItem("bl_customers_v1");
@@ -133,7 +137,7 @@ export default function RevenueManager() {
   // 会社詳細（年度）— 売上履歴 + 入出金履歴
   const detailData = useMemo(() => {
     if (!detail) return null;
-    const ls = fyLines.filter((l) => l.customer === detail).sort((a, b) => a.ym.localeCompare(b.ym));
+    const ls = fyLines.filter((l) => l.customer === detail).sort((a, b) => b.recognitionDate.localeCompare(a.recognitionDate));
     const billed = ls.reduce((t, l) => t + taxIn(l), 0);
     const paid = ls.reduce((t, l) => t + paidOf(l), 0);
     const remain = ls.reduce((t, l) => t + remainOf(l), 0);
@@ -164,16 +168,22 @@ export default function RevenueManager() {
   function toggleStatus(l: RevLine) { patch(l.id, { status: l.status === "confirmed" ? "forecast" : "confirmed" }, l.status === "confirmed" ? "予定に戻す" : "確定"); }
   function confirmMonth() { if (!confirm(`${ym} の全明細を「確定」にしますか？`)) return; setStore((prev) => ({ ...prev, lines: prev.lines.map((l) => l.ym === ym && l.status !== "confirmed" ? { ...l, status: "confirmed", updatedAt: nowIso(), updatedBy: op, history: [...l.history, { at: nowIso(), by: op, action: "確定（一括）" }] } : l) })); }
   function addPayment() {
-    if (!payFor) return; const amt = Number(payAmount) || 0; if (amt <= 0) { alert("入金額を入力してください。"); return; }
-    const pay: Payment = { date: today, amount: amt, by: op, note: payNote.trim() || undefined };
-    patch(payFor.id, { payments: [...payFor.payments, pay] }, `入金 ${yen(amt)}${payNote.trim() ? "（" + payNote.trim() + "）" : ""}`);
-    setPayFor(null); setPayAmount(""); setPayNote("");
+    if (!payFor) return;
+    const amt = Number(payAmount) || 0;
+    if (amt <= 0) { alert("入金額を入力してください。"); return; }
+    if (!payDate) { alert("入金日を入力してください。"); return; }
+    const rem = remainOf(payFor);
+    if (amt > rem) { alert(`入金額は残高（${yen(rem)}）を超えられません。`); return; }
+    const pay: Payment = { date: payDate, amount: amt, by: op, method: payMethod, note: payNote.trim() || undefined, createdAt: nowIso() };
+    const patchObj: Partial<RevLine> = { payments: [...payFor.payments, pay] };
+    if (payFor.status === "forecast") patchObj.status = "confirmed";  // 予定明細は入金時に確定
+    patch(payFor.id, patchObj, `入金 ${yen(amt)}・${payMethod}${payNote.trim() ? "（" + payNote.trim() + "）" : ""}`);
+    setPayFor(null); setPayAmount(""); setPayNote(""); setPayDate(""); setPayMethod("銀行振込");
   }
-  function adjustOverpay(l: RevLine) { const over = -balanceOf(l); if (over <= 0) return; if (!confirm(`過入金 ${yen(over)} を返金・調整として記録しますか？`)) return; patch(l.id, { payments: [...l.payments, { date: today, amount: -over, by: op }] }, `返金・調整 ${yen(over)}`); }
-  // 入金モーダルを開く（予定明細は入金と同時に確定にする）
+  function adjustOverpay(l: RevLine) { const over = -balanceOf(l); if (over <= 0) return; if (!confirm(`過入金 ${yen(over)} を返金・調整として記録しますか？`)) return; patch(l.id, { payments: [...l.payments, { date: today, amount: -over, by: op, method: "その他", note: "返金・調整", createdAt: nowIso() }] }, `返金・調整 ${yen(over)}`); }
+  // 入金モーダルを開く（残高を初期値に）
   function openPay(l: RevLine) {
-    if (l.status === "forecast") patch(l.id, { status: "confirmed" }, "入金記録により確定");
-    setPayFor(l); setPayAmount(String(remainOf(l)));
+    setPayFor(l); setPayAmount(String(remainOf(l))); setPayDate(today); setPayMethod("銀行振込"); setPayNote("");
   }
   function removeLine(l: RevLine) {
     if (!confirm("この明細を削除しますか？")) return;
@@ -183,9 +193,11 @@ export default function RevenueManager() {
   function saveEdit(id: string, e: EDraft) {
     const amount = Number(e.amount) || 0;
     if (!e.customer.trim() || !amount) { alert("会社名・金額は必須です。"); return; }
+    if (!e.recognitionDate) { alert("売上計上日を入力してください。"); return; }
     patch(id, {
-      customer: e.customer.trim(), owner: e.owner, category: e.category, headcount: Number(e.headcount) || 0,
-      amount, cost: Number(e.cost) || 0, invoiceNo: e.invoiceNo.trim(), dueDate: e.dueDate, status: e.status,
+      customer: e.customer.trim(), owner: e.owner, category: e.category,
+      amount, invoiceNo: e.invoiceNo.trim(), dueDate: e.dueDate, status: e.status,
+      recognitionDate: e.recognitionDate, ym: e.recognitionDate.slice(0, 7), note: e.note.trim() || undefined,
     }, "編集");
     setEditFor(null);
   }
@@ -194,27 +206,30 @@ export default function RevenueManager() {
     const raw = Number(draft.amount) || 0;
     const amountEx = draft.taxMode === "in" ? Math.round(raw / (1 + rate / 100)) : raw;
     if (!draft.customer.trim() || !amountEx) { alert("会社名・金額は必須です。"); return; }
+    if (!draft.recognitionDate) { alert("売上計上日を入力してください。"); return; }
+    const recog = draft.recognitionDate;
+    const lineYm = recog.slice(0, 7);
     const common = {
       customer: draft.customer.trim(), owner: draft.owner || S.owners[0], category: draft.category || S.categories[0],
-      headcount: Number(draft.headcount) || 0, amount: amountEx, taxRate: rate, cost: Number(draft.cost) || 0,
+      amount: amountEx, taxRate: rate, cost: 0, note: draft.note.trim() || undefined,
       recurring: draft.recurring, status: "forecast" as const, payments: [] as Payment[],
       createdAt: nowIso(), createdBy: op, updatedAt: nowIso(), updatedBy: op, history: [{ at: nowIso(), by: op, action: "登録" }],
     };
     if (draft.recurring) {
-      setStore((prev) => ({ ...prev, lines: [...prev.lines, ...expandRecurring(common, ym, "INV")] }));
+      setStore((prev) => ({ ...prev, lines: [...prev.lines, ...expandRecurring(common, recog, "INV")] }));
     } else {
-      setStore((prev) => ({ ...prev, lines: [...prev.lines, { ...common, id: uid(), ym, dueDate: draft.dueDate || endOfNextMonth(ym), invoiceNo: draft.invoiceNo.trim() || `INV-${ym.replace("-", "")}-S` }] }));
+      setStore((prev) => ({ ...prev, lines: [...prev.lines, { ...common, id: uid(), ym: lineYm, recognitionDate: recog, dueDate: endOfNextMonth(lineYm), invoiceNo: draft.invoiceNo.trim() || `INV-${lineYm.replace("-", "")}-S` }] }));
     }
     setDraft(emptyDraft); setShowNew(false);
   }
   function openNew(customer?: string) {
-    setDraft({ ...emptyDraft, owner: S.owners[0], category: S.categories[0], customer: customer ?? "" });
+    setDraft({ ...emptyDraft, owner: S.owners[0], category: S.categories[0], recognitionDate: today, customer: customer ?? "" });
     setShowNew(true);
   }
   function resetSample() { if (!confirm("サンプルデータに戻します。よろしいですか？")) return; setStore(sampleStore()); }
   function exportCsv() {
-    const head = ["年月", "請求書番号", "会社名", "担当", "区分", "人数", "売上(税抜)", "請求額(税込)", "入金済", "残高", "期日", "種別", "状態", "登録者", "最終更新"];
-    const data = rows.map((r) => [r.ym, r.invoiceNo, r.customer, r.owner, r.category, r.headcount, r.amount, taxIn(r), paidOf(r), remainOf(r), r.dueDate, r.recurring ? "定期" : "不定期", STATUS_LABEL[statusOf(r, today)], r.createdBy, fmtDT(r.updatedAt)]);
+    const head = ["売上計上日", "請求書番号", "会社名", "担当", "区分", "種別", "売上(税抜)", "請求額(税込)", "入金済", "残高", "期日", "状態", "登録者", "最終更新"];
+    const data = rows.map((r) => [r.recognitionDate, r.invoiceNo, r.customer, r.owner, r.category, r.recurring ? "定期" : "不定期", r.amount, taxIn(r), paidOf(r), remainOf(r), r.dueDate, STATUS_LABEL[statusOf(r, today)], r.createdBy, fmtDT(r.updatedAt)]);
     const csv = [head, ...data].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `uriage_${ym}.csv`; a.click(); URL.revokeObjectURL(a.href);
   }
@@ -334,7 +349,6 @@ export default function RevenueManager() {
                 <th className="py-2.5 font-bold">会社名</th>
                 <th className="py-2.5 font-bold">担当</th>
                 <th className="py-2.5 font-bold">区分</th>
-                <th className="py-2.5 text-right font-bold">人数</th>
                 <th className="py-2.5 text-right font-bold">{taxView === "in" ? "請求額(税込)" : "売上(税抜)"}</th>
                 <th className="py-2.5 text-right font-bold">入金済</th>
                 <th className="py-2.5 text-right font-bold">残高</th>
@@ -344,7 +358,7 @@ export default function RevenueManager() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {rows.length === 0 && <tr><td colSpan={11} className="py-10 text-center text-muted">この月の明細はありません。「登録」から追加してください。</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={10} className="py-10 text-center text-muted">この月の明細はありません。「登録」から追加してください。</td></tr>}
               {rows.map((r) => {
                 const st = statusOf(r, today); const remain = remainOf(r);
                 return (
@@ -353,7 +367,6 @@ export default function RevenueManager() {
                     <td className="py-2"><button onClick={() => setDetail(r.customer)} className="font-bold text-ink hover:text-brand-600 hover:underline">{r.customer}</button></td>
                     <td className="py-2"><span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-bold text-muted">{r.owner}</span></td>
                     <td className="py-2"><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700">{r.category}</span></td>
-                    <td className="py-2 text-right text-muted">{r.headcount || "—"}</td>
                     <td className="py-2 text-right font-black tabular-nums text-ink">{yen(taxView === "in" ? taxIn(r) : r.amount)}</td>
                     <td className="py-2 text-right text-emerald-600">{paidOf(r) ? yen(paidOf(r)) : "—"}</td>
                     <td className={`py-2 text-right font-black ${r.status === "forecast" ? "text-slate-300" : balanceOf(r) < 0 ? "text-violet-600" : remain ? "text-ink" : "text-slate-300"}`}>
@@ -365,7 +378,7 @@ export default function RevenueManager() {
                     </td>
                     <td className="py-2 text-right">
                       <div className="flex justify-end gap-1">
-                        {r.status === "confirmed" && remain > 0 && <button onClick={() => { setPayFor(r); setPayAmount(String(remain)); }} className="rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
+                        {remain > 0 && <button onClick={() => openPay(r)} className="rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
                         {st === "OVERPAID" && <button onClick={() => adjustOverpay(r)} className="rounded-lg bg-violet-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-violet-700">調整</button>}
                         <button onClick={() => setEditFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="編集"><Ic n="pencil" size={14} /></button>
                         <button onClick={() => setHistFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="履歴"><Ic n="clock" size={14} /></button>
@@ -380,7 +393,6 @@ export default function RevenueManager() {
               <tfoot>
                 <tr className="border-t-2 border-line bg-surface font-black">
                   <td className="py-2.5" colSpan={4}>合計（{rows.length}件）</td>
-                  <td className="py-2.5 text-right">{rowAgg.headcount}名</td>
                   <td className="py-2.5 text-right text-ink">{yen(taxView === "in" ? rowAgg.amountIn : rowAgg.amountEx)}</td>
                   <td className="py-2.5 text-right text-emerald-600">{yen(rows.reduce((t, r) => t + paidOf(r), 0))}</td>
                   <td className="py-2.5 text-right text-amber-600">{yen(rows.reduce((t, r) => t + remainOf(r), 0))}</td>
@@ -440,22 +452,37 @@ export default function RevenueManager() {
         <div className="fixed inset-0 z-[75] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
-            <h3 className="mb-1 text-base font-black text-ink">売上を登録 — {ym.replace("-", "年")}月</h3>
+            <h3 className="mb-1 text-base font-black text-ink">売上を登録</h3>
             <p className="mb-4 text-[11px] text-muted">登録者：{op} ・ {fmtDT(nowIso())}</p>
             <div className="space-y-3">
+              {/* 種別 / 区分 */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-xs font-bold text-muted">種別</label>
                   <select value={draft.recurring ? "rec" : "spot"} onChange={(e) => setDraft((d) => ({ ...d, recurring: e.target.value === "rec" }))}
                     className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
-                    <option value="rec">定期（毎月・年度末まで自動）</option>
-                    <option value="spot">不定期（単発）</option>
+                    <option value="rec">定期</option>
+                    <option value="spot">不定期</option>
                   </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-muted">区分</label>
+                  <select value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
+                    {S.categories.map((c) => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              {/* 売上計上日 / 請求書番号 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-muted">売上計上日 *</label>
+                  <input type="date" value={draft.recognitionDate} onChange={(e) => setDraft((d) => ({ ...d, recognitionDate: e.target.value }))}
+                    className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-bold text-muted">請求書番号</label>
                   <input value={draft.invoiceNo} onChange={(e) => setDraft((d) => ({ ...d, invoiceNo: e.target.value }))}
-                    placeholder={`INV-${ym.replace("-", "")}-…`} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+                    placeholder={`INV-${(draft.recognitionDate || "").slice(0, 7).replace("-", "")}-…`} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
                 </div>
               </div>
               <div>
@@ -486,50 +513,34 @@ export default function RevenueManager() {
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              {/* 担当 / 請求金額 */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-xs font-bold text-muted">担当</label>
-                  <select value={draft.owner} onChange={(e) => setDraft((d) => ({ ...d, owner: e.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+                  <select value={draft.owner} onChange={(e) => setDraft((d) => ({ ...d, owner: e.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
                     {S.owners.map((o) => <option key={o}>{o}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-muted">区分</label>
-                  <select value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
-                    {S.categories.map((c) => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-bold text-muted">人数</label>
-                  <input type="number" value={draft.headcount} onChange={(e) => setDraft((d) => ({ ...d, headcount: e.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-right text-sm outline-none focus:border-brand-500" />
+                  <div className="mb-1 flex items-center justify-between gap-1">
+                    <label className="text-xs font-bold text-muted">請求金額 *</label>
+                    <div className="flex overflow-hidden rounded-lg border border-line">
+                      <button onClick={() => setDraft((d) => ({ ...d, taxMode: "ex" }))} className={`px-1.5 py-0.5 text-[10px] font-bold ${draft.taxMode === "ex" ? "bg-brand-600 text-white" : "bg-white text-muted"}`}>税抜</button>
+                      <button onClick={() => setDraft((d) => ({ ...d, taxMode: "in" }))} className={`px-1.5 py-0.5 text-[10px] font-bold ${draft.taxMode === "in" ? "bg-brand-600 text-white" : "bg-white text-muted"}`}>税込</button>
+                    </div>
+                  </div>
+                  <input type="number" value={draft.amount} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
+                    placeholder={draft.taxMode === "in" ? "税込金額" : "税抜金額"} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
                 </div>
               </div>
+              <p className="text-right text-[11px] text-slate-400">
+                税抜 <b className="text-ink">{yen(liveEx)}</b> ／ 税{S.taxRate}% ／ <b className="text-brand-700">税込 {yen(liveIn)}</b>
+              </p>
+              {/* メモ */}
               <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label className="text-xs font-bold text-muted">請求金額 *</label>
-                  <div className="flex overflow-hidden rounded-lg border border-line">
-                    <button onClick={() => setDraft((d) => ({ ...d, taxMode: "ex" }))} className={`px-2 py-0.5 text-[11px] font-bold ${draft.taxMode === "ex" ? "bg-brand-600 text-white" : "bg-white text-muted"}`}>税抜で入力</button>
-                    <button onClick={() => setDraft((d) => ({ ...d, taxMode: "in" }))} className={`px-2 py-0.5 text-[11px] font-bold ${draft.taxMode === "in" ? "bg-brand-600 text-white" : "bg-white text-muted"}`}>税込で入力</button>
-                  </div>
-                </div>
-                <input type="number" value={draft.amount} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
-                  placeholder={draft.taxMode === "in" ? "税込金額（請求総額）" : "税抜金額"} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
-                <p className="mt-1 text-right text-[11px] text-slate-400">
-                  税抜 <b className="text-ink">{yen(liveEx)}</b> ／ 税{S.taxRate}% ／ <b className="text-brand-700">税込 {yen(liveIn)}</b>
-                </p>
+                <label className="mb-1 block text-xs font-bold text-muted">メモ（任意）</label>
+                <input value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} placeholder="備考・補足など" className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
               </div>
-              {!draft.recurring && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-muted">入金期日</label>
-                    <input type="date" value={draft.dueDate} onChange={(e) => setDraft((d) => ({ ...d, dueDate: e.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-muted">原価（税抜）</label>
-                    <input type="number" value={draft.cost} onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))} placeholder="0" className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm outline-none focus:border-brand-500" />
-                  </div>
-                </div>
-              )}
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setShowNew(false)} className="rounded-xl border border-line px-4 py-2 text-sm font-bold text-muted hover:bg-surface">キャンセル</button>
@@ -557,11 +568,24 @@ export default function RevenueManager() {
               <div className="flex justify-between"><span className="text-muted">入金済</span><span className="font-bold text-emerald-600">{yen(paidOf(payFor))}</span></div>
               <div className="mt-1.5 flex justify-between border-t border-line pt-1.5"><span className="font-bold text-ink">残高</span><span className="font-black text-ink">{yen(remainOf(payFor))}</span></div>
             </div>
-            <label className="mb-1 block text-xs font-bold text-muted">入金額（円）— {today} ・ 操作者 {op}</label>
-            <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-muted">入金日 *</label>
+                <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-muted">入金額（円）*</label>
+                <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
+              </div>
+            </div>
+            <label className="mb-1 mt-3 block text-xs font-bold text-muted">入金方法</label>
+            <select value={payMethod} onChange={(e) => setPayMethod(e.target.value as PayMethod)} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
+              {PAY_METHODS.map((m) => <option key={m}>{m}</option>)}
+            </select>
             <label className="mb-1 mt-3 block text-xs font-bold text-muted">メモ（任意）</label>
-            <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="例：銀行振込 / 一部入金 / 手渡し"
+            <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="備考・補足など"
               className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            <p className="mt-2 text-[10px] text-slate-400">操作者：{op} ・ 登録日時：{fmtDT(nowIso())}</p>
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setPayFor(null)} className="rounded-xl border border-line px-4 py-2 text-sm font-bold text-muted hover:bg-surface">キャンセル</button>
               <button onClick={addPayment} className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white hover:bg-emerald-700">記録する</button>
@@ -631,17 +655,20 @@ export default function RevenueManager() {
                   <button onClick={() => openNew(detail)} className="flex items-center gap-1 rounded-lg border border-dashed border-brand-300 px-2.5 py-1 text-[11px] font-bold text-brand-600 hover:bg-brand-50"><Ic n="plus" size={13} />月を追加</button>
                 </div>
                 <div className="overflow-x-auto rounded-2xl border border-line">
-                  <table className="w-full min-w-[640px] text-sm">
-                    <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">年月</th><th className="px-2 py-2.5 font-bold">区分</th><th className="px-2 py-2.5 text-right font-bold">税込</th><th className="px-2 py-2.5 text-right font-bold">入金済</th><th className="px-2 py-2.5 text-right font-bold">残高</th><th className="px-2 py-2.5 text-center font-bold">状態</th><th className="px-4 py-2.5 text-right font-bold">操作</th></tr></thead>
+                  <table className="w-full min-w-[860px] text-sm">
+                    <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">売上計上日</th><th className="px-2 py-2.5 font-bold">種別</th><th className="px-2 py-2.5 font-bold">区分</th><th className="px-2 py-2.5 font-bold">請求書番号</th><th className="px-2 py-2.5 text-right font-bold">請求金額</th><th className="px-2 py-2.5 text-right font-bold">入金済</th><th className="px-2 py-2.5 text-right font-bold">残高</th><th className="px-2 py-2.5 text-center font-bold">入金状況</th><th className="px-2 py-2.5 font-bold">担当</th><th className="px-4 py-2.5 text-right font-bold">操作</th></tr></thead>
                     <tbody className="divide-y divide-line">
                       {detailData.ls.map((l) => { const st = statusOf(l, today); const rem = remainOf(l); const bal = balanceOf(l); const paid = paidOf(l); return (
                         <tr key={l.id} className="hover:bg-surface/60">
-                          <td className="px-4 py-2.5"><span className="font-bold text-ink">{l.ym}</span><span className="ml-1.5 font-mono text-[10px] text-slate-400">{l.invoiceNo}</span></td>
+                          <td className="px-4 py-2.5 font-bold text-ink">{l.recognitionDate}</td>
+                          <td className="px-2 py-2.5"><span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-muted">{l.recurring ? "定期" : "不定期"}</span></td>
                           <td className="px-2 py-2.5"><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{l.category}</span></td>
+                          <td className="px-2 py-2.5 font-mono text-[10px] text-slate-400">{l.invoiceNo}</td>
                           <td className="px-2 py-2.5 text-right font-bold tabular-nums">{yen(taxIn(l))}</td>
                           <td className={`px-2 py-2.5 text-right tabular-nums ${paid ? "text-emerald-600" : "text-slate-300"}`}>{paid ? yen(paid) : "—"}</td>
                           <td className={`px-2 py-2.5 text-right font-black tabular-nums ${bal < 0 ? "text-violet-600" : rem ? "text-amber-600" : "text-slate-300"}`}>{bal < 0 ? `+${yen(-bal)}` : rem ? yen(rem) : "—"}</td>
                           <td className="px-2 py-2.5 text-center"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_TONE[st]}`}>{STATUS_LABEL[st]}</span></td>
+                          <td className="px-2 py-2.5"><span className="text-[11px] text-muted">{l.owner}</span></td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="flex justify-end gap-1">
                               {rem > 0 && <button onClick={() => openPay(l)} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
@@ -664,12 +691,13 @@ export default function RevenueManager() {
                 ) : (
                   <div className="overflow-hidden rounded-2xl border border-line">
                     <table className="w-full text-sm">
-                      <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">入金日</th><th className="px-2 py-2.5 font-bold">請求書番号</th><th className="px-2 py-2.5 text-right font-bold">金額</th><th className="px-2 py-2.5 font-bold">担当</th><th className="px-4 py-2.5 font-bold">メモ</th></tr></thead>
+                      <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">入金日</th><th className="px-2 py-2.5 font-bold">請求書番号</th><th className="px-2 py-2.5 font-bold">入金方法</th><th className="px-2 py-2.5 text-right font-bold">入金額</th><th className="px-2 py-2.5 font-bold">操作者</th><th className="px-4 py-2.5 font-bold">メモ</th></tr></thead>
                       <tbody className="divide-y divide-line">
                         {detailData.pays.map((p, i) => (
                           <tr key={i} className="hover:bg-surface/60">
                             <td className="px-4 py-2.5 font-semibold text-ink">{p.date}</td>
                             <td className="px-2 py-2.5 font-mono text-[10px] text-slate-400">{p.invoiceNo}</td>
+                            <td className="px-2 py-2.5 text-xs text-muted">{p.method || "—"}</td>
                             <td className={`px-2 py-2.5 text-right font-black tabular-nums ${p.amount < 0 ? "text-violet-600" : "text-emerald-600"}`}>
                               <span className="inline-flex items-center justify-end gap-1"><Ic n={p.amount < 0 ? "out" : "in"} size={13} />{yen(p.amount)}</span>
                             </td>
@@ -702,18 +730,20 @@ function EditModal({ line, owners, categories, taxRate, onClose, onSave }: {
   onClose: () => void; onSave: (e: EDraft) => void;
 }) {
   const [e, setE] = useState<EDraft>({
-    customer: line.customer, owner: line.owner, category: line.category, headcount: String(line.headcount || ""),
-    amount: String(line.amount || ""), cost: String(line.cost || ""), invoiceNo: line.invoiceNo, dueDate: line.dueDate, status: line.status,
+    customer: line.customer, owner: line.owner, category: line.category,
+    amount: String(line.amount || ""), invoiceNo: line.invoiceNo, dueDate: line.dueDate, status: line.status,
+    recognitionDate: line.recognitionDate, note: line.note || "",
   });
   const ex = Number(e.amount) || 0;
   const inc = Math.round(ex * (1 + taxRate / 100));
+  const catOptions = categories.includes(e.category) ? categories : [e.category, ...categories];
 
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} />
       <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
-          <div><h3 className="text-base font-black text-ink">明細を編集</h3><p className="text-[11px] text-muted">{line.ym} ・ {line.invoiceNo}</p></div>
+          <div><h3 className="text-base font-black text-ink">明細を編集</h3><p className="text-[11px] text-muted">{line.recurring ? "定期" : "不定期"} ・ {line.invoiceNo}</p></div>
           <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface"><Ic n="x" size={16} /></button>
         </div>
         <div className="space-y-3">
@@ -721,22 +751,28 @@ function EditModal({ line, owners, categories, taxRate, onClose, onSave }: {
             <label className="mb-1 block text-xs font-bold text-muted">会社名 *</label>
             <input value={e.customer} onChange={(ev) => setE((d) => ({ ...d, customer: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-bold text-muted">担当</label>
-              <select value={e.owner} onChange={(ev) => setE((d) => ({ ...d, owner: ev.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+              <select value={e.owner} onChange={(ev) => setE((d) => ({ ...d, owner: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
                 {owners.map((o) => <option key={o}>{o}</option>)}
               </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-bold text-muted">区分</label>
-              <select value={e.category} onChange={(ev) => setE((d) => ({ ...d, category: ev.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
-                {categories.map((c) => <option key={c}>{c}</option>)}
+              <select value={e.category} onChange={(ev) => setE((d) => ({ ...d, category: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
+                {catOptions.map((c) => <option key={c}>{c}</option>)}
               </select>
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-bold text-muted">人数</label>
-              <input type="number" value={e.headcount} onChange={(ev) => setE((d) => ({ ...d, headcount: ev.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-right text-sm outline-none focus:border-brand-500" />
+              <label className="mb-1 block text-xs font-bold text-muted">売上計上日 *</label>
+              <input type="date" value={e.recognitionDate} onChange={(ev) => setE((d) => ({ ...d, recognitionDate: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">請求書番号</label>
+              <input value={e.invoiceNo} onChange={(ev) => setE((d) => ({ ...d, invoiceNo: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
             </div>
           </div>
           <div>
@@ -746,26 +782,20 @@ function EditModal({ line, owners, categories, taxRate, onClose, onSave }: {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-bold text-muted">請求書番号</label>
-              <input value={e.invoiceNo} onChange={(ev) => setE((d) => ({ ...d, invoiceNo: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
-            </div>
-            <div>
               <label className="mb-1 block text-xs font-bold text-muted">入金期日</label>
               <input type="date" value={e.dueDate} onChange={(ev) => setE((d) => ({ ...d, dueDate: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
             </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-bold text-muted">原価（税抜）</label>
-              <input type="number" value={e.cost} onChange={(ev) => setE((d) => ({ ...d, cost: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm outline-none focus:border-brand-500" />
-            </div>
             <div>
               <label className="mb-1 block text-xs font-bold text-muted">状態</label>
-              <select value={e.status} onChange={(ev) => setE((d) => ({ ...d, status: ev.target.value as "forecast" | "confirmed" }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+              <select value={e.status} onChange={(ev) => setE((d) => ({ ...d, status: ev.target.value as "forecast" | "confirmed" }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500">
                 <option value="forecast">予定（見込）</option>
                 <option value="confirmed">確定</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-bold text-muted">メモ（任意）</label>
+            <input value={e.note} onChange={(ev) => setE((d) => ({ ...d, note: ev.target.value }))} placeholder="備考・補足など" className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
           </div>
         </div>
         <div className="mt-5 flex justify-end gap-2">
