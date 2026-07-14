@@ -79,7 +79,7 @@ export default function RevenueManager() {
   const [today, setToday] = useState("");
   const [fy, setFy] = useState(2025);
   const [mi, setMi] = useState(0);
-  const [taxView, setTaxView] = useState<"ex" | "in">("ex");
+  const [taxView, setTaxView] = useState<"ex" | "in">("in");
   const [ownerF, setOwnerF] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
@@ -746,7 +746,10 @@ export default function RevenueManager() {
 
               {/* 入出金履歴 */}
               <div>
-                <p className="mb-2 flex items-center gap-1.5 text-sm font-black text-ink"><Ic n="in" size={15} className="text-emerald-600" />入出金履歴</p>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="flex items-center gap-1.5 text-sm font-black text-ink"><Ic n="in" size={15} className="text-emerald-600" />入出金履歴</p>
+                  <span className="text-[11px] text-muted">各入金は「修正」で編集・「削除」で取消できます</span>
+                </div>
                 {detailData.pays.length === 0 ? (
                   <p className="rounded-2xl border border-dashed border-line px-4 py-6 text-center text-xs text-muted">入金の記録はまだありません。</p>
                 ) : (
@@ -766,9 +769,9 @@ export default function RevenueManager() {
                             <td className="px-2 py-2.5 text-xs text-muted">{p.by}</td>
                             <td className="px-2 py-2.5 text-xs text-muted">{p.note || "—"}</td>
                             <td className="px-4 py-2.5 text-right">
-                              <div className="flex justify-end gap-1">
-                                <button onClick={() => { const ln = store.lines.find((x) => x.id === p.lineId); if (ln) setEditPay({ line: ln, pi: p.pi }); }} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="修正"><Ic n="pencil" size={13} /></button>
-                                <button onClick={() => deletePay(p.lineId, p.pi, p.amount)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-rose-400 hover:text-rose-500" title="削除"><Ic n="trash" size={13} /></button>
+                              <div className="flex justify-end gap-1.5">
+                                <button onClick={() => { const ln = store.lines.find((x) => x.id === p.lineId); if (ln) setEditPay({ line: ln, pi: p.pi }); }} className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[11px] font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="pencil" size={12} />修正</button>
+                                <button onClick={() => deletePay(p.lineId, p.pi, p.amount)} className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[11px] font-bold text-muted hover:border-rose-400 hover:text-rose-500"><Ic n="trash" size={12} />削除</button>
                               </div>
                             </td>
                           </tr>
