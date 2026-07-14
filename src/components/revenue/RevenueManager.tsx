@@ -134,9 +134,9 @@ export default function RevenueManager() {
   const detailData = useMemo(() => {
     if (!detail) return null;
     const ls = fyLines.filter((l) => l.customer === detail).sort((a, b) => a.ym.localeCompare(b.ym));
-    const billed = ls.filter((l) => l.status === "confirmed").reduce((t, l) => t + taxIn(l), 0);
+    const billed = ls.reduce((t, l) => t + taxIn(l), 0);
     const paid = ls.reduce((t, l) => t + paidOf(l), 0);
-    const remain = ls.filter((l) => l.status === "confirmed").reduce((t, l) => t + remainOf(l), 0);
+    const remain = ls.reduce((t, l) => t + remainOf(l), 0);
     const overdue = ls.filter((l) => statusOf(l, today) === "OVERDUE").reduce((t, l) => t + remainOf(l), 0);
     const pays = ls.flatMap((l) => l.payments.map((p) => ({ ...p, invoiceNo: l.invoiceNo, ym: l.ym }))).sort((a, b) => b.date.localeCompare(a.date));
     return { ls, billed, paid, remain, overdue, pays };
@@ -170,6 +170,11 @@ export default function RevenueManager() {
     setPayFor(null); setPayAmount(""); setPayNote("");
   }
   function adjustOverpay(l: RevLine) { const over = -balanceOf(l); if (over <= 0) return; if (!confirm(`過入金 ${yen(over)} を返金・調整として記録しますか？`)) return; patch(l.id, { payments: [...l.payments, { date: today, amount: -over, by: op }] }, `返金・調整 ${yen(over)}`); }
+  // 入金モーダルを開く（予定明細は入金と同時に確定にする）
+  function openPay(l: RevLine) {
+    if (l.status === "forecast") patch(l.id, { status: "confirmed" }, "入金記録により確定");
+    setPayFor(l); setPayAmount(String(remainOf(l)));
+  }
   function removeLine(l: RevLine) {
     if (!confirm("この明細を削除しますか？")) return;
     if (l.recurring && l.seriesId) { const all = confirm("定期明細です。\n［OK］今月以降の同系列をすべて削除\n［キャンセル］今月のみ削除"); if (all) { setStore((prev) => ({ ...prev, lines: prev.lines.filter((x) => !(x.seriesId === l.seriesId && x.ym >= l.ym)) })); return; } }
@@ -614,7 +619,7 @@ export default function RevenueManager() {
             <div className="space-y-6 overflow-auto p-6">
               {/* サマリー */}
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                {[["請求済(税込)", yen(detailData.billed), "text-ink"], ["入金済", yen(detailData.paid), "text-emerald-600"], ["未回収残高", yen(detailData.remain), detailData.remain ? "text-amber-600" : "text-slate-300"], ["うち延滞", yen(detailData.overdue), detailData.overdue ? "text-red-600" : "text-slate-300"]].map(([l, v, c]) => (
+                {[["売上(税込)", yen(detailData.billed), "text-ink"], ["入金済", yen(detailData.paid), "text-emerald-600"], ["未回収残高", yen(detailData.remain), detailData.remain ? "text-amber-600" : "text-slate-300"], ["うち延滞", yen(detailData.overdue), detailData.overdue ? "text-red-600" : "text-slate-300"]].map(([l, v, c]) => (
                   <div key={l} className="rounded-2xl border border-line bg-surface/60 px-4 py-3"><p className="text-[11px] font-bold text-muted">{l}</p><p className={`mt-1 text-lg font-black tabular-nums ${c}`}>{v}</p></div>
                 ))}
               </div>
@@ -625,20 +630,22 @@ export default function RevenueManager() {
                   <p className="flex items-center gap-1.5 text-sm font-black text-ink"><Ic n="out" size={15} className="text-brand-600" />売上履歴</p>
                   <button onClick={() => openNew(detail)} className="flex items-center gap-1 rounded-lg border border-dashed border-brand-300 px-2.5 py-1 text-[11px] font-bold text-brand-600 hover:bg-brand-50"><Ic n="plus" size={13} />月を追加</button>
                 </div>
-                <div className="overflow-hidden rounded-2xl border border-line">
-                  <table className="w-full text-sm">
-                    <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">年月</th><th className="px-2 py-2.5 font-bold">区分</th><th className="px-2 py-2.5 text-right font-bold">税込</th><th className="px-2 py-2.5 text-right font-bold">残高</th><th className="px-2 py-2.5 text-center font-bold">状態</th><th className="px-4 py-2.5 text-right font-bold">操作</th></tr></thead>
+                <div className="overflow-x-auto rounded-2xl border border-line">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">年月</th><th className="px-2 py-2.5 font-bold">区分</th><th className="px-2 py-2.5 text-right font-bold">税込</th><th className="px-2 py-2.5 text-right font-bold">入金済</th><th className="px-2 py-2.5 text-right font-bold">残高</th><th className="px-2 py-2.5 text-center font-bold">状態</th><th className="px-4 py-2.5 text-right font-bold">操作</th></tr></thead>
                     <tbody className="divide-y divide-line">
-                      {detailData.ls.map((l) => { const st = statusOf(l, today); const rem = remainOf(l); return (
+                      {detailData.ls.map((l) => { const st = statusOf(l, today); const rem = remainOf(l); const bal = balanceOf(l); const paid = paidOf(l); return (
                         <tr key={l.id} className="hover:bg-surface/60">
                           <td className="px-4 py-2.5"><span className="font-bold text-ink">{l.ym}</span><span className="ml-1.5 font-mono text-[10px] text-slate-400">{l.invoiceNo}</span></td>
                           <td className="px-2 py-2.5"><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{l.category}</span></td>
                           <td className="px-2 py-2.5 text-right font-bold tabular-nums">{yen(taxIn(l))}</td>
-                          <td className={`px-2 py-2.5 text-right font-black tabular-nums ${rem ? "text-amber-600" : "text-slate-300"}`}>{l.status === "confirmed" ? yen(rem) : "—"}</td>
+                          <td className={`px-2 py-2.5 text-right tabular-nums ${paid ? "text-emerald-600" : "text-slate-300"}`}>{paid ? yen(paid) : "—"}</td>
+                          <td className={`px-2 py-2.5 text-right font-black tabular-nums ${bal < 0 ? "text-violet-600" : rem ? "text-amber-600" : "text-slate-300"}`}>{bal < 0 ? `+${yen(-bal)}` : rem ? yen(rem) : "—"}</td>
                           <td className="px-2 py-2.5 text-center"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_TONE[st]}`}>{STATUS_LABEL[st]}</span></td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="flex justify-end gap-1">
-                              {l.status === "confirmed" && rem > 0 && <button onClick={() => { setPayFor(l); setPayAmount(String(rem)); }} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
+                              {rem > 0 && <button onClick={() => openPay(l)} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
+                              {st === "OVERPAID" && <button onClick={() => adjustOverpay(l)} className="rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-violet-700">調整</button>}
                               <button onClick={() => setEditFor(l)} className="flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[11px] font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="pencil" size={12} />編集</button>
                             </div>
                           </td>
