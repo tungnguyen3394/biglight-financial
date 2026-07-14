@@ -629,19 +629,23 @@ export default function RevenueManager() {
                 <div className="mb-1 flex items-center justify-between gap-1">
                   <label className="text-xs font-bold text-muted">手数料（当社負担）</label>
                   <button type="button" onClick={() => setPayFee(String(Math.max(0, remainOf(payFor) - (Number(payAmount) || 0))))}
-                    className="text-[10px] font-bold text-brand-600 hover:underline">残額を充当</button>
+                    className="text-[10px] font-bold text-brand-600 hover:underline">不足分を手数料に</button>
                 </div>
                 <input type="number" value={payFee} onChange={(e) => setPayFee(e.target.value)} placeholder="0"
                   className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm outline-none focus:border-brand-500" />
               </div>
             </div>
-            <p className="mt-1 text-[10px] text-slate-400">振込手数料などを相手が差し引いた場合、その差額を「手数料（当社負担）」に入れると残高が消し込まれます。</p>
+            <p className="mt-1 text-[10px] text-slate-400">お客様が振込手数料を差し引いた場合、「入金額」に実際に入金された額を、「手数料（当社負担）」に差し引かれた額を入力すると、合算で残高が消し込まれます。<br />例：請求 ¥100,000 → 入金 ¥99,500 ＋ 手数料 ¥500 ＝ 完了。</p>
             {(() => {
-              const rem = remainOf(payFor); const after = rem - (Number(payAmount) || 0) - (Number(payFee) || 0);
+              const rem = remainOf(payFor); const amt = Number(payAmount) || 0; const fee = Number(payFee) || 0; const settle = amt + fee; const after = rem - settle;
               return (
-                <p className={`mt-2 text-right text-[11px] font-black ${after === 0 ? "text-emerald-600" : after < 0 ? "text-violet-600" : "text-red-600"}`}>
-                  この入金後の残高：{after < 0 ? `過入金 +${yen(-after)}` : after > 0 ? `不足 -${yen(after)}` : "¥0（完了）"}
-                </p>
+                <div className="mt-2 rounded-xl bg-surface px-3 py-2 text-[11px]">
+                  <div className="flex justify-between text-muted"><span>消込合計（入金＋手数料）</span><span className="font-bold text-ink">{yen(amt)} ＋ {yen(fee)} ＝ {yen(settle)}</span></div>
+                  <div className="mt-1 flex justify-between border-t border-line pt-1">
+                    <span className="font-bold text-ink">この入金後の残高</span>
+                    <span className={`font-black ${after === 0 ? "text-emerald-600" : after < 0 ? "text-violet-600" : "text-red-600"}`}>{after < 0 ? `過入金 +${yen(-after)}` : after > 0 ? `不足 -${yen(after)}` : "¥0（完了）"}</span>
+                  </div>
+                </div>
               );
             })()}
             <label className="mb-1 mt-2 block text-xs font-bold text-muted">メモ（任意）</label>
@@ -658,7 +662,7 @@ export default function RevenueManager() {
 
       {/* ===== 履歴モーダル ===== */}
       {histFor && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setHistFor(null)} />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
@@ -1010,6 +1014,15 @@ function PayEditModal({ line, pi, methods, onClose, onSave, onDelete }: {
         </div>
         <label className="mb-1 mt-3 block text-xs font-bold text-muted">メモ（任意）</label>
         <input value={d.note} onChange={(e) => setD((s) => ({ ...s, note: e.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        {(() => {
+          const otherSettle = line.payments.filter((_, i) => i !== pi).reduce((t, x) => t + x.amount + (x.fee || 0), 0);
+          const after = taxIn(line) - otherSettle - (Number(d.amount) || 0) - (Number(d.fee) || 0);
+          return (
+            <p className={`mt-2 text-right text-[11px] font-black ${after === 0 ? "text-emerald-600" : after < 0 ? "text-violet-600" : "text-red-600"}`}>
+              修正後の残高：{after < 0 ? `過入金 +${yen(-after)}` : after > 0 ? `不足 -${yen(after)}` : "¥0（完了）"}
+            </p>
+          );
+        })()}
         <div className="mt-4 flex items-center justify-between gap-2">
           <button onClick={onDelete} className="flex items-center gap-1 rounded-xl border border-rose-200 px-3 py-2 text-sm font-bold text-rose-600 hover:bg-rose-50"><Ic n="trash" size={14} />削除</button>
           <div className="flex gap-2">
