@@ -90,6 +90,7 @@ export default function RevenueManager() {
   const [payMethod, setPayMethod] = useState<PayMethod>("銀行振込");
   const [payFee, setPayFee] = useState("");
   const [editPay, setEditPay] = useState<{ line: RevLine; pi: number } | null>(null);
+  const [paysForId, setPaysForId] = useState<string | null>(null);
   const [custOpen, setCustOpen] = useState(false);
   const [histFor, setHistFor] = useState<RevLine | null>(null);
   const [editFor, setEditFor] = useState<RevLine | null>(null);
@@ -221,7 +222,8 @@ export default function RevenueManager() {
   }
   // 入金モーダルを開く（残高を初期値に）
   function openPay(l: RevLine) {
-    setPayFor(l); setPayAmount(String(remainOf(l))); setPayDate(today); setPayMethod("銀行振込"); setPayNote(""); setPayFee("");
+    const rem = remainOf(l);
+    setPayFor(l); setPayAmount(rem > 0 ? String(rem) : ""); setPayDate(today); setPayMethod("銀行振込"); setPayNote(""); setPayFee("");
   }
   function removeLine(l: RevLine) {
     if (!confirm("この明細を削除しますか？")) return;
@@ -299,6 +301,7 @@ export default function RevenueManager() {
   const liveEx = (() => { const raw = Number(draft.amount) || 0; return draft.taxMode === "in" ? Math.round(raw / (1 + S.taxRate / 100)) : raw; })();
   const liveIn = Math.round(liveEx * (1 + S.taxRate / 100));
   const nextYm = (() => { const [y, m] = today.slice(0, 7).split("-").map(Number); const nm = m === 12 ? 1 : m + 1; const ny = m === 12 ? y + 1 : y; return `${ny}-${String(nm).padStart(2, "0")}`; })();
+  const paysLine = paysForId ? store.lines.find((l) => l.id === paysForId) ?? null : null;
 
   return (
     <div className="space-y-5">
@@ -399,7 +402,7 @@ export default function RevenueManager() {
             <tbody className="divide-y divide-line">
               {rows.length === 0 && <tr><td colSpan={10} className="py-10 text-center text-muted">この月の明細はありません。「登録」から追加してください。</td></tr>}
               {rows.map((r) => {
-                const st = statusOf(r, today); const remain = remainOf(r);
+                const st = statusOf(r, today);
                 return (
                   <tr key={r.id} className={`hover:bg-surface ${r.status === "forecast" ? "bg-sky-50/40" : ""}`}>
                     <td className="py-2 font-mono text-[11px] text-muted">{r.invoiceNo}</td>
@@ -415,10 +418,10 @@ export default function RevenueManager() {
                     </td>
                     <td className="py-2 text-right">
                       <div className="flex justify-end gap-1">
-                        {remain > 0 && <button onClick={() => openPay(r)} className="rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
-                        {st === "OVERPAID" && <button onClick={() => adjustOverpay(r)} className="rounded-lg bg-violet-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-violet-700">調整</button>}
-                        <button onClick={() => setEditFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="編集"><Ic n="pencil" size={14} /></button>
-                        <button onClick={() => setHistFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="履歴"><Ic n="clock" size={14} /></button>
+                        <button onClick={() => openPay(r)} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>
+                        <button onClick={() => setPaysForId(r.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="入金明細・修正"><Ic n="coins" size={14} /></button>
+                        <button onClick={() => setEditFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="売上を編集"><Ic n="pencil" size={14} /></button>
+                        <button onClick={() => setHistFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="変更履歴"><Ic n="clock" size={14} /></button>
                         <button onClick={() => removeLine(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-rose-400 hover:text-rose-500" title="削除"><Ic n="trash" size={14} /></button>
                       </div>
                     </td>
@@ -717,7 +720,7 @@ export default function RevenueManager() {
                   <table className="w-full min-w-[820px] text-sm">
                     <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">売上計上日</th><th className="px-2 py-2.5 font-bold">種別</th><th className="px-2 py-2.5 font-bold">区分</th><th className="px-2 py-2.5 font-bold">請求書番号</th><th className="px-2 py-2.5 text-right font-bold">請求金額</th><th className="px-2 py-2.5 text-right font-bold">入金済</th><th className="px-2 py-2.5 text-right font-bold">残高</th><th className="px-2 py-2.5 text-center font-bold">入金状況</th><th className="px-2 py-2.5 font-bold">担当</th><th className="sticky right-0 bg-surface px-4 py-2.5 text-right font-bold">操作</th></tr></thead>
                     <tbody className="divide-y divide-line">
-                      {detailData.ls.map((l) => { const st = statusOf(l, today); const rem = remainOf(l); const mc = moneyCells(l); return (
+                      {detailData.ls.map((l) => { const st = statusOf(l, today); const mc = moneyCells(l); return (
                         <tr key={l.id} className="hover:bg-surface/60">
                           <td className="px-4 py-2.5 font-bold text-ink">{l.recognitionDate}</td>
                           <td className="px-2 py-2.5"><span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-muted">{l.recurring ? "定期" : "不定期"}</span></td>
@@ -730,9 +733,9 @@ export default function RevenueManager() {
                           <td className="px-2 py-2.5"><span className="text-[11px] text-muted">{l.owner}</span></td>
                           <td className="sticky right-0 bg-white px-4 py-2.5 text-right shadow-[-8px_0_10px_-8px_rgba(15,23,42,0.15)]">
                             <div className="flex justify-end gap-1">
-                              {rem > 0 && <button onClick={() => openPay(l)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-emerald-700">入金</button>}
-                              {st === "OVERPAID" && <button onClick={() => adjustOverpay(l)} className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-violet-700">調整</button>}
-                              <button onClick={() => setEditFor(l)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="編集"><Ic n="pencil" size={13} /></button>
+                              <button onClick={() => openPay(l)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-emerald-700">入金</button>
+                              <button onClick={() => setPaysForId(l.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="入金明細・修正"><Ic n="coins" size={13} /></button>
+                              <button onClick={() => setEditFor(l)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="売上を編集"><Ic n="pencil" size={13} /></button>
                               <button onClick={() => setHistFor(l)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="変更履歴"><Ic n="clock" size={13} /></button>
                             </div>
                           </td>
@@ -813,6 +816,48 @@ export default function RevenueManager() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 請求書ごとの入金明細モーダル ===== */}
+      {paysLine && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-ink/40" onClick={() => setPaysForId(null)} />
+          <div className="relative w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-black text-ink">入金明細・修正</h3>
+                <p className="text-[11px] text-muted">{paysLine.customer} — {paysLine.invoiceNo}</p>
+              </div>
+              <button onClick={() => setPaysForId(null)} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface"><Ic n="x" size={16} /></button>
+            </div>
+            <div className="mb-3 grid grid-cols-3 gap-2 text-sm">
+              <div className="rounded-xl bg-surface px-3 py-2"><p className="text-[10px] font-bold text-muted">請求(税込)</p><p className="font-black text-ink">{yen(taxIn(paysLine))}</p></div>
+              <div className="rounded-xl bg-surface px-3 py-2"><p className="text-[10px] font-bold text-muted">入金済</p><p className={`font-black ${moneyCells(paysLine).paidClass}`}>{yen(paidOf(paysLine))}</p></div>
+              <div className="rounded-xl bg-surface px-3 py-2"><p className="text-[10px] font-bold text-muted">残高</p><p className={`font-black ${moneyCells(paysLine).balClass}`}>{moneyCells(paysLine).balText}</p></div>
+            </div>
+            <div className="max-h-[46vh] space-y-1.5 overflow-auto">
+              {paysLine.payments.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-xs text-muted">入金の記録はまだありません。「＋ 入金を追加」から登録してください。</p>
+              ) : (
+                paysLine.payments.map((p, pi) => (
+                  <div key={pi} className="flex flex-wrap items-center gap-2 rounded-xl border border-line px-3 py-2 text-xs">
+                    <span className="font-bold text-ink">{p.date}</span>
+                    <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-muted">{p.method || "—"}</span>
+                    {p.fee ? <span className="text-[10px] text-amber-600">手数料 {yen(p.fee)}</span> : null}
+                    {p.note ? <span className="truncate text-[10px] text-muted">{p.note}</span> : null}
+                    <span className={`ml-auto font-black tabular-nums ${p.amount < 0 ? "text-violet-600" : "text-emerald-600"}`}>{yen(p.amount)}</span>
+                    <button onClick={() => setEditPay({ line: paysLine, pi })} className="flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[10px] font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="pencil" size={11} />修正</button>
+                    <button onClick={() => deletePay(paysLine.id, pi, p.amount)} className="flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[10px] font-bold text-muted hover:border-rose-400 hover:text-rose-500"><Ic n="trash" size={11} />削除</button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              {balanceOf(paysLine) < 0 && <button onClick={() => adjustOverpay(paysLine)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white hover:bg-violet-700">過入金を調整</button>}
+              <button onClick={() => openPay(paysLine)} className="flex items-center gap-1 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"><Ic n="plus" size={14} />入金を追加</button>
             </div>
           </div>
         </div>
