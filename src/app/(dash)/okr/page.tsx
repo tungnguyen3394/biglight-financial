@@ -6,7 +6,7 @@ export default function OkrPage() {
     <>
       <PageHeader
         title="OKR / KPI"
-        subtitle="Objective + Key Result — 組織全体 → 部署 → 個人 3 cấp, tiến độ tự tổng hợp"
+        subtitle="Objective + Key Result — 組織全体 → 部署 → 個人 の3階層、進捗を自動集計"
       />
       <OkrManager />
     </>

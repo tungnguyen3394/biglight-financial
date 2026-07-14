@@ -6,7 +6,7 @@ export default function SalesPage() {
     <>
       <PageHeader
         title="売上・回収管理"
-        subtitle="1 nguồn duy nhất: doanh thu (見込→確定) → 請求(税抜/税込) → 入金 → 未回収・延滞"
+        subtitle="売上（見込→確定）から請求・入金・未回収・延滞までを一元管理"
       />
       <RevenueManager />
     </>

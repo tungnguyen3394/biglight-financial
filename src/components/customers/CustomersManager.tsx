@@ -125,7 +125,7 @@ export default function CustomersManager() {
         </div>
       </Panel>
 
-      {/* ===== Modal chi tiết khách + hợp đồng ===== */}
+      {/* ===== 顧客詳細・契約モーダル ===== */}
       {detail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setDetailId(null)} />
@@ -145,7 +145,7 @@ export default function CustomersManager() {
             </div>
 
             <div className="space-y-5 overflow-auto p-5">
-              {/* Thông tin liên hệ */}
+              {/* 連絡先情報 */}
               <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 {[["担当", detail.contact], ["電話", detail.phone], ["メール", detail.email], ["メモ", detail.note]].map(([l, v]) => (
                   <div key={l} className="rounded-xl bg-surface px-3.5 py-3">
@@ -155,7 +155,7 @@ export default function CustomersManager() {
                 ))}
               </div>
 
-              {/* Hợp đồng */}
+              {/* 契約 */}
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <h4 className="text-sm font-black text-ink">契約一覧（{detail.contracts.length}件）</h4>
@@ -203,7 +203,7 @@ export default function CustomersManager() {
         </div>
       )}
 
-      {/* ===== Modal thêm khách ===== */}
+      {/* ===== 顧客登録モーダル ===== */}
       {showNew && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />
@@ -255,7 +255,7 @@ export default function CustomersManager() {
         </div>
       )}
 
-      {/* ===== Modal thêm hợp đồng ===== */}
+      {/* ===== 契約追加モーダル ===== */}
       {showCon && detail && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowCon(false)} />

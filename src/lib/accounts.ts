@@ -1,6 +1,6 @@
-// 勘定科目マスタ (Chart of Accounts) — 大分類 › 中分類 › 小分類 › 細分類.
-// ĐỊNH NGHĨA TẬP TRUNG ở 設定. Các nơi khác (回収 …) chỉ CHỌN từ dropdown.
-// Dùng chung cấu trúc cây với expenses (CatNode) — nhưng lưu bảng riêng.
+// 勘定科目マスタ — 大分類 › 中分類 › 小分類 › 細分類.
+// 設定画面で一元管理。他の画面（回収 …）はドロップダウンで選択のみ。
+// expenses と同じツリー構造（CatNode）を利用するが、別テーブルに保存。
 
 import { defaultTree, type CatNode } from "./expenses";
 export type { CatNode } from "./expenses";
@@ -17,7 +17,7 @@ export function loadAccounts(): CatNode[] {
   catch { return defaultAccounts(); }
 }
 
-// Danh sách phẳng mọi nút (để chọn dropdown) — mỗi cấp đều chọn được.
+// 全ノードのフラット一覧（ドロップダウン用）— 各階層を選択可能。
 export type AccountRef = { keys: string[]; label: string; depth: number };
 export function accountOptions(tree: CatNode[]): AccountRef[] {
   const out: AccountRef[] = [];
@@ -31,7 +31,7 @@ export function accountOptions(tree: CatNode[]): AccountRef[] {
   rec(tree, [], []);
   return out;
 }
-// Chỉ lấy nút lá (小/細) — thường dùng cho 勘定科目 cụ thể.
+// 末端ノード（小/細）のみ取得 — 具体的な勘定科目に使用。
 export function accountLeaves(tree: CatNode[]): AccountRef[] {
   const out: AccountRef[] = [];
   const rec = (nodes: CatNode[], labels: string[], keys: string[]) => {

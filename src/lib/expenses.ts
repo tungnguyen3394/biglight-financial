@@ -1,8 +1,8 @@
-// 支出管理 v2 — danh mục CÂY TỰ ĐỊNH NGHĨA tối đa 4 tầng:
-//   大分類 → 中分類 → 小分類 → 細分類 (tầng 4 TÙY CHỌN)
-// Người dùng tự thêm/sửa/xóa hạng mục trong「分類設定」— cây lưu cùng dữ liệu.
+// 支出管理 v2 — ユーザー定義の分類ツリー（最大4階層）:
+//   大分類 → 中分類 → 小分類 → 細分類（第4階層は任意）
+// 分類は「分類設定」で追加・編集・削除でき、ツリーはデータと共に保存される。
 //
-// Mỗi khoản chi có: 定期/不定期, ngày trả định kỳ, phương thức trả (自動引き落とし/振込/現金).
+// 各支出は次を持つ：定期/不定期、定期支払日、支払方法（自動引き落とし/振込/現金）。
 
 export type CatNode = { key: string; label: string; children?: CatNode[] };
 
@@ -20,27 +20,27 @@ export const METHOD_TONE: Record<PayMethod, string> = {
 export type Expense = {
   id: string;
   date: string;            // 支払日 YYYY-MM-DD
-  path: string[];          // key theo cây: [大, 中, 小, (細)] — độ sâu linh hoạt
+  path: string[];          // ツリーのkey: [大, 中, 小, (細)] — 階層の深さは可変
   vendor: string;          // 支払先
   amount: number;          // 円
   method: PayMethod;       // 支払方法
   recurring: boolean;      // true = 定期 / false = 不定期
-  recurringDay?: number;   // 定期支払日 (1〜31) — chỉ khi 定期
+  recurringDay?: number;   // 定期支払日 (1〜31) — 定期のみ
   note: string;
-  propertyId?: string;     // 物件マスタ liên kết — chỉ khi 小項目 = 地代家賃
+  propertyId?: string;     // 物件マスタ連携 — 小項目 = 地代家賃 のみ
 };
 
 export type ExpenseStore = {
   version: 2;
-  tree: CatNode[];                  // cây danh mục NGƯỜI DÙNG TỰ SỬA
+  tree: CatNode[];                  // ユーザーが編集する分類ツリー
   records: Expense[];
-  budgets: Record<string, number>;  // 予算 tháng theo key 大分類
+  budgets: Record<string, number>;  // 大分類keyごとの月次予算
 };
 
 export const STORAGE_KEY = "bl_expenses_v2";
 export const LEGACY_KEY = "bl_expenses_v1";
 
-// ---------- Cây mặc định (nhánh Web広告 có TẦNG 4 làm mẫu) ----------
+// ---------- 既定ツリー（Web広告の枝に第4階層をサンプルとして用意） ----------
 export function defaultTree(): CatNode[] {
   return [
     {
@@ -55,7 +55,7 @@ export function defaultTree(): CatNode[] {
     {
       key: "sales_cost", label: "販売費", children: [
         { key: "ad", label: "広告宣伝費", children: [
-          { key: "web_ad", label: "Web広告", children: [           // ← tầng 4 tùy chọn
+          { key: "web_ad", label: "Web広告", children: [           // ← 第4階層（任意）
             { key: "google", label: "Google広告" }, { key: "meta", label: "Meta広告" }] },
           { key: "sns", label: "SNS運用" }, { key: "print", label: "印刷物" }] },
         { key: "travel", label: "旅費交通費", children: [
@@ -77,7 +77,7 @@ export function defaultTree(): CatNode[] {
   ];
 }
 
-// ---------- Duyệt cây ----------
+// ---------- ツリー走査 ----------
 export function findNode(tree: CatNode[], path: string[]): CatNode | null {
   let nodes = tree, found: CatNode | null = null;
   for (const key of path) {
@@ -93,7 +93,7 @@ export function childrenAt(tree: CatNode[], path: string[]): CatNode[] {
   return findNode(tree, path)?.children ?? [];
 }
 
-// Nhãn từng tầng của 1 path (key đã bị xóa khỏi cây → hiển thị key thô).
+// pathの各階層のラベル（ツリーから削除済みのkeyはkeyをそのまま表示）。
 export function labelsOf(tree: CatNode[], path: string[]): string[] {
   const out: string[] = [];
   let nodes = tree;
@@ -105,11 +105,11 @@ export function labelsOf(tree: CatNode[], path: string[]): string[] {
   return out;
 }
 
-// Khoản chi thuộc node nếu path của nó BẮT ĐẦU bằng path node.
+// 支出のpathがノードのpathで始まる場合、その支出はノードに属する。
 export const underPath = (e: Expense, prefix: string[]): boolean =>
   prefix.every((k, i) => e.path[i] === k);
 
-// ---------- Sửa cây (immutable) ----------
+// ---------- ツリー編集（immutable） ----------
 function mapAt(tree: CatNode[], path: string[], fn: (nodes: CatNode[]) => CatNode[]): CatNode[] {
   if (path.length === 0) return fn(tree);
   return tree.map((n) => n.key === path[0]
@@ -131,7 +131,7 @@ export function deleteAt(tree: CatNode[], path: string[]): CatNode[] {
 
 export const yen = (n: number): string => "¥" + Math.round(n).toLocaleString("ja-JP");
 
-// ---------- Migration từ v1 (major/mid/small) ----------
+// ---------- v1（major/mid/small）からの移行 ----------
 type LegacyExpense = { id: string; date: string; major: string; mid: string; small: string; vendor: string; amount: number; note: string };
 type LegacyStore = { records: LegacyExpense[]; budgets: Record<string, number> };
 
@@ -147,7 +147,7 @@ export function migrateV1(old: LegacyStore): ExpenseStore {
   };
 }
 
-// ---------- Dữ liệu mẫu ----------
+// ---------- サンプルデータ ----------
 export function sampleExpenses(): ExpenseStore {
   return {
     version: 2,
@@ -165,12 +165,12 @@ export function sampleExpenses(): ExpenseStore {
       { id: "e09", date: "2026-07-05", path: ["admin", "it", "saas"], vendor: "各種SaaS", amount: 128000, method: "自動引き落とし", recurring: true, recurringDay: 5, note: "システム利用料" },
       { id: "e10", date: "2026-07-08", path: ["admin", "office", "utility"], vendor: "電力会社", amount: 46000, method: "自動引き落とし", recurring: true, recurringDay: 8, note: "" },
       { id: "e16", date: "2026-07-20", path: ["admin", "it", "comm"], vendor: "通信キャリア", amount: 38000, method: "自動引き落とし", recurring: true, recurringDay: 20, note: "携帯・ネット" },
-      // 不定期 (one-time) — Web広告 dùng TẦNG 4
+      // 不定期（単発）— Web広告は第4階層を使用
       { id: "e04", date: "2026-07-05", path: ["sales_cost", "ad", "web_ad", "google"], vendor: "Google広告", amount: 450000, method: "振込", recurring: false, note: "求人広告" },
       { id: "e05", date: "2026-07-10", path: ["sales_cost", "ad", "web_ad", "meta"], vendor: "Meta広告", amount: 380000, method: "振込", recurring: false, note: "Facebook求人" },
       { id: "e06", date: "2026-07-12", path: ["sales_cost", "travel", "biz_trip"], vendor: "JR東海", amount: 86000, method: "現金", recurring: false, note: "岐阜出張" },
       { id: "e07", date: "2026-07-15", path: ["sales_cost", "entertain", "meal"], vendor: "会食", amount: 42000, method: "現金", recurring: false, note: "顧客会食" },
-      // Tháng trước + năm tài chính trước (cho レポート so sánh)
+      // 前月 + 前年度（比較レポート用）
       { id: "e11", date: "2026-06-25", path: ["personnel", "salary", "fulltime"], vendor: "給与振込", amount: 3150000, method: "振込", recurring: true, recurringDay: 25, note: "6月分給与" },
       { id: "e12", date: "2026-06-05", path: ["sales_cost", "ad", "web_ad", "google"], vendor: "Google広告", amount: 400000, method: "振込", recurring: false, note: "" },
       { id: "e13", date: "2024-11-25", path: ["personnel", "salary", "fulltime"], vendor: "給与振込", amount: 1800000, method: "振込", recurring: true, recurringDay: 25, note: "11月分給与" },

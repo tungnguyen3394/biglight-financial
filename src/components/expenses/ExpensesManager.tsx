@@ -30,7 +30,7 @@ function openPrint(title: string, bodyHtml: string) {
   setTimeout(() => w.print(), 300);
 }
 
-// Đường dẫn mặc định: đi theo con đầu tiên tới lá.
+// 既定パス：常に先頭の子をたどって末端まで展開する。
 function autoExtend(tree: CatNode[], path: string[]): string[] {
   const out = [...path];
   while (out.length < MAX_DEPTH) {
@@ -42,13 +42,13 @@ function autoExtend(tree: CatNode[], path: string[]): string[] {
 }
 
 // ==================================================================
-// Trình sửa CÂY DANH MỤC (đệ quy, tối đa 4 tầng) — dùng trong 分類設定
+// 分類ツリー編集（再帰・最大4階層）— 分類設定で使用
 // ==================================================================
 function CatEditor({ nodes, path, tree, onChange }: {
   nodes: CatNode[]; path: string[]; tree: CatNode[];
   onChange: (tree: CatNode[]) => void;
 }) {
-  const depth = path.length; // 0 = đang liệt kê 大分類
+  const depth = path.length; // 0 = 大分類を列挙中
   const [adding, setAdding] = useState("");
 
   return (
@@ -56,7 +56,7 @@ function CatEditor({ nodes, path, tree, onChange }: {
       {nodes.map((n) => (
         <CatRow key={n.key} node={n} path={[...path, n.key]} tree={tree} onChange={onChange} />
       ))}
-      {/* thêm mục ở tầng này */}
+      {/* この階層に項目を追加 */}
       <div className="mt-1.5 flex items-center gap-1.5">
         <input value={adding} onChange={(e) => setAdding(e.target.value)}
           placeholder={`＋ ${TIER_LABELS[depth]}を追加`}
@@ -72,7 +72,7 @@ function CatRow({ node, path, tree, onChange }: {
   node: CatNode; path: string[]; tree: CatNode[];
   onChange: (tree: CatNode[]) => void;
 }) {
-  const [open, setOpen] = useState(path.length === 1); // 大分類 mở sẵn
+  const [open, setOpen] = useState(path.length === 1); // 大分類は初期展開
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(node.label);
   const depth = path.length;
@@ -114,7 +114,7 @@ function CatRow({ node, path, tree, onChange }: {
 }
 
 // ==================================================================
-// Dòng cây XỔ XUỐNG cho chế độ xem 分類別
+// 分類別ビュー用の展開ツリー行
 // ==================================================================
 function TreeRows({ nodes, path, records, tree, expanded, toggle }: {
   nodes: CatNode[]; path: string[]; records: Expense[]; tree: CatNode[];
@@ -128,7 +128,7 @@ function TreeRows({ nodes, path, records, tree, expanded, toggle }: {
         const total = records.filter((r) => underPath(r, p)).reduce((t, r) => t + r.amount, 0);
         const count = records.filter((r) => underPath(r, p)).length;
         const kids = n.children ?? [];
-        const exact = records.filter((r) => r.path.join("/") === pk); // bản ghi nằm đúng node này
+        const exact = records.filter((r) => r.path.join("/") === pk); // このノードに一致する明細
         const isOpen = expanded.has(pk);
         const depth = p.length;
         return (
@@ -145,7 +145,7 @@ function TreeRows({ nodes, path, records, tree, expanded, toggle }: {
             </button>
             {isOpen && (
               <>
-                {/* bản ghi nằm đúng node này */}
+                {/* このノードに一致する明細 */}
                 {exact.map((r) => (
                   <div key={r.id} className="flex items-center gap-2 border-b border-line/40 py-2 pr-2 text-xs"
                     style={{ paddingLeft: depth * 22 + 8 }}>
@@ -171,7 +171,7 @@ function TreeRows({ nodes, path, records, tree, expanded, toggle }: {
 }
 
 // ==================================================================
-// Trang chính
+// メイン画面
 // ==================================================================
 export default function ExpensesManager() {
   const [store, setStore] = useState<ExpenseStore>({ version: 2, tree: [], records: [], budgets: {} });
@@ -209,7 +209,7 @@ export default function ExpensesManager() {
 
   const monthRecords = useMemo(() => store.records.filter((r) => r.date.slice(0, 7) === month), [store.records, month]);
 
-  // Lọc dùng chung cho cả 2 chế độ xem.
+  // 両ビュー共通のフィルタ。
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
     return monthRecords
@@ -236,7 +236,7 @@ export default function ExpensesManager() {
     .map((m) => ({ key: m.key, label: m.label, spent: majorTotals[m.key] ?? 0, budget: store.budgets[m.key] ?? 0 }))
     .filter((x) => x.budget > 0 && x.spent > x.budget);
 
-  // Lịch trả định kỳ trong tháng (sắp theo ngày).
+  // 当月の定期支払スケジュール（支払日順）。
   const schedule = useMemo(() =>
     monthRecords.filter((r) => r.recurring).sort((a, b) => (a.recurringDay ?? 99) - (b.recurringDay ?? 99)),
   [monthRecords]);
@@ -290,7 +290,7 @@ export default function ExpensesManager() {
     openPrint(`支出一覧_${month}`, body);
   }
 
-  // Cascading select trong modal đăng ký (tối đa 4 tầng, tầng hiện khi có con).
+  // 登録モーダルの連動セレクト（最大4階層・子がある階層のみ表示）。
   const levels: { options: CatNode[]; value: string }[] = [];
   for (let i = 0; i < MAX_DEPTH; i++) {
     const options = childrenAt(tree, draft.path.slice(0, i));
@@ -305,7 +305,7 @@ export default function ExpensesManager() {
 
   return (
     <div className="space-y-6">
-      {/* ===== Cảnh báo vượt 予算 ===== */}
+      {/* ===== 予算超過アラート ===== */}
       {warnings.length > 0 && (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-black text-red-600">⚠️ 予算超過アラート（{month}）</p>
@@ -347,7 +347,7 @@ export default function ExpensesManager() {
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <button onClick={() => openNew(true)} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">＋ 支出を登録</button>
-            {/* ⚙ menu gom nút phụ */}
+            {/* ⚙ 補助ボタンのメニュー */}
             <div className="relative">
               <button onClick={() => setMenuOpen((o) => !o)} className="flex h-9 items-center gap-1 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">⚙ 設定</button>
               {menuOpen && (
@@ -371,7 +371,7 @@ export default function ExpensesManager() {
         </div>
       </div>
 
-      {/* ===== Thẻ 大分類 + 定期スケジュール ===== */}
+      {/* ===== 大分類カード + 定期スケジュール ===== */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
         {tree.map((m) => {
           const spent = majorTotals[m.key] ?? 0;
@@ -395,7 +395,7 @@ export default function ExpensesManager() {
           );
         })}
 
-        {/* 📅 Lịch trả định kỳ */}
+        {/* 📅 定期支払スケジュール */}
         <div className="rounded-2xl border border-line bg-white p-5 shadow-card">
           <p className="mb-2 text-sm font-black text-ink">📅 定期支払（{month}）</p>
           {schedule.length === 0 ? (
@@ -415,7 +415,7 @@ export default function ExpensesManager() {
         </div>
       </div>
 
-      {/* ===== Nội dung: 一覧 hoặc 分類別ツリー ===== */}
+      {/* ===== 本体：一覧 または 分類別ツリー ===== */}
       {view === "list" ? (
         <Panel title={`支出一覧（${month}）`}>
           <div className="overflow-x-auto">
@@ -486,13 +486,13 @@ export default function ExpensesManager() {
         </Panel>
       )}
 
-      {/* ===== Modal: đăng ký 支出 (定期/不定期) ===== */}
+      {/* ===== モーダル：支出登録（定期/不定期） ===== */}
       {showNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />
           <div className="relative w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
             <h3 className="mb-1 text-base font-black text-ink">{draft.recurring ? "定期支出を登録" : "不定期支出を登録"}</h3>
-            <p className="mb-4 text-[11px] text-muted">{draft.recurring ? "Chi phí lặp mỗi tháng (lương, tiền nhà, SaaS…)" : "Chi phí phát sinh 1 lần (quảng cáo, công tác, tiếp khách…)"}</p>
+            <p className="mb-4 text-[11px] text-muted">{draft.recurring ? "毎月発生する費用（給与・家賃・SaaS など）" : "単発で発生する費用（広告・出張・接待 など）"}</p>
             <div className="space-y-3">
               {/* 種別 dropdown */}
               <div>
@@ -517,7 +517,7 @@ export default function ExpensesManager() {
                 </div>
               </div>
 
-              {/* Danh mục cascading tối đa 4 tầng */}
+              {/* 分類の連動セレクト（最大4階層） */}
               <div>
                 <label className="mb-1 block text-xs font-bold text-muted">分類（{levels.map((_, i) => TIER_LABELS[i]).join(" › ")}）</label>
                 <div className={`grid gap-2 ${levels.length >= 4 ? "grid-cols-4" : levels.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
@@ -570,7 +570,7 @@ export default function ExpensesManager() {
         </div>
       )}
 
-      {/* ===== Modal: 分類設定 (quản lý cây 4 tầng) ===== */}
+      {/* ===== モーダル：分類設定（4階層ツリー管理） ===== */}
       {showCats && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowCats(false)} />
@@ -578,7 +578,7 @@ export default function ExpensesManager() {
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div>
                 <h3 className="text-base font-black text-ink">⚙ 分類マスタ設定</h3>
-                <p className="text-[11px] text-muted">大 › 中 › 小 › 細（tầng 4 tùy chọn）— tự thêm/sửa/xóa. Thay đổi lưu ngay.</p>
+                <p className="text-[11px] text-muted">大 › 中 › 小 › 細（第4階層は任意）— 追加・編集・削除が可能。変更は即時保存されます。</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={resetTreeOnly} className="rounded-xl border border-line px-3 py-1.5 text-xs font-bold text-muted hover:border-rose-400 hover:text-rose-500">初期値に戻す</button>
@@ -601,7 +601,7 @@ export default function ExpensesManager() {
           <div className="absolute inset-0 bg-ink/40" onClick={() => setEditBudget(false)} />
           <div className="relative w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
             <h3 className="mb-1 text-base font-black text-ink">月次予算を設定</h3>
-            <p className="mb-4 text-[11px] text-muted">大分類ごとの月次予算 — vượt là cảnh báo đỏ.</p>
+            <p className="mb-4 text-[11px] text-muted">大分類ごとの月次予算 — 超過すると赤字で警告します。</p>
             <div className="space-y-3">
               {tree.map((m) => (
                 <div key={m.key} className="flex items-center justify-between gap-3">

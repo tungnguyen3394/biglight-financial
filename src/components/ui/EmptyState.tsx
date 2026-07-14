@@ -1,7 +1,7 @@
 import Icon from "../Icon";
 import type { IconName } from "@/lib/nav";
 
-// Trạng thái "module đang phát triển" — dùng cho các trang khung ở Giai đoạn 1.
+// 「開発中モジュール」表示 — フェーズ1の枠組みページ用。
 export default function EmptyState({
   icon, title, description,
 }: { icon: IconName; title: string; description: string }) {
@@ -13,7 +13,7 @@ export default function EmptyState({
       <h3 className="text-base font-black text-ink">{title}</h3>
       <p className="mt-1.5 max-w-md text-sm text-muted">{description}</p>
       <span className="mt-5 rounded-full bg-surface px-3 py-1 text-[11px] font-bold text-muted">
-        Giai đoạn 1 · khung sẵn sàng — chức năng chi tiết sẽ bổ sung sau
+        フェーズ1 · 枠組み準備済み — 詳細機能は今後追加予定
       </span>
     </div>
   );

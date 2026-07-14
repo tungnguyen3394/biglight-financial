@@ -1,4 +1,4 @@
-// 顧客・契約管理 — khách hàng CHỨA hợp đồng (gộp 契約管理 vào 顧客管理).
+// 顧客・契約管理 — 顧客が契約を保持（契約管理を顧客管理に統合）。
 //   顧客 (1) ──▶ (n) 契約
 
 export type Contract = {
@@ -7,7 +7,7 @@ export type Contract = {
   type: string;       // 月額 / スポット / 成果報酬
   amount: number;     // 契約金額 (円)
   startDate: string;
-  endDate: string;    // "" = không kỳ hạn
+  endDate: string;    // "" = 無期限
   status: "有効" | "終了" | "下書き";
 };
 
@@ -15,8 +15,8 @@ export type Customer = {
   id: string;
   code: string;
   name: string;
-  group: string;      // phân loại
-  contact: string;    // người phụ trách phía khách
+  group: string;      // 分類
+  contact: string;    // 顧客側の担当者
   phone: string;
   email: string;
   note: string;

@@ -1,11 +1,11 @@
-// OKR / KPI — cấu trúc 3 cấp:  全社(org) → 部署(dept) → 個人(user).
+// OKR / KPI — 3階層構造:  全社(org) → 部署(dept) → 個人(user).
 //
-//   Objective (mục tiêu định tính)
-//     └── KeyResult × n (kết quả then chốt ĐO ĐƯỢC: target / current)
+//   Objective（定性的な目標）
+//     └── KeyResult × n（測定可能な主要成果：target / current）
 //
 //   progress(KR)        = min(100, current / target)
-//   progress(Objective) = trung bình các KR
-//   progress(部署/全社)  = trung bình các Objective thuộc cấp đó
+//   progress(Objective) = 各KRの平均
+//   progress(部署/全社)  = その階層に属するObjectiveの平均
 
 export type KR = { id: string; title: string; target: number; current: number; unit: string };
 
@@ -16,7 +16,7 @@ export type Objective = {
   title: string;
   quarter: string;   // "2026-Q3"
   level: Level;
-  owner: string;     // org: "全社" / dept: tên bộ phận / user: tên nhân viên
+  owner: string;     // org: "全社" / dept: 部署名 / user: 従業員名
   krs: KR[];
 };
 

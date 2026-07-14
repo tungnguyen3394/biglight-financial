@@ -33,7 +33,7 @@ function openPrint(title: string, body: string) {
 export default function UriageManager() {
   const [lines, setLines] = useState<RevLine[]>([]);
   const [fy, setFy] = useState(2025);
-  const [mi, setMi] = useState(0);          // chỉ số tháng tài chính (0=8月)
+  const [mi, setMi] = useState(0);          // 会計月インデックス (0=8月)
   const [ownerF, setOwnerF] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
@@ -48,7 +48,7 @@ export default function UriageManager() {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       setLines(raw ? (JSON.parse(raw) as RevLine[]) : sampleLines());
     } catch { setLines(sampleLines()); }
-    // gợi ý tên công ty từ 顧客管理
+    // 顧客管理から会社名を候補として取得
     try {
       const raw = window.localStorage.getItem("bl_customers_v1");
       if (raw) setCustomerNames((JSON.parse(raw) as { name: string }[]).map((c) => c.name));
@@ -63,7 +63,7 @@ export default function UriageManager() {
   const months = useMemo(() => fiscalMonths(fy), [fy]);
   const prevMonths = useMemo(() => fiscalMonths(fy - 1), [fy]);
   const ym = months[mi];
-  const budget = useMemo(() => readBudgetSeries(fy), [fy, lines]); // lines dep → cập nhật khi đổi 予実
+  const budget = useMemo(() => readBudgetSeries(fy), [fy, lines]); // lines依存 → 予実変更時に更新
 
   const monthAggs = useMemo(() => months.map((m) => aggregate(lines.filter((l) => l.ym === m))), [lines, months]);
   const prevAggs = useMemo(() => prevMonths.map((m) => aggregate(lines.filter((l) => l.ym === m))), [lines, prevMonths]);
@@ -81,7 +81,7 @@ export default function UriageManager() {
     { label: "累計", bud: budCum, conf: confCum, seen: seenCum, gross: monthAggs.slice(0, mi + 1).reduce((t, a) => t + a.gross, 0), hc: 0, prevSeen: prevSeenCum },
   ];
 
-  // Danh sách dòng của tháng đang xem.
+  // 表示中の月の明細一覧。
   const rows = useMemo(() => lines
     .filter((l) => l.ym === ym)
     .filter((l) => !ownerF || l.owner === ownerF)
@@ -91,7 +91,7 @@ export default function UriageManager() {
 
   const names = useMemo(() => Array.from(new Set([...customerNames, ...lines.map((l) => l.customer)])).sort(), [customerNames, lines]);
 
-  // ===== thao tác =====
+  // ===== 操作 =====
   function shift(delta: number) {
     let f = fy, m = mi + delta;
     if (m > 11) { f++; m = 0; } else if (m < 0) { f--; m = 11; }
@@ -164,7 +164,7 @@ export default function UriageManager() {
 
   return (
     <div className="space-y-5">
-      {/* ===== Điều hướng tháng ===== */}
+      {/* ===== 月ナビゲーション ===== */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-white p-3 shadow-card">
         <button onClick={() => shift(-1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600">◀</button>
         <div className="rounded-xl bg-brand-600 px-4 py-2 text-center text-white">
@@ -187,7 +187,7 @@ export default function UriageManager() {
         </div>
       </div>
 
-      {/* ===== Summary 当月 + 累計 (kiểu ミーティング報告書) ===== */}
+      {/* ===== サマリー 当月 + 累計（ミーティング報告書形式） ===== */}
       <Panel title={`📊 サマリー（${ym.replace("-", "年")}月）`}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
@@ -223,7 +223,7 @@ export default function UriageManager() {
         <p className="mt-2 text-[10px] text-slate-400">予算は「予実管理」から自動連携 ・ 見込売上＝確定＋予定 ・ 対前年は同月の見込比較</p>
       </Panel>
 
-      {/* ===== Dải 12 tháng — bấm để nhảy ===== */}
+      {/* ===== 12か月バー — クリックで月移動 ===== */}
       <Panel title="年間ビュー（クリックで月移動）">
         <div className="flex items-end gap-1.5 overflow-x-auto pb-1" style={{ height: 150 }}>
           {months.map((m, i) => {
@@ -233,7 +233,7 @@ export default function UriageManager() {
               <button key={m} onClick={() => setMi(i)}
                 className={`flex min-w-[42px] flex-1 flex-col items-center gap-1 rounded-lg pt-1 transition ${i === mi ? "bg-brand-50" : "hover:bg-surface"}`}>
                 <div className="relative flex h-[100px] w-full items-end justify-center">
-                  {/* mốc 予算 */}
+                  {/* 予算ライン */}
                   {b > 0 && <div className="absolute left-1 right-1 border-t-2 border-dashed border-amber-400" style={{ bottom: `${(b / stripMax) * 100}%` }} title={`予算 ${yen(b)}`} />}
                   <div className="flex w-3/4 flex-col justify-end">
                     <div className="w-full rounded-t bg-brand-200" style={{ height: `${(a.forecast / stripMax) * 100}%` }} title={`予定 ${yen(a.forecast)}`} />
@@ -253,7 +253,7 @@ export default function UriageManager() {
         </div>
       </Panel>
 
-      {/* ===== Danh sách chi tiết tháng ===== */}
+      {/* ===== 月別明細一覧 ===== */}
       <Panel title={`売上明細一覧 — ${ym.replace("-", "年")}月（${rows.length}件）`}
         action={
           <div className="flex flex-wrap items-center gap-1.5">
@@ -325,7 +325,7 @@ export default function UriageManager() {
         </div>
       </Panel>
 
-      {/* ===== Modal thêm明細 ===== */}
+      {/* ===== 明細追加モーダル ===== */}
       {showNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />

@@ -11,7 +11,7 @@ import { fiscalLabel, FY_MONTH_LABELS, fiscalYearOf, fiscalMonthIndex, deltaPct 
 
 const yenFull = (n: number) => "¥" + Math.round(n).toLocaleString("ja-JP");
 
-// ===== Kỳ so sánh (theo năm tài chính 8月始まり) =====
+// ===== 比較期間（会計年度 8月始まり） =====
 type Gran = "month" | "quarter" | "half" | "year";
 const GRAN_TABS: { key: Gran; label: string }[] = [
   { key: "month", label: "月次" }, { key: "quarter", label: "四半期" }, { key: "half", label: "半期" }, { key: "year", label: "通期" },
@@ -84,11 +84,11 @@ export default function YojitsuManager() {
   }
   function resetSample() { if (!confirm("サンプルデータに戻します。よろしいですか？")) return; setStore(defaultStore()); }
 
-  // Hero: 通期 (cả năm) cho 3 chỉ tiêu chính
+  // ヒーロー：主要3指標の通期（年間）
   const heroKeys: MetricKey[] = ["revenue", "gross", "operating"];
   const hero = heroKeys.map((k) => ({ key: k, label: METRICS.find((x) => x.key === k)!.label, plan: sum(series[k].plan), actual: sum(series[k].actual) }));
 
-  // Bảng đối chiếu theo kỳ đã chọn
+  // 選択した期間の対照表
   const rows = useMemo(() => {
     const cur = bucketize(series[metric], gran, cum);
     const prev = bucketize(prevSeries[metric], gran, cum);
@@ -114,17 +114,17 @@ export default function YojitsuManager() {
 
   return (
     <div className="space-y-6">
-      {/* ===== Giải thích cấu trúc (1 dòng) ===== */}
+      {/* ===== 仕組みの説明（1行） ===== */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-3xl border border-line/70 bg-white px-5 py-3.5 text-sm shadow-card">
         <span className="font-black text-ink">仕組み：</span>
-        <span className="text-muted"><b className="text-brand-700">予算</b> = kế hoạch</span>
-        <span className="text-muted"><b className="text-emerald-600">実績</b> = thực tế</span>
+        <span className="text-muted"><b className="text-brand-700">予算</b> = 計画</span>
+        <span className="text-muted"><b className="text-emerald-600">実績</b> = 実際</span>
         <span className="text-muted"><b className="text-ink">差異</b> = 実績 − 予算</span>
         <span className="text-muted"><b className="text-ink">達成率</b> = 実績 ÷ 予算</span>
         <span className="hidden text-slate-400 lg:inline">粗利 = 売上 − 原価 ／ 営業利益 = 粗利 − 販管費（自動）</span>
       </div>
 
-      {/* ===== Toolbar gọn ===== */}
+      {/* ===== ツールバー ===== */}
       <div className="flex flex-wrap items-center gap-2.5 rounded-3xl border border-line/70 bg-white p-3.5 shadow-card">
         <select value={year} onChange={(e) => setYear(Number(e.target.value))}
           className="rounded-xl border border-line bg-white px-3 py-2 text-sm font-bold text-ink outline-none focus:border-brand-500">
@@ -147,7 +147,7 @@ export default function YojitsuManager() {
         </div>
       </div>
 
-      {/* ===== Hero: 通期 予算 vs 実績 (3 chỉ tiêu chính) ===== */}
+      {/* ===== ヒーロー：通期 予算 vs 実績（主要3指標） ===== */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {hero.map((h) => {
           const rate = h.plan ? Math.round((h.actual / h.plan) * 100) : 0;
@@ -171,7 +171,7 @@ export default function YojitsuManager() {
         })}
       </div>
 
-      {/* ===== 予実対照 — chọn kỳ, gọn ===== */}
+      {/* ===== 予実対照 — 期間選択 ===== */}
       <Panel title="予実対照（予算 vs 実績）"
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -188,7 +188,7 @@ export default function YojitsuManager() {
             </select>
           </div>
         }>
-        {/* Tabs kỳ */}
+        {/* 期間タブ */}
         <div className="mb-4 inline-flex overflow-hidden rounded-xl border border-line">
           {GRAN_TABS.map((g) => (
             <button key={g.key} onClick={() => setGran(g.key)}
@@ -197,7 +197,7 @@ export default function YojitsuManager() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          {/* Bảng đối chiếu gọn */}
+          {/* 対照表 */}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[440px] text-sm">
               <thead>
@@ -240,7 +240,7 @@ export default function YojitsuManager() {
             <p className="mt-2 text-[10px] text-slate-400">単位：万円 ・ Q1=8〜10月 / Q2=11〜1月 / Q3=2〜4月 / Q4=5〜7月 ・ 上期=8〜1月 / 下期=2〜7月</p>
           </div>
 
-          {/* Biểu đồ cặp 予算 vs 実績 */}
+          {/* 予算 vs 実績 の棒グラフ */}
           <div>
             <div className="flex items-end gap-2 overflow-x-auto pb-2" style={{ height: 200 }}>
               {rows.map((b, i) => (

@@ -6,7 +6,7 @@ export default function ExpensesPage() {
     <>
       <PageHeader
         title="支出管理"
-        subtitle="Chi phí 3 tầng: 大分類 › 中分類 › 小分類 — cảnh báo tự động khi vượt 予算"
+        subtitle="3階層の費用分類：大分類 › 中分類 › 小分類 — 予算超過時に自動アラート"
       />
       <ExpensesManager />
     </>

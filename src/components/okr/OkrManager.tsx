@@ -19,7 +19,7 @@ function Bar({ value, small }: { value: number; small?: boolean }) {
   );
 }
 
-// 1 khối Objective (mở rộng được để sửa KR).
+// Objective 1件（展開して KR を編集可能）。
 function ObjectiveCard({ o, onUpdateKr, onAddKr, onRemove }: {
   o: Objective;
   onUpdateKr: (krId: string, current: number) => void;
@@ -80,7 +80,7 @@ function ObjectiveCard({ o, onUpdateKr, onAddKr, onRemove }: {
             </tbody>
           </table>
 
-          {/* thêm KR */}
+          {/* KRを追加 */}
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-surface p-2">
             <input value={krTitle} onChange={(e) => setKrTitle(e.target.value)} placeholder="KR名（例：新規契約）"
               className="min-w-0 flex-1 rounded-lg border border-line px-2.5 py-1.5 text-xs outline-none focus:border-brand-500" />
@@ -119,7 +119,7 @@ export default function OkrManager() {
 
   const inQuarter = useMemo(() => objs.filter((o) => o.quarter === quarter), [objs, quarter]);
   const orgObjs = inQuarter.filter((o) => o.level === "org");
-  const orgProgress = groupProgress(inQuarter); // toàn bộ mục tiêu quý = tiến độ tổ chức
+  const orgProgress = groupProgress(inQuarter); // 当四半期の全目標 = 組織全体の進捗
 
   function updateKr(objId: string, krId: string, current: number) {
     setObjs((prev) => prev.map((o) => o.id === objId
@@ -176,7 +176,7 @@ export default function OkrManager() {
         </div>
       </div>
 
-      {/* Thẻ tổng tổ chức */}
+      {/* 組織全体サマリーカード */}
       <div className="rounded-2xl border border-line bg-gradient-to-br from-brand-600 to-brand-700 p-6 text-white shadow-card">
         <div className="flex flex-wrap items-center gap-6">
           <div>
@@ -198,7 +198,7 @@ export default function OkrManager() {
       {/* 部署 */}
       {DEPARTMENTS.map((d) => section(`👥 ${d}`, inQuarter.filter((o) => o.level === "dept" && o.owner === d)))}
 
-      {/* 個人 (nhóm theo bộ phận) */}
+      {/* 個人（メンバー別） */}
       <Panel title="👤 個人目標（メンバー別）">
         <div className="space-y-6">
           {EMPLOYEES.map((emp) => {
@@ -229,7 +229,7 @@ export default function OkrManager() {
         </div>
       </Panel>
 
-      {/* Modal thêm Objective */}
+      {/* モーダル：Objective追加 */}
       {showNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />

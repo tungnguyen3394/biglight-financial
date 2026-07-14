@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// 物件・家賃管理 đã đổi thành 回収管理 (chung) tại /collection.
+// 物件・家賃管理は回収管理（/collection）に変更。
 export default function PropertiesPage() {
   redirect("/collection");
 }

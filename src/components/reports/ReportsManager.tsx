@@ -1,7 +1,7 @@
 "use client";
 
-// レポート — tổng hợp từ 売上 (bl_sales_v1) + 支出 (bl_expenses_v1).
-// Năm tài chính 8/1〜7/31. Xem 月次 / 四半期 / 年度比較 (so sánh các năm + 前年比).
+// レポート — 売上 (bl_sales_v1) と 支出 (bl_expenses_v1) を集計。
+// 会計年度 8/1〜7/31。月次 / 四半期 / 年度比較（複数年度・前年比）を表示。
 
 import { useEffect, useMemo, useState } from "react";
 import Panel from "@/components/ui/Panel";
@@ -26,7 +26,7 @@ function openPrint(title: string, bodyHtml: string) {
   setTimeout(() => w.print(), 300);
 }
 
-// Số liệu 1 kỳ (tháng / quý / năm).
+// 1期間（月次 / 四半期 / 年度）の数値。
 type PeriodRow = { rev: number; col: number; exp: number };
 const emptyRow = (): PeriodRow => ({ rev: 0, col: 0, exp: 0 });
 
@@ -44,7 +44,7 @@ export default function ReportsManager() {
     setFy(fiscalYearOf(new Date().toISOString().slice(0, 10)));
   }, []);
 
-  // Các năm tài chính có dữ liệu.
+  // データのある会計年度。
   const fys = useMemo(() => {
     const set = new Set<number>();
     for (const s of sales) { set.add(fiscalYearOf(s.saleDate)); for (const p of s.payments) set.add(fiscalYearOf(p.date)); }
@@ -52,19 +52,19 @@ export default function ReportsManager() {
     return Array.from(set).sort((a, b) => a - b);
   }, [sales, expenses]);
 
-  // Tổng theo "YYYY-MM".
+  // "YYYY-MM" ごとの集計。
   const byMonth = useMemo(() => {
     const map = new Map<string, PeriodRow>();
     const get = (ym: string) => { let r = map.get(ym); if (!r) { r = emptyRow(); map.set(ym, r); } return r; };
     for (const s of sales) {
-      if (!s.isForecast) get(s.saleDate.slice(0, 7)).rev += s.amount; // 予定売上 không tính doanh thu thật
+      if (!s.isForecast) get(s.saleDate.slice(0, 7)).rev += s.amount; // 予定売上は実売上に含めない
       for (const p of s.payments) get(p.date.slice(0, 7)).col += p.amount;
     }
     for (const e of expenses) get(e.date.slice(0, 7)).exp += e.amount;
     return map;
   }, [sales, expenses]);
 
-  // Tổng của 1 năm tài chính.
+  // 1会計年度の合計。
   const fyTotal = (y: number): PeriodRow => {
     const t = emptyRow();
     for (const ym of fiscalMonths(y)) {
@@ -82,14 +82,14 @@ export default function ReportsManager() {
   const profit = total.rev - total.exp;
   const margin = total.rev ? (profit / total.rev) * 100 : 0;
 
-  // Quý: gộp 3 tháng một.
+  // 四半期：3か月ごとに集計。
   const quarterRows = [0, 1, 2, 3].map((qi) => {
     const t = emptyRow();
     for (let i = qi * 3; i < qi * 3 + 3; i++) { t.rev += monthRows[i].rev; t.col += monthRows[i].col; t.exp += monthRows[i].exp; }
     return t;
   });
 
-  // So sánh các năm + 前年比.
+  // 年度比較 ＋ 前年比。
   const yearRows = fys.map((y) => {
     const t = fyTotal(y);
     return { fy: y, ...t, profit: t.rev - t.exp };
@@ -142,7 +142,7 @@ export default function ReportsManager() {
         <button onClick={printReport} className="ml-auto rounded-xl border border-line px-3 py-2 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">印刷 / PDF</button>
       </div>
 
-      {/* KPI năm đang chọn */}
+      {/* 選択年度のKPI */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           { l: "売上高", v: yen(total.rev), c: "text-ink" },
@@ -308,7 +308,7 @@ export default function ReportsManager() {
                 </tbody>
               </table>
             </div>
-            {yearRows.length < 2 && <p className="mt-3 text-[11px] text-slate-400">※ Dữ liệu mới có 1 năm — nếu vừa cập nhật, bấm「サンプルに戻す」ở trang 売上・回収 để nạp dữ liệu mẫu nhiều năm.</p>}
+            {yearRows.length < 2 && <p className="mt-3 text-[11px] text-slate-400">※ データが1年度分のみです。複数年度のサンプルを読み込むには、売上・回収ページで「サンプルに戻す」を押してください。</p>}
           </Panel>
         </>
       )}

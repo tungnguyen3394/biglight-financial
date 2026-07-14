@@ -6,7 +6,7 @@ export default function YojitsuPage() {
     <>
       <PageHeader
         title="予実管理"
-        subtitle="Kế hoạch (予算) vs Thực tế (実績) — 売上高・原価・粗利・販管費・営業利益 theo 12 tháng"
+        subtitle="予算 vs 実績 — 売上高・原価・粗利・販管費・営業利益を12ヶ月で対比"
       />
       <YojitsuManager />
     </>

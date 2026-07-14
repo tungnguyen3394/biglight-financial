@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Vào "/" → chuyển thẳng tới Dashboard.
+// "/" にアクセス → ダッシュボードへリダイレクト。
 export default function RootPage() {
   redirect("/dashboard");
 }

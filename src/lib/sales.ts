@@ -1,12 +1,12 @@
-// 売上・回収管理 — model theo TƯ DUY GỐC: 1 dòng chảy duy nhất.
+// 売上・回収管理 — 単一のデータフローで管理。
 //
-//   ① 売上登録 ──▶ tự sinh 売掛金 (khoản phải thu, có 入金期日)
-//   ② 入金記録 ──▶ trừ dần khoản phải thu
-//   ③ trạng thái TỰ TÍNH:  未回収 / 一部入金 / 回収済 / 延滞
+//   ① 売上登録 ──▶ 売掛金を自動生成（入金期日付き）
+//   ② 入金記録 ──▶ 売掛金を順次消し込み
+//   ③ 状態を自動判定：未回収 / 一部入金 / 回収済 / 延滞
 //
-// KHÔNG lưu trạng thái — luôn suy ra từ (金額, 入金 tổng, 期日, hôm nay).
+// 状態は保存せず、常に（金額・入金合計・期日・当日）から算出する。
 
-export type Payment = { date: string; amount: number }; // 入金 1 lần
+export type Payment = { date: string; amount: number }; // 入金1件
 
 export type Sale = {
   id: string;
@@ -16,12 +16,12 @@ export type Sale = {
   saleDate: string;   // 計上日 YYYY-MM-DD
   dueDate: string;    // 入金期日 YYYY-MM-DD
   payments: Payment[];
-  isForecast?: boolean; // true = 予定売上 (doanh thu DỰ KIẾN, chưa xác định) — không tính vào 売掛金
+  isForecast?: boolean; // true = 予定売上（未確定）— 売掛金に含めない
 };
 
 export const isFc = (s: Sale): boolean => !!s.isForecast;
 
-// OVERPAID = 過入金 (khách trả THỪA). PARTIAL = trả THIẾU (một phần).
+// OVERPAID = 過入金（払い過ぎ）。PARTIAL = 一部入金（不足）。
 export type SaleStatus = "PAID" | "PARTIAL" | "OPEN" | "OVERDUE" | "OVERPAID";
 
 export const STORAGE_KEY = "bl_sales_v1";
@@ -38,19 +38,19 @@ export const STATUS_TONE: Record<SaleStatus, string> = {
 };
 
 export const paidOf = (s: Sale): number => s.payments.reduce((t, p) => t + p.amount, 0);
-// Số dư thực: dương = còn thiếu, âm = trả thừa (過入金).
+// 実残高：正=不足、負=過入金。
 export const balanceOf = (s: Sale): number => s.amount - paidOf(s);
 export const remainOf = (s: Sale): number => Math.max(0, balanceOf(s));
 
 export function statusOf(s: Sale, today: string): SaleStatus {
   const bal = balanceOf(s);
-  if (bal < 0) return "OVERPAID";           // trả thừa
-  if (bal === 0) return "PAID";             // trả đúng
+  if (bal < 0) return "OVERPAID";           // 過入金
+  if (bal === 0) return "PAID";             // 完済
   if (today && s.dueDate < today) return "OVERDUE";
-  return paidOf(s) > 0 ? "PARTIAL" : "OPEN"; // trả thiếu / chưa trả
+  return paidOf(s) > 0 ? "PARTIAL" : "OPEN"; // 一部入金 / 未入金
 }
 
-// ---- Danh sách giao dịch trả SAI SỐ (đã có 入金 nhưng thừa/thiếu) ----
+// ---- 入金差異のある取引一覧（入金済だが過不足あり）----
 export type Discrepancy = { sale: Sale; diff: number }; // diff>0 = 不足, diff<0 = 過入金
 
 export function discrepancies(sales: Sale[]): Discrepancy[] {
@@ -65,7 +65,7 @@ export const daysLate = (s: Sale, today: string): number => {
   return Math.max(0, d);
 };
 
-// ---- Báo cáo công ty trả chậm ----
+// ---- 支払遅延企業のレポート ----
 export type OverdueRow = { customer: string; total: number; count: number; maxDays: number };
 
 export function overdueReport(sales: Sale[], today: string): OverdueRow[] {
@@ -81,22 +81,22 @@ export function overdueReport(sales: Sale[], today: string): OverdueRow[] {
   return Array.from(map.values()).sort((a, b) => b.maxDays - a.maxDays || b.total - a.total);
 }
 
-// ---- Tổng hợp theo KHÁCH HÀNG (cho chế độ xem 顧客別) ----
+// ---- 顧客別の集計（顧客別ビュー用）----
 export type CustomerSummary = {
   customer: string;
-  billed: number;       // 総売上 (tổng phải trả)
-  paid: number;         // 入金済 (tổng đã trả)
+  billed: number;       // 総売上
+  paid: number;         // 入金済
   remain: number;       // 残高
-  overdue: number;      // trong đó quá hạn
-  overpaid: number;     // 過入金 (trả thừa)
+  overdue: number;      // うち延滞
+  overpaid: number;     // 過入金
   salesCount: number;
-  lastPayment: string | null; // ngày trả tiền gần nhất
+  lastPayment: string | null; // 最終入金日
 };
 
 export function customerSummaries(sales: Sale[], today: string): CustomerSummary[] {
   const map = new Map<string, CustomerSummary>();
   for (const s of sales) {
-    if (isFc(s)) continue; // 予定売上 không tính vào công nợ
+    if (isFc(s)) continue; // 予定売上は債権に含めない
     const row = map.get(s.customer) ?? { customer: s.customer, billed: 0, paid: 0, remain: 0, overdue: 0, overpaid: 0, salesCount: 0, lastPayment: null };
     row.billed += s.amount;
     row.paid += paidOf(s);
@@ -110,8 +110,8 @@ export function customerSummaries(sales: Sale[], today: string): CustomerSummary
   return Array.from(map.values()).sort((a, b) => b.remain - a.remain);
 }
 
-// ---- Doanh thu theo danh sách tháng "YYYY-MM" (theo năm tài chính) ----
-// forecast=false → chỉ thực tế; true → chỉ dự kiến.
+// ---- 月別（"YYYY-MM"、会計年度）の売上 ----
+// forecast=false → 実績のみ / true → 予定のみ。
 export function revenueByMonths(sales: Sale[], months: string[], forecast: boolean): number[] {
   const idx = new Map(months.map((m, i) => [m, i]));
   const out = Array(months.length).fill(0) as number[];
@@ -123,7 +123,7 @@ export function revenueByMonths(sales: Sale[], months: string[], forecast: boole
   return out;
 }
 
-// ---- Tiền về (入金) theo danh sách tháng ----
+// ---- 月別の入金額 ----
 export function collectionsByMonths(sales: Sale[], months: string[]): number[] {
   const idx = new Map(months.map((m, i) => [m, i]));
   const out = Array(months.length).fill(0) as number[];
@@ -138,7 +138,7 @@ export function collectionsByMonths(sales: Sale[], months: string[]): number[] {
 
 export const yen = (n: number): string => "¥" + Math.round(n).toLocaleString("ja-JP");
 
-// ---- Dữ liệu mẫu: 12 giao dịch / 6 khách hàng (hôm nay ~2026-07) ----
+// ---- サンプルデータ：6顧客の取引（当日 ~2026-07）----
 export function sampleSales(): Sale[] {
   return [
     { id: "s01", customer: "株式会社アオイ工業", title: "特定技能 人材紹介（2名）", amount: 1800000, saleDate: "2026-07-01", dueDate: "2026-07-31", payments: [] },
@@ -153,14 +153,14 @@ export function sampleSales(): Sale[] {
     { id: "s10", customer: "ヤマト食品株式会社", title: "人材紹介（2名）", amount: 1600000, saleDate: "2026-06-15", dueDate: "2026-07-15", payments: [{ date: "2026-07-01", amount: 1600000 }] },
     { id: "s11", customer: "ヤマト食品株式会社", title: "登録支援委託費（7月分）", amount: 200000, saleDate: "2026-07-01", dueDate: "2026-07-31", payments: [] },
     { id: "s12", customer: "グリーン農園株式会社", title: "特定技能 人材紹介（4名）", amount: 3200000, saleDate: "2026-06-25", dueDate: "2026-07-25", payments: [{ date: "2026-07-03", amount: 1600000 }] },
-    // 過入金 (trả THỪA): chuyển nhầm 2 tháng phí — dư ¥200,000.
+    // 過入金：2カ月分を誤って振込 — ¥200,000の過剰。
     { id: "s13", customer: "ヤマト食品株式会社", title: "登録支援委託費（6月分）", amount: 200000, saleDate: "2026-06-01", dueDate: "2026-06-30", payments: [{ date: "2026-06-28", amount: 400000 }] },
-    // ---- Năm tài chính trước (2024年度 = 2024/8〜2025/7) — để so sánh 前年比 ở レポート ----
+    // ---- 前会計年度（2024年度 = 2024/8〜2025/7）— レポートの前年比用 ----
     { id: "s14", customer: "ミライフーズ株式会社", title: "人材紹介（1名）", amount: 800000, saleDate: "2024-10-15", dueDate: "2024-11-30", payments: [{ date: "2024-11-25", amount: 800000 }] },
     { id: "s15", customer: "サクラ建設", title: "人材紹介（2名）", amount: 1500000, saleDate: "2025-01-20", dueDate: "2025-02-28", payments: [{ date: "2025-02-20", amount: 1500000 }] },
     { id: "s16", customer: "株式会社アオイ工業", title: "人材紹介（1名）", amount: 900000, saleDate: "2025-04-10", dueDate: "2025-05-31", payments: [{ date: "2025-05-28", amount: 900000 }] },
     { id: "s17", customer: "有限会社ハルタ", title: "登録支援委託費", amount: 400000, saleDate: "2025-06-05", dueDate: "2025-07-15", payments: [{ date: "2025-07-10", amount: 400000 }] },
-    // ---- 予定売上 (doanh thu DỰ KIẾN cho các tháng tới) ----
+    // ---- 予定売上（今後の月の見込み）----
     { id: "s18", customer: "グリーン農園株式会社", title: "登録支援委託費（7月分・予定）", amount: 200000, saleDate: "2026-07-31", dueDate: "2026-08-31", payments: [], isForecast: true },
     { id: "s19", customer: "株式会社アオイ工業", title: "人材紹介（2名・内定済）", amount: 1800000, saleDate: "2026-08-10", dueDate: "2026-09-10", payments: [], isForecast: true },
     { id: "s20", customer: "サクラ建設", title: "人材紹介（2名・商談中）", amount: 1200000, saleDate: "2026-09-15", dueDate: "2026-10-15", payments: [], isForecast: true },

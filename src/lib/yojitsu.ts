@@ -1,19 +1,19 @@
-// 予実管理 v3 — theo NĂM TÀI CHÍNH 8/1〜7/31 (index 0 = 8月, 11 = 7月).
+// 予実管理 v3 — 会計年度 8/1〜7/31（index 0 = 8月, 11 = 7月）。
 //
 //   年度(FY) → { 予算(plan) , 実績(actual) } → 予実対比(差異・達成率・累計・各種前期比)
 //
-// - 予算(plan)  : đăng ký 1 lần cho cả năm (bấm「予算を登録」)
-// - 実績(actual): nhập dần theo từng tháng
-// - 粗利・営業利益 KHÔNG lưu — luôn tự tính.
+// - 予算(plan)  : 年間分を一括登録（「予算を登録」から）
+// - 実績(actual): 月ごとに順次入力
+// - 粗利・営業利益は保存せず、常に自動計算。
 
 export type InputMetric = "revenue" | "cogs" | "sga";
 export type MetricKey = InputMetric | "gross" | "operating";
 
-export type Book = Record<InputMetric, number[]>;   // mỗi mảng 12 tháng (0=8月)
+export type Book = Record<InputMetric, number[]>;   // 各配列は12ヶ月分（0=8月）
 export type YearData = { plan: Book; actual: Book };
-export type Store = Record<string, YearData>;        // key = năm tài chính (năm bắt đầu)
+export type Store = Record<string, YearData>;        // key = 会計年度（開始年）
 
-export const STORAGE_KEY = "bl_yojitsu_v3";          // v3: chuyển sang năm tài chính
+export const STORAGE_KEY = "bl_yojitsu_v3";          // v3: 会計年度ベースに移行
 export const FY_YEARS = [2024, 2025, 2026];
 
 export const METRICS: {
@@ -41,17 +41,17 @@ export function emptyYear(): YearData {
   return { plan: emptyBook(), actual: emptyBook() };
 }
 
-// Dữ liệu mẫu theo năm tài chính:
-//   2024年度 (2024/8〜2025/7): đủ 12 tháng thực tế — để so 前年比.
-//   2025年度 (2025/8〜2026/7): thực tế tới 6月, 7月 mới chạy vài ngày (một phần).
-//   2026年度: chỉ có kế hoạch (năm tới).
+// 会計年度別のサンプルデータ：
+//   2024年度 (2024/8〜2025/7): 実績12ヶ月分あり — 前年比の比較用。
+//   2025年度 (2025/8〜2026/7): 6月まで実績あり、7月は数日分のみ（一部）。
+//   2026年度: 予算のみ（翌年度）。
 export function sampleYear(fy: number): YearData {
   const base = fy === 2024 ? 10_500_000 : fy === 2025 ? 12_000_000 : 13_500_000;
   const revPlan = arr12((m) => base + m * 200_000);
   const actualMonths = fy <= 2024 ? 12 : fy === 2025 ? 12 : 0;
   const revActual = arr12((m) => {
     if (m >= actualMonths) return 0;
-    if (fy === 2025 && m === 11) return Math.round(revPlan[m] * 0.18); // 7月 mới 6 ngày
+    if (fy === 2025 && m === 11) return Math.round(revPlan[m] * 0.18); // 7月は6日分のみ
     return Math.round(revPlan[m] * (0.93 + ((m * 7) % 12) / 100));
   });
   const plan: Book = {
@@ -64,7 +64,7 @@ export function sampleYear(fy: number): YearData {
     cogs: revActual.map((v) => (v ? Math.round(v * 0.56) : 0)),
     sga: arr12((m) => (m < actualMonths ? (fy === 2024 ? 3_250_000 : 3_500_000) + (m % 3) * 60_000 : 0)),
   };
-  if (fy === 2025) actual.sga[11] = 600_000; // 7月 một phần
+  if (fy === 2025) actual.sga[11] = 600_000; // 7月は一部
   return { plan, actual };
 }
 

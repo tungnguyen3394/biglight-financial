@@ -12,7 +12,7 @@ import { fiscalLabel, fiscalYearOf, FY_MONTH_LABELS } from "@/lib/fiscal";
 
 const emptyCol = { itemId: "", targetId: "", amount: "", date: "", method: "振込" as PayMethod, memo: "" };
 
-// Render cây đối tượng (đệ quy) cho MASTER — sửa tại chỗ.
+// マスタ用の対象ツリー（再帰）をレンダリング — その場で編集。
 function NodeRows({ nodes, itemId, path, onPatch, onAdd, onDel, onMove }: {
   nodes: Target[]; itemId: string; path: string[];
   onPatch: (p: string[], patch: Partial<Target>) => void; onAdd: (p: string[]) => void; onDel: (p: string[]) => void; onMove: (p: string[], d: -1 | 1) => void;
@@ -48,7 +48,7 @@ function NodeRows({ nodes, itemId, path, onPatch, onAdd, onDel, onMove }: {
   );
 }
 
-// Render cây trong BÁO CÁO (chỉ đọc): tên · 予定 · 実回収 · 未回収.
+// レポート用の対象ツリー（読み取り専用）：名称 · 予定 · 実回収 · 未回収。
 function ReportTree({ nodes, path, store, ym }: { nodes: Target[]; path: string[]; store: CollectStore; ym: string }) {
   return (
     <>
@@ -80,7 +80,7 @@ export default function CollectionManager() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCol, setShowCol] = useState(false);
   const [cDraft, setCDraft] = useState(emptyCol);
-  const [newAcc, setNewAcc] = useState("");        // 勘定科目 (index) chọn để thêm項目
+  const [newAcc, setNewAcc] = useState("");        // 項目追加用に選択する勘定科目（index）
   const [newMonthly, setNewMonthly] = useState(true);
   const ready = useRef(false);
 
@@ -135,7 +135,7 @@ export default function CollectionManager() {
 
   return (
     <div className="space-y-6">
-      {/* Cách hiểu */}
+      {/* 用語の説明 */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-3xl border border-line/70 bg-white px-5 py-3.5 text-sm shadow-card">
         <span className="font-black text-ink">仕組み：</span>
         <span className="text-muted"><b className="text-rose-600">支出</b> = 会社が立替えた金額</span>
@@ -154,7 +154,7 @@ export default function CollectionManager() {
         </div>
       </div>
 
-      {/* ===== BÁO CÁO ===== */}
+      {/* ===== レポート ===== */}
       <Panel title={`📊 回収サマリー（${ym}）`} action={<span className="text-[11px] text-slate-400">行をクリックで対象の内訳を表示</span>}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">

@@ -1,9 +1,9 @@
-// 売上明細 — DANH SÁCH CHUẨN phát sinh doanh thu theo công ty (kiểu bảng ミーティング報告書).
+// 売上明細 — 会社別の売上発生を管理する標準リスト（ミーティング報告書形式）。
 //
-// Mỗi dòng = 1 công ty × 1 tháng: 担当・区分・人数・売上・粗利.
-//   定期(recurring): khi thêm → TỰ điền sang các tháng sau tới cuối năm tài chính (7月).
-//   不定期(spot):    chỉ tồn tại ở đúng tháng đó (thời vụ, không tự nhân bản).
-//   状態: 予定(forecast) → 確定(confirmed).  → sinh ra số cho báo cáo doanh thu (実績＋見込).
+// 1行 = 1社 × 1か月: 担当・区分・人数・売上・粗利。
+//   定期(recurring): 追加時に会計年度末(7月)まで自動で各月へ展開。
+//   不定期(spot):    その月だけに存在（単発、自動展開なし）。
+//   状態: 予定(forecast) → 確定(confirmed)。売上レポートの数値（実績＋見込）を生成。
 
 import { fiscalMonths, fiscalYearOf } from "./fiscal";
 
@@ -11,16 +11,16 @@ export type LineStatus = "forecast" | "confirmed"; // 予定 / 確定
 
 export type RevLine = {
   id: string;
-  ym: string;          // "2025-08" — tháng dòng này thuộc về
+  ym: string;          // "2025-08" — この行が属する月
   customer: string;    // 会社名
   owner: string;       // 担当
   category: string;    // 区分
   headcount: number;   // 人数
   amount: number;      // 売上
   cost: number;        // 売上原価 (粗利 = amount − cost)
-  recurring: boolean;  // 定期 = tự nhân bản sang tháng sau
+  recurring: boolean;  // 定期 = 翌月以降に自動展開
   status: LineStatus;  // 予定 / 確定
-  seriesId?: string;   // liên kết chuỗi 定期 để xóa/sửa cả chuỗi
+  seriesId?: string;   // 定期の系列リンク（系列単位で削除・編集）
 };
 
 export const STORAGE_KEY = "bl_uriage_v1";
@@ -43,7 +43,7 @@ export function aggregate(lines: RevLine[]): Agg {
 export const yen = (n: number): string => "¥" + Math.round(n).toLocaleString("ja-JP");
 export const uid = (): string => "l" + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
 
-// Nhân bản 1 dòng 定期 từ tháng bắt đầu tới hết năm tài chính (7月).
+// 定期明細を開始月から会計年度末(7月)まで展開。
 export function expandRecurring(base: Omit<RevLine, "id" | "ym" | "seriesId">, startYm: string): RevLine[] {
   const months = fiscalMonths(fiscalYearOf(startYm));
   const startIdx = months.indexOf(startYm);
@@ -56,7 +56,7 @@ export function expandRecurring(base: Omit<RevLine, "id" | "ym" | "seriesId">, s
   return out;
 }
 
-// ---------- Dữ liệu mẫu (dựa trên bảng thật của bạn) ----------
+// ---------- サンプルデータ（実データを基に作成） ----------
 type Seed = { customer: string; owner: string; amount: number; hc: number; cat?: string };
 const SEED_RECURRING: Seed[] = [
   { customer: "株式会社志葉屋", owner: "フン", amount: 18000, hc: 1 },
@@ -102,7 +102,7 @@ export function sampleLines(): RevLine[] {
   return out;
 }
 
-// ---------- Đọc 予算 tháng từ 予実管理 (bl_yojitsu_v3) ----------
+// ---------- 予実管理 (bl_yojitsu_v3) から月次予算を読み込む ----------
 export function readBudgetSeries(fy: number): number[] {
   if (typeof window === "undefined") return Array(12).fill(0);
   try {

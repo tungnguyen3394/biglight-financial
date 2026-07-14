@@ -6,7 +6,7 @@ import { yen } from "@/lib/format";
 export default function DashboardPage() {
   return (
     <div className="space-y-6">
-      {/* 8 thẻ tổng quan */}
+      {/* 概要カード8枚 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {DASHBOARD_STATS.map((s) => <StatCard key={s.key} stat={s} />)}
       </div>
@@ -60,7 +60,7 @@ export default function DashboardPage() {
       </div>
 
       <p className="text-center text-[11px] text-slate-400">
-        ※ Giai đoạn 1 hiển thị dữ liệu mẫu. Giai đoạn 2 sẽ nối database thật (Prisma / PostgreSQL).
+        ※ フェーズ1はサンプルデータを表示。フェーズ2で実データベース（Prisma / PostgreSQL）に接続予定。
       </p>
     </div>
   );

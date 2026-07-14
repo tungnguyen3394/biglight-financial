@@ -1,6 +1,6 @@
-// User管理 — nhân viên + PHÂN QUYỀN xem từng module.
-// perms: moduleKey (theo lib/nav.ts) → true/false (được xem hay không).
-// Admin bật/tắt từng ô trong ma trận quyền.
+// ユーザー管理 — 従業員とモジュール別の閲覧権限。
+// perms: moduleKey（lib/nav.ts 準拠）→ true/false（閲覧可否）。
+// 管理者が権限マトリクスの各項目を切り替える。
 
 import { NAV } from "./nav";
 
@@ -26,7 +26,7 @@ export const ROLE_TONE: Record<Role, string> = {
   VIEWER: "bg-slate-100 text-slate-500",
 };
 
-// Bộ quyền mặc định theo vai trò (admin có thể chỉnh từng ô sau).
+// ロール別の初期権限（管理者が後から各項目を調整可能）。
 export function presetPerms(role: Role): Record<string, boolean> {
   const all = (v: boolean) => Object.fromEntries(MODULE_KEYS.map((k) => [k, v]));
   if (role === "ADMIN") return all(true);

@@ -6,7 +6,7 @@ export default function CustomersPage() {
     <>
       <PageHeader
         title="顧客・契約管理"
-        subtitle="Khách hàng & hợp đồng — bấm vào từng khách để xem/thêm 契約"
+        subtitle="顧客・契約 — 顧客をクリックして契約を表示・追加"
       />
       <CustomersManager />
     </>

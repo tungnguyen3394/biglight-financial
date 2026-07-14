@@ -1,4 +1,4 @@
-// Bộ icon nội bộ (SVG) — không phụ thuộc thư viện ngoài.
+// 内部アイコン（SVG）— 外部ライブラリ非依存。
 import type { IconName } from "@/lib/nav";
 
 const PATHS: Record<IconName, React.ReactNode> = {

@@ -1,44 +1,44 @@
-// 回収管理 — quản lý THU HỒI TIỀN chung (立替・未収 recovery), kiểu phần mềm kế toán.
+// 回収管理 — 立替・未収の回収を会計ソフト風に管理。
 //
-// Ý tưởng: mỗi 勘定科目 cần thu hồi = 1 "回収項目".
-//   Mỗi項目 có CÂY ĐỐI TƯỢNG nhiều tầng (tùy độ sâu):
-//     地代家賃 → 物件A → Aさん / Bさん / Dさん  (mỗi người 1 số 予定回収)
-//     社員貸付 → フン / トゥン                   (1 tầng)
-//   Mỗi node có:  支出(立替=会社が出した)  +  予定回収(số cần thu ở node/người này)
-//   回収記録 (CollectRecord) = tiền THỰC THU theo từng đối tượng.
+// 考え方: 回収が必要な勘定科目ごとに 1 つの「回収項目」。
+//   各項目は多階層の対象ツリーを持つ（深さは任意）:
+//     地代家賃 → 物件A → Aさん / Bさん / Dさん  （各人に予定回収額）
+//     社員貸付 → フン / トゥン                   （1 階層）
+//   各ノード:  支出（立替＝会社が支払った額）  +  予定回収（このノード/人から回収する額）
+//   回収記録 (CollectRecord) = 対象ごとの実回収額。
 //
-// Báo cáo mỗi項目:  支出 − 実回収 = 実質負担 ／ 予定回収 − 実回収 = 未回収.
+// 各項目のレポート:  支出 − 実回収 = 実質負担 ／ 予定回収 − 実回収 = 未回収。
 //
-// Nguyên tắc: Master (項目・対象) và Transaction (回収記録) tách bảng.
+// 原則: マスタ（項目・対象）とトランザクション（回収記録）はテーブルを分離。
 
 import { fiscalMonths } from "./fiscal";
 
 export type PayMethod = "自動引き落とし" | "振込" | "現金" | "給与天引き";
 export const PAY_METHODS: PayMethod[] = ["振込", "現金", "自動引き落とし", "給与天引き"];
 
-// Node đối tượng — đệ quy nhiều tầng.
+// 対象ノード — 多階層の再帰構造。
 export type Target = {
   id: string;
   name: string;       // 物件A / Aさん / 社員名…
-  paidOut: number;    // 支出 (会社が立替えた金額) tại node này
-  expected: number;   // 予定回収額 (số cần thu ở node/người này)
+  paidOut: number;    // 支出（このノードで会社が立替えた金額）
+  expected: number;   // 予定回収額（このノード/人から回収する額）
   order: number;
   children: Target[];
 };
 
 export type CollectItem = {
   id: string;
-  name: string;       // 勘定科目 (地代家賃 / 社員貸付 / 立替金…) — chọn từ 勘定科目マスタ
+  name: string;       // 勘定科目 (地代家賃 / 社員貸付 / 立替金…) — 勘定科目マスタから選択
   order: number;
-  monthly: boolean;   // true=毎月 (予定 lặp mỗi tháng) / false=一括 (予定 là tổng 1 lần)
-  accountKeys?: string[]; // liên kết 勘定科目マスタ
+  monthly: boolean;   // true=毎月（予定は毎月繰り返し） / false=一括（予定は総額1回）
+  accountKeys?: string[]; // 勘定科目マスタとの紐付け
   targets: Target[];
 };
 
 export type CollectRecord = {
   id: string;
   itemId: string;
-  targetId: string;   // đối tượng (leaf) đã thu
+  targetId: string;   // 回収した対象（末端ノード）
   ym: string;         // 対象月
   amount: number;
   date: string;       // 回収日
@@ -52,14 +52,14 @@ export const STORAGE_KEY = "bl_collect_v1";
 export const yen = (n: number): string => "¥" + Math.round(n).toLocaleString("ja-JP");
 export const uid = (): string => "t" + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
 
-// ---- duyệt cây ----
+// ---- ツリー走査 ----
 export function walk(targets: Target[], fn: (t: Target, depth: number, parent: Target | null) => void, depth = 0, parent: Target | null = null): void {
   for (const t of [...targets].sort((a, b) => a.order - b.order)) { fn(t, depth, parent); walk(t.children, fn, depth + 1, t); }
 }
 export function sumPaidOut(targets: Target[]): number { let s = 0; walk(targets, (t) => (s += t.paidOut)); return s; }
 export function sumExpected(targets: Target[]): number { let s = 0; walk(targets, (t) => (s += t.expected)); return s; }
 
-// Danh sách phẳng leaf (để chọn khi ghi 回収).
+// 末端ノードのフラットな一覧（回収記録時の選択用）。
 export type LeafRef = { itemId: string; itemName: string; targetId: string; label: string; expected: number };
 export function leafTargets(items: CollectItem[]): LeafRef[] {
   const out: LeafRef[] = [];
@@ -79,7 +79,7 @@ export const nameOfTarget = (items: CollectItem[], itemId: string, targetId: str
   return res;
 };
 
-// ---- báo cáo ----
+// ---- レポート ----
 export type ItemRow = { item: CollectItem; paidOut: number; expected: number; collected: number; uncollected: number; net: number };
 export function itemReport(store: CollectStore, ym: string): ItemRow[] {
   return [...store.items].sort((a, b) => a.order - b.order).map((item) => {
@@ -89,18 +89,18 @@ export function itemReport(store: CollectStore, ym: string): ItemRow[] {
     return { item, paidOut, expected, collected, uncollected: Math.max(0, expected - collected), net: paidOut - collected };
   });
 }
-// 回収 thực thu theo target trong tháng.
+// その月の対象ごとの実回収額。
 export const collectedOfTarget = (store: CollectStore, targetId: string, ym: string): number =>
   store.records.filter((r) => r.targetId === targetId && r.ym === ym).reduce((t, r) => t + r.amount, 0);
 
-// ---- Lịch sử 12 tháng (theo năm tài chính) + 残高 mỗi đối tượng ----
+// ---- 12ヶ月の履歴（会計年度単位）＋ 対象ごとの残高 ----
 export type HistoryRow = {
   itemId: string; itemName: string; monthly: boolean; targetId: string; label: string;
-  expected: number;      // 予定 mỗi tháng (毎月) hoặc tổng (一括)
-  months: number[];      // 12 tháng: số thực thu
-  collectedYear: number; // tổng thu trong năm
-  expectedYear: number;  // 予定 cả năm (毎月→×12 / 一括→giữ nguyên)
-  balance: number;       // 残高 = 予定 − 実回収 (số còn nợ)
+  expected: number;      // 予定（毎月＝月額 / 一括＝総額）
+  months: number[];      // 12ヶ月: 実回収額
+  collectedYear: number; // 年間の回収合計
+  expectedYear: number;  // 年間の予定（毎月→×12 / 一括→そのまま）
+  balance: number;       // 残高 = 予定 − 実回収（未回収額）
 };
 export function history(store: CollectStore, fy: number): HistoryRow[] {
   const months = fiscalMonths(fy);
@@ -119,7 +119,7 @@ export function history(store: CollectStore, fy: number): HistoryRow[] {
   }
   return out;
 }
-// 残高 hiện tại của 1 đối tượng (đến hết tháng đang xem) — dùng ở form nhập.
+// 対象1件の現在残高（表示中の月末時点）— 入力フォームで使用。
 export function balanceOfTarget(store: CollectStore, item: CollectItem, target: Target, fy: number): number {
   const months = fiscalMonths(fy);
   const collected = months.reduce((t, ym) => t + collectedOfTarget(store, target.id, ym), 0);
@@ -127,7 +127,7 @@ export function balanceOfTarget(store: CollectStore, item: CollectItem, target: 
   return expectedYear - collected;
 }
 
-// ---- sửa cây (immutable, path = mảng id) ----
+// ---- ツリー編集（immutable、path = id の配列） ----
 function mapTree(targets: Target[], path: string[], fn: (list: Target[]) => Target[]): Target[] {
   if (path.length === 0) return fn(targets);
   return targets.map((t) => t.id === path[0] ? { ...t, children: mapTree(t.children, path.slice(1), fn) } : t);
@@ -152,7 +152,7 @@ export function moveNode(targets: Target[], path: string[], dir: -1 | 1): Target
   });
 }
 
-// ---- dữ liệu mẫu ----
+// ---- サンプルデータ ----
 export function sampleCollect(): CollectStore {
   const T = (id: string, name: string, paidOut: number, expected: number, order: number, children: Target[] = []): Target => ({ id, name, paidOut, expected, order, children });
   const items: CollectItem[] = [

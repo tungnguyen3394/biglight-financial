@@ -6,7 +6,7 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="User管理"
-        subtitle="Nhân viên & phân quyền — admin bật/tắt module mỗi người được xem"
+        subtitle="従業員と権限管理 — 各ユーザーの閲覧モジュールを管理者が設定"
       />
       <UsersManager />
     </>

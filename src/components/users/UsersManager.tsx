@@ -14,7 +14,7 @@ const emptyDraft = { name: "", email: "", dept: DEPTS[1], role: "STAFF" as Role 
 
 export default function UsersManager() {
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [permFor, setPermFor] = useState<string | null>(null); // user id đang chỉnh quyền
+  const [permFor, setPermFor] = useState<string | null>(null); // 権限編集中のユーザーID
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
   const ready = useRef(false);
@@ -119,7 +119,7 @@ export default function UsersManager() {
         </div>
       </Panel>
 
-      {/* ===== Modal: ma trận quyền ===== */}
+      {/* ===== モーダル：権限マトリクス ===== */}
       {target && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setPermFor(null)} />
@@ -127,13 +127,13 @@ export default function UsersManager() {
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div>
                 <h3 className="text-base font-black text-ink">権限設定 — {target.name}</h3>
-                <p className="text-[11px] text-muted">Bật/tắt module mà người này ĐƯỢC XEM. Menu của họ chỉ hiện module được bật.</p>
+                <p className="text-[11px] text-muted">このユーザーが閲覧できるモジュールを設定します。メニューには有効なモジュールのみ表示されます。</p>
               </div>
               <button onClick={() => setPermFor(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる">✕</button>
             </div>
 
             <div className="overflow-auto p-5">
-              {/* preset theo role */}
+              {/* ロール別プリセット */}
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold text-muted">ロール一括適用：</span>
                 {ROLES.map((r) => (
@@ -144,7 +144,7 @@ export default function UsersManager() {
                 ))}
               </div>
 
-              {/* ma trận module */}
+              {/* モジュールマトリクス */}
               <div className="divide-y divide-line rounded-xl border border-line">
                 {NAV.map((n) => {
                   const on = !!target.perms[n.key];
@@ -171,7 +171,7 @@ export default function UsersManager() {
         </div>
       )}
 
-      {/* ===== Modal: thêm user ===== */}
+      {/* ===== モーダル：ユーザー追加 ===== */}
       {showNew && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />
@@ -204,7 +204,7 @@ export default function UsersManager() {
                   </select>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400">※ Quyền xem module sẽ áp bộ mặc định theo ロール — thêm xong có thể chỉnh từng ô ở「権限設定」.</p>
+              <p className="text-[11px] text-slate-400">※ モジュール閲覧権限はロール別の初期値が適用されます。追加後に「権限設定」で個別に調整できます。</p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setShowNew(false)} className="rounded-xl border border-line px-4 py-2 text-sm font-bold text-muted hover:bg-surface">キャンセル</button>

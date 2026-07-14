@@ -53,7 +53,7 @@ export default function SalesManager() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [today, setToday] = useState("");
   const [fy, setFy] = useState(2025);
-  const [mi, setMi] = useState(11); // chỉ số tháng tài chính hiện tại (0=8月)
+  const [mi, setMi] = useState(11); // 現在の会計月インデックス（0=8月）
   const [cum, setCum] = useState(false);
   const [view, setView] = useState<"list" | "customer">("list");
   const [filter, setFilter] = useState<Filter>("ALL");
@@ -85,7 +85,7 @@ export default function SalesManager() {
   const customers = useMemo(() => Array.from(new Set(sales.map((s) => s.customer))).sort(), [sales]);
   const thisMonth = today.slice(0, 7);
 
-  // ===== Thẻ tổng (loại trừ 予定売上 khỏi tiền thật) =====
+  // ===== 集計カード（予定売上は実額から除外）=====
   const stats = useMemo(() => {
     let monthSales = 0, unpaid = 0, overdue = 0, overdueCnt = 0, monthCollected = 0, overpaid = 0, overpaidCnt = 0, fcTotal = 0;
     for (const s of sales) {
@@ -101,7 +101,7 @@ export default function SalesManager() {
     return { monthSales, unpaid, overdue, overdueCnt, monthCollected, overpaid, overpaidCnt, fcTotal };
   }, [sales, today, thisMonth]);
 
-  // ===== Mảng theo năm tài chính (cho so sánh + biểu đồ) =====
+  // ===== 会計年度別の配列（比較・グラフ用）=====
   const months = useMemo(() => fiscalMonths(fy), [fy]);
   const prevMonths = useMemo(() => fiscalMonths(fy - 1), [fy]);
   const actualRev = useMemo(() => revenueByMonths(sales, months, false), [sales, months]);
@@ -113,7 +113,7 @@ export default function SalesManager() {
   const combRev = actualRev.map((v, i) => v + fcRev[i]); // 予定込み
   const outlook = sumRange(actualRev, 0, 11) + sumRange(fcRev, 0, 11); // 年度見通し
 
-  // Bảng so sánh: 3 dòng.
+  // 比較表：3行。
   const compareRows = [
     { label: "売上高（実績）", c: compareSeries(actualRev, prevRev, mi), strong: true },
     { label: "売上高（予定込み）", c: compareSeries(combRev, prevRev, mi), strong: false },
@@ -150,7 +150,7 @@ export default function SalesManager() {
     return { rows, fcRows, payments, billed, paid, remain: rows.reduce((t, s) => t + remainOf(s), 0), overdue, overpaid };
   }, [detail, sales, today]);
 
-  // ===== thao tác =====
+  // ===== 操作 =====
   function addSale() {
     if (!draft.customer || !draft.amount || !draft.saleDate || !draft.dueDate) { alert("顧客名・金額・計上日・入金期日は必須です。"); return; }
     setSales((prev) => [{
@@ -229,11 +229,11 @@ export default function SalesManager() {
 
   return (
     <div className="space-y-6">
-      {/* ===== Sơ đồ dòng chảy ===== */}
+      {/* ===== フロー図 ===== */}
       <div className="flex flex-wrap items-stretch gap-2 rounded-2xl border border-line bg-white p-3 shadow-card">
         {[
-          { n: "①", t: "売上登録", d: "実績 hoặc 予定（dự kiến）", tone: "bg-brand-50 text-brand-700" },
-          { n: "②", t: "入金記録", d: "Tiền về → trừ dần phải thu", tone: "bg-emerald-50 text-emerald-700" },
+          { n: "①", t: "売上登録", d: "実績または予定", tone: "bg-brand-50 text-brand-700" },
+          { n: "②", t: "入金記録", d: "入金で売掛金を消し込み", tone: "bg-emerald-50 text-emerald-700" },
           { n: "③", t: "回収・分析", d: "延滞・過不足・累計・前期比", tone: "bg-violet-50 text-violet-700" },
         ].map((s, i) => (
           <div key={s.n} className="flex flex-1 items-center gap-2">
@@ -246,15 +246,15 @@ export default function SalesManager() {
         ))}
       </div>
 
-      {/* ===== 6 thẻ tổng hợp ===== */}
+      {/* ===== 集計カード6枚 ===== */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
         {[
-          { label: "今月売上", vi: "Doanh thu tháng này", value: yen(stats.monthSales), cls: "text-ink" },
-          { label: "予定売上", vi: "DT dự kiến (tương lai)", value: yen(stats.fcTotal), cls: "text-sky-600" },
-          { label: "未回収残高", vi: "Tiền cần thu", value: yen(stats.unpaid), cls: "text-amber-600" },
-          { label: "延滞金額", vi: `Quá hạn — ${stats.overdueCnt}件`, value: yen(stats.overdue), cls: "text-red-600" },
-          { label: "過入金", vi: `Trả thừa — ${stats.overpaidCnt}件`, value: yen(stats.overpaid), cls: "text-violet-600" },
-          { label: "今月回収額", vi: "Tiền về trong tháng", value: yen(stats.monthCollected), cls: "text-emerald-600" },
+          { label: "今月売上", vi: "当月の売上高", value: yen(stats.monthSales), cls: "text-ink" },
+          { label: "予定売上", vi: "今後の見込み", value: yen(stats.fcTotal), cls: "text-sky-600" },
+          { label: "未回収残高", vi: "回収予定額", value: yen(stats.unpaid), cls: "text-amber-600" },
+          { label: "延滞金額", vi: `期限超過 — ${stats.overdueCnt}件`, value: yen(stats.overdue), cls: "text-red-600" },
+          { label: "過入金", vi: `払い過ぎ — ${stats.overpaidCnt}件`, value: yen(stats.overpaid), cls: "text-violet-600" },
+          { label: "今月回収額", vi: "当月の入金", value: yen(stats.monthCollected), cls: "text-emerald-600" },
         ].map((c) => (
           <div key={c.label} className="rounded-2xl border border-line bg-white p-4 shadow-card">
             <p className="text-xs font-bold text-muted">{c.label}</p>
@@ -264,7 +264,7 @@ export default function SalesManager() {
         ))}
       </div>
 
-      {/* ===== 📊 売上サマリー (累計・前期比 — 1 trang thấy hết) ===== */}
+      {/* ===== 📊 売上サマリー（累計・前期比を1画面で表示）===== */}
       <Panel title={`📊 売上サマリー（${fiscalLabel(fy)} ・ 対象月 ${FY_MONTH_LABELS[mi]}）`}
         action={
           <div className="flex items-center gap-2">
@@ -318,7 +318,7 @@ export default function SalesManager() {
       </Panel>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* ===== Biểu đồ năm tài chính: 実績 + 予定 ===== */}
+        {/* ===== 会計年度グラフ：実績 + 予定 ===== */}
         <Panel title={`売上 月次推移（実績＋予定）${cum ? " — 累計" : ""}`} className="lg:col-span-2"
           action={
             <label className="flex cursor-pointer items-center gap-1.5 text-xs font-bold text-muted">
@@ -398,7 +398,7 @@ export default function SalesManager() {
                     </td>
                     <td className="py-3 text-center">
                       <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${diff > 0 ? "bg-red-50 text-red-600" : "bg-violet-50 text-violet-600"}`}>
-                        {diff > 0 ? "trả thiếu" : "trả thừa"}
+                        {diff > 0 ? "不足" : "過入金"}
                       </span>
                     </td>
                     <td className="py-3 text-right">
@@ -418,7 +418,7 @@ export default function SalesManager() {
         </Panel>
       )}
 
-      {/* ===== Danh sách chính ===== */}
+      {/* ===== メイン一覧 ===== */}
       <Panel
         title={view === "list" ? "売上・売掛金一覧" : "顧客別 回収状況"}
         action={
@@ -555,7 +555,7 @@ export default function SalesManager() {
         )}
       </Panel>
 
-      {/* ===== Modal: chi tiết khách hàng ===== */}
+      {/* ===== モーダル：顧客明細 ===== */}
       {detail && detailData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setDetail(null)} />
@@ -578,7 +578,7 @@ export default function SalesManager() {
                   { l: "入金済合計", v: yen(detailData.paid), c: "text-emerald-600" },
                   { l: "未回収残高", v: yen(detailData.remain), c: detailData.remain ? "text-amber-600" : "text-slate-400" },
                   { l: "うち延滞", v: yen(detailData.overdue), c: detailData.overdue ? "text-red-600" : "text-slate-400" },
-                  { l: "過入金（trả thừa）", v: yen(detailData.overpaid), c: detailData.overpaid ? "text-violet-600" : "text-slate-400" },
+                  { l: "過入金", v: yen(detailData.overpaid), c: detailData.overpaid ? "text-violet-600" : "text-slate-400" },
                 ].map((x) => (
                   <div key={x.l} className="rounded-xl bg-surface px-3.5 py-3">
                     <p className="text-[11px] font-bold text-muted">{x.l}</p>
@@ -635,10 +635,10 @@ export default function SalesManager() {
                 </div>
               </div>
 
-              {/* 予定売上 của khách này */}
+              {/* この顧客の予定売上 */}
               {detailData.fcRows.length > 0 && (
                 <div>
-                  <h4 className="mb-2 text-sm font-black text-sky-700">🔭 予定売上（doanh thu dự kiến）</h4>
+                  <h4 className="mb-2 text-sm font-black text-sky-700">🔭 予定売上（見込み）</h4>
                   <div className="overflow-x-auto rounded-xl border border-sky-200">
                     <table className="w-full min-w-[460px] text-sm">
                       <tbody className="divide-y divide-line">
@@ -660,7 +660,7 @@ export default function SalesManager() {
               )}
 
               <div>
-                <h4 className="mb-2 text-sm font-black text-ink">入金履歴（ngày trả tiền）</h4>
+                <h4 className="mb-2 text-sm font-black text-ink">入金履歴</h4>
                 {detailData.payments.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-xs text-muted">入金履歴はまだありません。</p>
                 ) : (
@@ -691,13 +691,13 @@ export default function SalesManager() {
         </div>
       )}
 
-      {/* ===== Modal: ① 売上登録 (実績/予定) ===== */}
+      {/* ===== モーダル：① 売上登録（実績/予定）===== */}
       {showNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <h3 className="mb-1 text-base font-black text-ink">① 売上を登録</h3>
-            <p className="mb-4 text-[11px] text-muted">実績 = doanh thu đã chốt (thành 売掛金) ・ 予定 = dự kiến cho tháng sau.</p>
+            <p className="mb-4 text-[11px] text-muted">実績 = 確定した売上（売掛金化）・ 予定 = 翌月以降の見込み。</p>
             <div className="space-y-3">
               {/* 実績/予定 switch */}
               <div className="flex overflow-hidden rounded-xl border border-line">
@@ -736,7 +736,7 @@ export default function SalesManager() {
               </div>
               {draft.isForecast && (
                 <p className="rounded-xl bg-sky-50 px-3 py-2 text-[11px] text-sky-700">
-                  💡 予定売上 không tính vào 売掛金/延滞. Khi chốt đơn → bấm「実績に確定」để chuyển thành doanh thu thật.
+                  💡 予定売上は売掛金・延滞に含まれません。受注が確定したら「実績に確定」を押して実売上に変換してください。
                 </p>
               )}
             </div>

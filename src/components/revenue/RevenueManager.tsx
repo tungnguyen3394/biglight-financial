@@ -4,14 +4,41 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
 import {
   STORAGE_KEY, DEFAULT_SETTINGS, STATUS_LABEL, STATUS_TONE,
-  sampleStore, statusOf, taxIn, grossOf, paidOf, remainOf, balanceOf, daysLate,
+  sampleStore, statusOf, taxIn, paidOf, remainOf, balanceOf, daysLate,
   aggregate, expandRecurring, readBudgetSeries, endOfNextMonth, uid, yen,
-  type RevStore, type RevLine, type Payment, type CollectStatus,
+  type RevStore, type RevLine, type Payment,
 } from "@/lib/revenue";
 import { fiscalMonths, fiscalLabel, fiscalYearOf, fiscalMonthIndex, FY_MONTH_LABELS } from "@/lib/fiscal";
 
 const nowIso = () => new Date().toISOString();
 const fmtDT = (iso: string) => { try { return iso.replace("T", " ").slice(0, 16); } catch { return iso; } };
+
+/* ===== 線アイコン（外部ライブラリ非依存・SVG line） ===== */
+const ICONS: Record<string, React.ReactNode> = {
+  left: <path d="m15 6-6 6 6 6" />,
+  right: <path d="m9 6 6 6-6 6" />,
+  gear: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>,
+  x: <path d="M6 6l12 12M18 6 6 18" />,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  coins: <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></>,
+  alert: <><path d="M12 3 21 19H3z" /><path d="M12 10v4M12 17h.01" /></>,
+  check: <path d="M20 6 9 17l-5-5" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  pencil: <><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" /></>,
+  trash: <><path d="M3 6h18" /><path d="M8 6V4h8v2M6 6l1 14h10l1-14" /></>,
+  arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
+  in: <><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></>,
+  out: <><path d="M12 20V9" /><path d="M7 14l5-5 5 5" /><path d="M5 4h14" /></>,
+  printer: <><path d="M6 9V3h12v6" /><rect x="4" y="9" width="16" height="8" rx="1.5" /><path d="M8 17h8v4H8z" /></>,
+};
+function Ic({ n, size = 16, className = "" }: { n: string; size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      {ICONS[n]}
+    </svg>
+  );
+}
 
 function openPrint(title: string, body: string) {
   const w = window.open("", "_blank", "width=1050,height=740");
@@ -29,6 +56,7 @@ function openPrint(title: string, body: string) {
 }
 
 const emptyDraft = { customer: "", owner: "", category: "", headcount: "", amount: "", cost: "", invoiceNo: "", dueDate: "", recurring: true, taxMode: "ex" as "ex" | "in" };
+type EDraft = { customer: string; owner: string; category: string; headcount: string; amount: string; cost: string; invoiceNo: string; dueDate: string; status: "forecast" | "confirmed" };
 
 export default function RevenueManager() {
   const [store, setStore] = useState<RevStore>({ lines: [], settings: DEFAULT_SETTINGS });
@@ -44,6 +72,7 @@ export default function RevenueManager() {
   const [payNote, setPayNote] = useState("");
   const [custOpen, setCustOpen] = useState(false);
   const [histFor, setHistFor] = useState<RevLine | null>(null);
+  const [editFor, setEditFor] = useState<RevLine | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [customerNames, setCustomerNames] = useState<string[]>([]);
@@ -75,7 +104,7 @@ export default function RevenueManager() {
   const budget = useMemo(() => readBudgetSeries(fy), [fy, store]);
   const fyLines = useMemo(() => store.lines.filter((l) => months.includes(l.ym)), [store.lines, months]);
 
-  // ===== KPI năm =====
+  // 年度 KPI
   const kpi = useMemo(() => {
     let confEx = 0, seenEx = 0, confIn = 0, unpaidIn = 0, overdueIn = 0, overdueCnt = 0;
     for (const l of fyLines) {
@@ -91,26 +120,29 @@ export default function RevenueManager() {
   const cur = monthAggs[mi];
   const curRate = budget[mi] ? Math.round((cur.amountEx / budget[mi]) * 100) : 0;
 
+  // 明細は「登録が新しい順」で表示
   const rows = useMemo(() => store.lines
     .filter((l) => l.ym === ym)
     .filter((l) => !ownerF || l.owner === ownerF)
-    .sort((a, b) => a.owner.localeCompare(b.owner) || b.amount - a.amount),
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.amount - a.amount),
   [store.lines, ym, ownerF]);
   const rowAgg = aggregate(rows);
 
   const names = useMemo(() => Array.from(new Set([...customerNames, ...store.lines.map((l) => l.customer)])).sort(), [customerNames, store.lines]);
 
+  // 会社詳細（年度）— 売上履歴 + 入出金履歴
   const detailData = useMemo(() => {
     if (!detail) return null;
     const ls = fyLines.filter((l) => l.customer === detail).sort((a, b) => a.ym.localeCompare(b.ym));
     const billed = ls.filter((l) => l.status === "confirmed").reduce((t, l) => t + taxIn(l), 0);
     const paid = ls.reduce((t, l) => t + paidOf(l), 0);
     const remain = ls.filter((l) => l.status === "confirmed").reduce((t, l) => t + remainOf(l), 0);
+    const overdue = ls.filter((l) => statusOf(l, today) === "OVERDUE").reduce((t, l) => t + remainOf(l), 0);
     const pays = ls.flatMap((l) => l.payments.map((p) => ({ ...p, invoiceNo: l.invoiceNo, ym: l.ym }))).sort((a, b) => b.date.localeCompare(a.date));
-    return { ls, billed, paid, remain, pays };
-  }, [detail, fyLines]);
+    return { ls, billed, paid, remain, overdue, pays };
+  }, [detail, fyLines, today]);
 
-  // ===== Danh sách công ty CÒN NỢ (未回収) — gộp theo công ty =====
+  // 未回収リスト（会社別）
   const owingList = useMemo(() => {
     const map = new Map<string, { customer: string; remain: number; count: number; overdue: number; oldestDue: string }>();
     for (const l of fyLines) {
@@ -125,8 +157,6 @@ export default function RevenueManager() {
     return Array.from(map.values()).sort((a, b) => b.remain - a.remain);
   }, [fyLines, today]);
 
-  // ===== helpers =====
-  const disp = (l: RevLine) => (taxView === "in" ? taxIn(l) : l.amount);
   function shift(d: number) { let f = fy, m = mi + d; if (m > 11) { f++; m = 0; } else if (m < 0) { f--; m = 11; } setFy(f); setMi(m); }
   function patch(id: string, p: Partial<RevLine>, action?: string) {
     setStore((prev) => ({ ...prev, lines: prev.lines.map((l) => l.id === id ? { ...l, ...p, updatedAt: nowIso(), updatedBy: op, history: action ? [...l.history, { at: nowIso(), by: op, action }] : l.history } : l) }));
@@ -144,6 +174,15 @@ export default function RevenueManager() {
     if (!confirm("この明細を削除しますか？")) return;
     if (l.recurring && l.seriesId) { const all = confirm("定期明細です。\n［OK］今月以降の同系列をすべて削除\n［キャンセル］今月のみ削除"); if (all) { setStore((prev) => ({ ...prev, lines: prev.lines.filter((x) => !(x.seriesId === l.seriesId && x.ym >= l.ym)) })); return; } }
     setStore((prev) => ({ ...prev, lines: prev.lines.filter((x) => x.id !== l.id) }));
+  }
+  function saveEdit(id: string, e: EDraft) {
+    const amount = Number(e.amount) || 0;
+    if (!e.customer.trim() || !amount) { alert("会社名・金額は必須です。"); return; }
+    patch(id, {
+      customer: e.customer.trim(), owner: e.owner, category: e.category, headcount: Number(e.headcount) || 0,
+      amount, cost: Number(e.cost) || 0, invoiceNo: e.invoiceNo.trim(), dueDate: e.dueDate, status: e.status,
+    }, "編集");
+    setEditFor(null);
   }
   function addLine() {
     const rate = S.taxRate;
@@ -163,6 +202,10 @@ export default function RevenueManager() {
     }
     setDraft(emptyDraft); setShowNew(false);
   }
+  function openNew(customer?: string) {
+    setDraft({ ...emptyDraft, owner: S.owners[0], category: S.categories[0], customer: customer ?? "" });
+    setShowNew(true);
+  }
   function resetSample() { if (!confirm("サンプルデータに戻します。よろしいですか？")) return; setStore(sampleStore()); }
   function exportCsv() {
     const head = ["年月", "請求書番号", "会社名", "担当", "区分", "人数", "売上(税抜)", "請求額(税込)", "入金済", "残高", "期日", "種別", "状態", "登録者", "最終更新"];
@@ -178,6 +221,20 @@ export default function RevenueManager() {
       <tr class="tot"><td colspan="4">合計（${rows.length}件）</td><td class="r">${yen(rowAgg.amountEx)}</td><td class="r">${yen(rowAgg.amountIn)}</td><td class="r"></td><td></td></tr></table>`;
     openPrint(`売上回収_${ym}`, body);
   }
+  function printCustomer() {
+    if (!detail || !detailData) return;
+    const d = detailData;
+    const body = `<h1>取引明細書 — ${detail}</h1><div class="sub">${fiscalLabel(fy)} ／ 出力日 ${today}</div>
+      <table><tr><th>請求済(税込)</th><th>入金済</th><th>未回収残高</th><th>うち延滞</th></tr>
+      <tr><td class="r">${yen(d.billed)}</td><td class="r">${yen(d.paid)}</td><td class="r">${yen(d.remain)}</td><td class="r ${d.overdue ? "red" : ""}">${yen(d.overdue)}</td></tr></table>
+      <h1 style="font-size:13px">売上履歴</h1>
+      <table><tr><th>年月</th><th>請求書番号</th><th>区分</th><th class="r">税込</th><th class="r">残高</th><th>状態</th></tr>
+      ${d.ls.map((l) => { const st = statusOf(l, today); return `<tr><td>${l.ym}</td><td>${l.invoiceNo}</td><td>${l.category}</td><td class="r">${yen(taxIn(l))}</td><td class="r ${st === "OVERDUE" ? "red" : ""}">${l.status === "confirmed" ? yen(remainOf(l)) : "—"}</td><td>${STATUS_LABEL[st]}</td></tr>`; }).join("")}</table>
+      <h1 style="font-size:13px">入出金履歴</h1>
+      <table><tr><th>入金日</th><th>請求書番号</th><th class="r">金額</th><th>担当</th><th>メモ</th></tr>
+      ${d.pays.length ? d.pays.map((p) => `<tr><td>${p.date}</td><td>${p.invoiceNo}</td><td class="r">${yen(p.amount)}</td><td>${p.by}</td><td>${p.note || ""}</td></tr>`).join("") : `<tr><td colspan="5">入金履歴なし</td></tr>`}</table>`;
+    openPrint(`取引明細_${detail}`, body);
+  }
 
   if (!today) return <div className="rounded-2xl border border-line bg-white p-12 text-center text-sm text-muted">読み込み中…</div>;
 
@@ -186,7 +243,7 @@ export default function RevenueManager() {
 
   return (
     <div className="space-y-5">
-      {/* ===== 4 KPI hero — sạch, to ===== */}
+      {/* ===== KPI ===== */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <div className="rounded-2xl border border-line bg-white p-5 shadow-card">
           <p className="text-sm font-bold text-muted">年度売上（確定・税抜）</p>
@@ -196,7 +253,7 @@ export default function RevenueManager() {
         <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5 shadow-card">
           <p className="text-sm font-bold text-amber-700">未回収残高（税込）</p>
           <p className="mt-1 text-2xl font-black tracking-tight text-amber-600">{yen(kpi.unpaidIn)}</p>
-          <p className="mt-1 text-[11px] text-amber-600/70">請求済みで未入金の合計</p>
+          <p className="mt-1 text-[11px] text-amber-600/70">請求済・未入金</p>
         </div>
         <div className="rounded-2xl border border-red-200 bg-red-50/40 p-5 shadow-card">
           <p className="text-sm font-bold text-red-700">延滞（税込）</p>
@@ -206,18 +263,17 @@ export default function RevenueManager() {
         <div className="rounded-2xl border border-line bg-white p-5 shadow-card">
           <p className="text-sm font-bold text-muted">回収率</p>
           <p className="mt-1 text-2xl font-black tracking-tight text-emerald-600">{kpi.collectRate}%</p>
-          <p className="mt-1 text-[11px] text-slate-400">確定請求のうち入金済み割合</p>
+          <p className="mt-1 text-[11px] text-slate-400">確定請求のうち入金済み</p>
         </div>
       </div>
 
-      {/* ===== Thanh điều hướng tháng (gọn) ===== */}
+      {/* ===== 月ナビ ===== */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-white p-3 shadow-card">
-        <button onClick={() => shift(-1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600">◀</button>
+        <button onClick={() => shift(-1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="前月"><Ic n="left" size={18} /></button>
         <div className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white">{ym.replace("-", "年")}月</div>
-        <button onClick={() => shift(1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600">▶</button>
+        <button onClick={() => shift(1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="翌月"><Ic n="right" size={18} /></button>
         <span className="ml-1 hidden text-xs font-bold text-muted sm:inline">{fiscalLabel(fy)}</span>
 
-        {/* summary chip tháng */}
         <div className="ml-2 hidden items-center gap-3 rounded-xl bg-surface px-3 py-1.5 text-xs md:flex">
           <span className="text-muted">予算 <b className="text-ink">{yen(budget[mi])}</b></span>
           <span className="text-muted">確定 <b className="text-emerald-600">{yen(cur.confirmedEx)}</b></span>
@@ -225,15 +281,14 @@ export default function RevenueManager() {
           <span className={`font-black ${curRate >= 100 ? "text-emerald-600" : curRate >= 80 ? "text-amber-600" : "text-rose-600"}`}>{budget[mi] ? curRate + "%" : "—"}</span>
         </div>
 
-        {/* 税抜/税込 */}
         <div className="ml-auto flex overflow-hidden rounded-xl border border-line">
           <button onClick={() => setTaxView("ex")} className={`px-3 py-2 text-xs font-bold ${taxView === "ex" ? "bg-brand-600 text-white" : "bg-white text-muted hover:bg-surface"}`}>税抜</button>
           <button onClick={() => setTaxView("in")} className={`px-3 py-2 text-xs font-bold ${taxView === "in" ? "bg-brand-600 text-white" : "bg-white text-muted hover:bg-surface"}`}>税込</button>
         </div>
-        <button onClick={() => setShowSettings(true)} className="flex h-9 items-center gap-1 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">⚙ 設定</button>
+        <button onClick={() => setShowSettings(true)} className="flex h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="gear" size={15} />設定</button>
       </div>
 
-      {/* ===== Dải 12 tháng ===== */}
+      {/* ===== 12ヶ月ストリップ ===== */}
       <div className="rounded-2xl border border-line bg-white p-4 shadow-card">
         <div className="flex items-end gap-1.5 overflow-x-auto pb-1" style={{ height: 120 }}>
           {months.map((m, i) => {
@@ -254,8 +309,8 @@ export default function RevenueManager() {
         </div>
       </div>
 
-      {/* ===== Danh sách明細 (core) ===== */}
-      <Panel title={`売上・回収明細 — ${ym.replace("-", "年")}月（${rows.length}件・${taxView === "in" ? "税込" : "税抜"}表示）`}
+      {/* ===== 明細 ===== */}
+      <Panel title={`売上・回収明細 — ${ym.replace("-", "年")}月（${rows.length}件・${taxView === "in" ? "税込" : "税抜"}）`}
         action={
           <div className="flex flex-wrap items-center gap-1.5">
             <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-bold outline-none focus:border-brand-500">
@@ -263,7 +318,7 @@ export default function RevenueManager() {
               {S.owners.map((o) => <option key={o}>{o}</option>)}
             </select>
             <button onClick={confirmMonth} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700">この月を確定</button>
-            <button onClick={() => { setDraft({ ...emptyDraft, owner: S.owners[0], category: S.categories[0] }); setShowNew(true); }} className="rounded-xl bg-brand-600 px-3.5 py-1.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700">＋ 登録</button>
+            <button onClick={() => openNew()} className="flex items-center gap-1 rounded-xl bg-brand-600 px-3.5 py-1.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"><Ic n="plus" size={15} />登録</button>
           </div>
         }>
         <div className="overflow-x-auto">
@@ -284,7 +339,7 @@ export default function RevenueManager() {
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {rows.length === 0 && <tr><td colSpan={11} className="py-10 text-center text-muted">この月の明細はありません。「＋ 登録」から追加してください。</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={11} className="py-10 text-center text-muted">この月の明細はありません。「登録」から追加してください。</td></tr>}
               {rows.map((r) => {
                 const st = statusOf(r, today); const remain = remainOf(r);
                 return (
@@ -293,16 +348,8 @@ export default function RevenueManager() {
                     <td className="py-2"><button onClick={() => setDetail(r.customer)} className="font-bold text-ink hover:text-brand-600 hover:underline">{r.customer}</button></td>
                     <td className="py-2"><span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-bold text-muted">{r.owner}</span></td>
                     <td className="py-2"><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700">{r.category}</span></td>
-                    <td className="py-2 text-right">
-                      <input type="number" value={r.headcount || ""} placeholder="0" onChange={(e) => patch(r.id, { headcount: Number(e.target.value) || 0 })}
-                        className="w-12 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right font-semibold outline-none hover:border-line focus:border-brand-500 focus:bg-white" />
-                    </td>
-                    <td className="py-2 text-right">
-                      {taxView === "in"
-                        ? <span className="font-black tabular-nums text-ink">{yen(taxIn(r))}</span>
-                        : <input type="number" value={r.amount || ""} placeholder="0" onChange={(e) => patch(r.id, { amount: Number(e.target.value) || 0 })}
-                            className="w-24 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right font-black text-ink outline-none hover:border-line focus:border-brand-500 focus:bg-white" />}
-                    </td>
+                    <td className="py-2 text-right text-muted">{r.headcount || "—"}</td>
+                    <td className="py-2 text-right font-black tabular-nums text-ink">{yen(taxView === "in" ? taxIn(r) : r.amount)}</td>
                     <td className="py-2 text-right text-emerald-600">{paidOf(r) ? yen(paidOf(r)) : "—"}</td>
                     <td className={`py-2 text-right font-black ${r.status === "forecast" ? "text-slate-300" : balanceOf(r) < 0 ? "text-violet-600" : remain ? "text-ink" : "text-slate-300"}`}>
                       {r.status === "forecast" ? "—" : balanceOf(r) < 0 ? `+${yen(-balanceOf(r))}` : remain ? yen(remain) : "—"}
@@ -315,8 +362,9 @@ export default function RevenueManager() {
                       <div className="flex justify-end gap-1">
                         {r.status === "confirmed" && remain > 0 && <button onClick={() => { setPayFor(r); setPayAmount(String(remain)); }} className="rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
                         {st === "OVERPAID" && <button onClick={() => adjustOverpay(r)} className="rounded-lg bg-violet-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-violet-700">調整</button>}
-                        <button onClick={() => setHistFor(r)} className="rounded-lg border border-line px-1.5 py-1 text-[11px] text-muted hover:border-brand-500 hover:text-brand-600" title="履歴">🕑</button>
-                        <button onClick={() => removeLine(r)} className="rounded-lg border border-line px-1.5 py-1 text-[11px] text-muted hover:border-rose-400 hover:text-rose-500">✕</button>
+                        <button onClick={() => setEditFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="編集"><Ic n="pencil" size={14} /></button>
+                        <button onClick={() => setHistFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="履歴"><Ic n="clock" size={14} /></button>
+                        <button onClick={() => removeLine(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-rose-400 hover:text-rose-500" title="削除"><Ic n="trash" size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -339,11 +387,11 @@ export default function RevenueManager() {
         </div>
       </Panel>
 
-      {/* ===== 未回収会社リスト (danh sách công ty còn nợ) ===== */}
-      <Panel title="🔻 未回収・要回収リスト（会社別）"
+      {/* ===== 未回収リスト（会社別） ===== */}
+      <Panel title={<span className="flex items-center gap-1.5"><Ic n="alert" size={16} className="text-amber-500" />未回収・要回収リスト（会社別）</span>}
         action={<span className="text-[11px] text-slate-400">{owingList.length}社 ・ 残高合計 {yen(owingList.reduce((t, r) => t + r.remain, 0))}</span>}>
         {owingList.length === 0 ? (
-          <p className="rounded-2xl bg-emerald-50 px-4 py-8 text-center text-sm font-bold text-emerald-600">未回収はありません 🎉 全て回収済みです。</p>
+          <p className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 px-4 py-8 text-center text-sm font-bold text-emerald-600"><Ic n="check" size={18} />未回収はありません。全て回収済みです。</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">
@@ -365,7 +413,7 @@ export default function RevenueManager() {
                     <td className={`py-2.5 text-right font-black tabular-nums ${r.overdue ? "text-red-600" : "text-slate-300"}`}>{r.overdue ? yen(r.overdue) : "—"}</td>
                     <td className="py-2.5 text-center text-muted">{r.count}件</td>
                     <td className={`py-2.5 ${r.oldestDue < today ? "font-bold text-red-600" : "text-muted"}`}>{r.oldestDue}</td>
-                    <td className="py-2.5 text-right"><span className="rounded-lg border border-line px-2.5 py-1 text-xs font-bold text-brand-600">明細 →</span></td>
+                    <td className="py-2.5 text-right"><span className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-bold text-brand-600">明細<Ic n="arrow" size={13} /></span></td>
                   </tr>
                 ))}
               </tbody>
@@ -382,9 +430,9 @@ export default function RevenueManager() {
         )}
       </Panel>
 
-      {/* ===== Modal đăng ký ===== */}
+      {/* ===== 登録モーダル ===== */}
       {showNew && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[75] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setShowNew(false)} />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <h3 className="mb-1 text-base font-black text-ink">売上を登録 — {ym.replace("-", "年")}月</h3>
@@ -406,14 +454,14 @@ export default function RevenueManager() {
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-bold text-muted">会社名 * <span className="font-normal text-slate-400">（顧客管理から選択・入力）</span></label>
+                <label className="mb-1 block text-xs font-bold text-muted">会社名 *</label>
                 <div className="relative">
                   <input value={draft.customer}
                     onChange={(e) => { setDraft((d) => ({ ...d, customer: e.target.value })); setCustOpen(true); }}
                     onFocus={() => setCustOpen(true)}
                     placeholder="会社名を入力または選択" autoComplete="off"
                     className="w-full rounded-xl border border-line px-3 py-2 pr-9 text-sm outline-none focus:border-brand-500" />
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="m6 9 6 6 6-6" /></svg>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><Ic n="right" size={14} className="rotate-90" /></span>
                   {custOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setCustOpen(false)} />
@@ -451,7 +499,6 @@ export default function RevenueManager() {
                   <input type="number" value={draft.headcount} onChange={(e) => setDraft((d) => ({ ...d, headcount: e.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-right text-sm outline-none focus:border-brand-500" />
                 </div>
               </div>
-              {/* 金額 + 税抜/税込 */}
               <div>
                 <div className="mb-1 flex items-center justify-between">
                   <label className="text-xs font-bold text-muted">請求金額 *</label>
@@ -463,7 +510,7 @@ export default function RevenueManager() {
                 <input type="number" value={draft.amount} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
                   placeholder={draft.taxMode === "in" ? "税込金額（請求総額）" : "税抜金額"} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
                 <p className="mt-1 text-right text-[11px] text-slate-400">
-                  税抜 <b className="text-ink">{yen(liveEx)}</b> ／ 消費税{S.taxRate}% ／ <b className="text-brand-700">請求総額(税込) {yen(liveIn)}</b>
+                  税抜 <b className="text-ink">{yen(liveEx)}</b> ／ 税{S.taxRate}% ／ <b className="text-brand-700">税込 {yen(liveIn)}</b>
                 </p>
               </div>
               {!draft.recurring && (
@@ -487,9 +534,15 @@ export default function RevenueManager() {
         </div>
       )}
 
-      {/* ===== Modal 入金 ===== */}
+      {/* ===== 編集モーダル ===== */}
+      {editFor && (
+        <EditModal line={editFor} owners={S.owners} categories={S.categories} taxRate={S.taxRate}
+          onClose={() => setEditFor(null)} onSave={(e) => saveEdit(editFor.id, e)} />
+      )}
+
+      {/* ===== 入金モーダル ===== */}
       {payFor && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setPayFor(null)} />
           <div className="relative w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
             <h3 className="mb-1 text-base font-black text-ink">入金を記録</h3>
@@ -502,7 +555,7 @@ export default function RevenueManager() {
             <label className="mb-1 block text-xs font-bold text-muted">入金額（円）— {today} ・ 操作者 {op}</label>
             <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
             <label className="mb-1 mt-3 block text-xs font-bold text-muted">メモ（任意）</label>
-            <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="例：銀行振込 / 一部入金 / 手渡し…"
+            <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="例：銀行振込 / 一部入金 / 手渡し"
               className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setPayFor(null)} className="rounded-xl border border-line px-4 py-2 text-sm font-bold text-muted hover:bg-surface">キャンセル</button>
@@ -512,14 +565,14 @@ export default function RevenueManager() {
         </div>
       )}
 
-      {/* ===== Modal 履歴 (audit) ===== */}
+      {/* ===== 履歴モーダル ===== */}
       {histFor && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setHistFor(null)} />
           <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <div><h3 className="text-base font-black text-ink">操作履歴</h3><p className="text-[11px] text-muted">{histFor.customer} — {histFor.invoiceNo}</p></div>
-              <button onClick={() => setHistFor(null)} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface">✕</button>
+              <button onClick={() => setHistFor(null)} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface"><Ic n="x" size={16} /></button>
             </div>
             <div className="mb-3 rounded-xl bg-surface px-3.5 py-2.5 text-xs">
               <div className="flex justify-between"><span className="text-muted">登録者</span><span className="font-bold text-ink">{histFor.createdBy} ・ {fmtDT(histFor.createdAt)}</span></div>
@@ -537,52 +590,84 @@ export default function RevenueManager() {
         </div>
       )}
 
-      {/* ===== Modal chi tiết khách ===== */}
+      {/* ===== 会社詳細モーダル ===== */}
       {detail && detailData && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-ink/40" onClick={() => setDetail(null)} />
-          <div className="relative flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-line px-5 py-4">
-              <div><h3 className="text-base font-black text-ink">{detail}</h3><p className="text-[11px] text-muted">{fiscalLabel(fy)} ・ {detailData.ls.length}件</p></div>
-              <button onClick={() => setDetail(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface">✕</button>
+          <div className="absolute inset-0 bg-ink/50 backdrop-blur-sm" onClick={() => setDetail(null)} />
+          <div className="relative flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 flex-none items-center justify-center rounded-2xl bg-brand-600 text-base font-black text-white">{detail.charAt(0)}</span>
+                <div>
+                  <h3 className="text-lg font-black tracking-tight text-ink">{detail}</h3>
+                  <p className="text-[11px] text-muted">{fiscalLabel(fy)} ・ 取引 {detailData.ls.length}件</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => openNew(detail)} className="flex items-center gap-1 rounded-xl bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700"><Ic n="plus" size={14} />月を追加</button>
+                <button onClick={printCustomer} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="印刷 / PDF"><Ic n="printer" size={16} /></button>
+                <button onClick={() => setDetail(null)} className="flex h-9 w-9 items-center justify-center rounded-xl text-muted hover:bg-surface" title="閉じる"><Ic n="x" size={16} /></button>
+              </div>
             </div>
-            <div className="space-y-4 overflow-auto p-5">
-              <div className="grid grid-cols-3 gap-3">
-                {[["請求済(税込)", yen(detailData.billed), "text-ink"], ["入金済", yen(detailData.paid), "text-emerald-600"], ["未回収残高", yen(detailData.remain), detailData.remain ? "text-amber-600" : "text-slate-400"]].map(([l, v, c]) => (
-                  <div key={l} className="rounded-xl bg-surface px-3.5 py-3"><p className="text-[11px] font-bold text-muted">{l}</p><p className={`mt-0.5 text-lg font-black ${c}`}>{v}</p></div>
+
+            <div className="space-y-6 overflow-auto p-6">
+              {/* サマリー */}
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                {[["請求済(税込)", yen(detailData.billed), "text-ink"], ["入金済", yen(detailData.paid), "text-emerald-600"], ["未回収残高", yen(detailData.remain), detailData.remain ? "text-amber-600" : "text-slate-300"], ["うち延滞", yen(detailData.overdue), detailData.overdue ? "text-red-600" : "text-slate-300"]].map(([l, v, c]) => (
+                  <div key={l} className="rounded-2xl border border-line bg-surface/60 px-4 py-3"><p className="text-[11px] font-bold text-muted">{l}</p><p className={`mt-1 text-lg font-black tabular-nums ${c}`}>{v}</p></div>
                 ))}
               </div>
+
+              {/* 売上履歴（月ごと・編集/入金） */}
               <div>
-                <p className="mb-1.5 text-sm font-black text-ink">請求・回収状況</p>
-                <div className="overflow-x-auto rounded-xl border border-line">
-                  <table className="w-full min-w-[520px] text-sm">
-                    <thead><tr className="border-b border-line bg-surface text-left text-xs text-muted"><th className="px-3 py-2 font-bold">年月</th><th className="px-3 py-2 font-bold">区分</th><th className="px-3 py-2 text-right font-bold">税込</th><th className="px-3 py-2 text-right font-bold">残高</th><th className="px-3 py-2 text-center font-bold">状態</th></tr></thead>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-sm font-black text-ink"><Ic n="out" size={15} className="text-brand-600" />売上履歴</p>
+                  <button onClick={() => openNew(detail)} className="flex items-center gap-1 rounded-lg border border-dashed border-brand-300 px-2.5 py-1 text-[11px] font-bold text-brand-600 hover:bg-brand-50"><Ic n="plus" size={13} />月を追加</button>
+                </div>
+                <div className="overflow-hidden rounded-2xl border border-line">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">年月</th><th className="px-2 py-2.5 font-bold">区分</th><th className="px-2 py-2.5 text-right font-bold">税込</th><th className="px-2 py-2.5 text-right font-bold">残高</th><th className="px-2 py-2.5 text-center font-bold">状態</th><th className="px-4 py-2.5 text-right font-bold">操作</th></tr></thead>
                     <tbody className="divide-y divide-line">
-                      {detailData.ls.map((l) => { const st = statusOf(l, today); return (
-                        <tr key={l.id}><td className="px-3 py-2 text-muted">{l.ym}</td><td className="px-3 py-2">{l.category}</td><td className="px-3 py-2 text-right font-bold">{yen(taxIn(l))}</td><td className={`px-3 py-2 text-right font-black ${remainOf(l) ? "text-amber-600" : "text-slate-300"}`}>{l.status === "confirmed" ? yen(remainOf(l)) : "—"}</td><td className="px-3 py-2 text-center"><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${STATUS_TONE[st]}`}>{STATUS_LABEL[st]}</span></td></tr>
+                      {detailData.ls.map((l) => { const st = statusOf(l, today); const rem = remainOf(l); return (
+                        <tr key={l.id} className="hover:bg-surface/60">
+                          <td className="px-4 py-2.5"><span className="font-bold text-ink">{l.ym}</span><span className="ml-1.5 font-mono text-[10px] text-slate-400">{l.invoiceNo}</span></td>
+                          <td className="px-2 py-2.5"><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{l.category}</span></td>
+                          <td className="px-2 py-2.5 text-right font-bold tabular-nums">{yen(taxIn(l))}</td>
+                          <td className={`px-2 py-2.5 text-right font-black tabular-nums ${rem ? "text-amber-600" : "text-slate-300"}`}>{l.status === "confirmed" ? yen(rem) : "—"}</td>
+                          <td className="px-2 py-2.5 text-center"><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_TONE[st]}`}>{STATUS_LABEL[st]}</span></td>
+                          <td className="px-4 py-2.5 text-right">
+                            <div className="flex justify-end gap-1">
+                              {l.status === "confirmed" && rem > 0 && <button onClick={() => { setPayFor(l); setPayAmount(String(rem)); }} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>}
+                              <button onClick={() => setEditFor(l)} className="flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[11px] font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="pencil" size={12} />編集</button>
+                            </div>
+                          </td>
+                        </tr>
                       ); })}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* 入金履歴 kèm ghi chú */}
+              {/* 入出金履歴 */}
               <div>
-                <p className="mb-1.5 text-sm font-black text-ink">💰 入金履歴（各回の記録・メモ）</p>
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-black text-ink"><Ic n="in" size={15} className="text-emerald-600" />入出金履歴</p>
                 {detailData.pays.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-line px-4 py-5 text-center text-xs text-muted">まだ入金履歴はありません。</p>
+                  <p className="rounded-2xl border border-dashed border-line px-4 py-6 text-center text-xs text-muted">入金の記録はまだありません。</p>
                 ) : (
-                  <div className="overflow-x-auto rounded-xl border border-line">
-                    <table className="w-full min-w-[520px] text-sm">
-                      <thead><tr className="border-b border-line bg-surface text-left text-xs text-muted"><th className="px-3 py-2 font-bold">入金日</th><th className="px-3 py-2 font-bold">請求書番号</th><th className="px-3 py-2 text-right font-bold">入金額</th><th className="px-3 py-2 font-bold">担当</th><th className="px-3 py-2 font-bold">メモ</th></tr></thead>
+                  <div className="overflow-hidden rounded-2xl border border-line">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b border-line bg-surface text-left text-[11px] text-muted"><th className="px-4 py-2.5 font-bold">入金日</th><th className="px-2 py-2.5 font-bold">請求書番号</th><th className="px-2 py-2.5 text-right font-bold">金額</th><th className="px-2 py-2.5 font-bold">担当</th><th className="px-4 py-2.5 font-bold">メモ</th></tr></thead>
                       <tbody className="divide-y divide-line">
                         {detailData.pays.map((p, i) => (
-                          <tr key={i}>
-                            <td className="px-3 py-2 font-semibold text-ink">{p.date}</td>
-                            <td className="px-3 py-2 font-mono text-[11px] text-muted">{p.invoiceNo}</td>
-                            <td className={`px-3 py-2 text-right font-black ${p.amount < 0 ? "text-violet-600" : "text-emerald-600"}`}>{yen(p.amount)}</td>
-                            <td className="px-3 py-2 text-xs text-muted">{p.by}</td>
-                            <td className="px-3 py-2 text-xs text-muted">{p.note || "—"}</td>
+                          <tr key={i} className="hover:bg-surface/60">
+                            <td className="px-4 py-2.5 font-semibold text-ink">{p.date}</td>
+                            <td className="px-2 py-2.5 font-mono text-[10px] text-slate-400">{p.invoiceNo}</td>
+                            <td className={`px-2 py-2.5 text-right font-black tabular-nums ${p.amount < 0 ? "text-violet-600" : "text-emerald-600"}`}>
+                              <span className="inline-flex items-center justify-end gap-1"><Ic n={p.amount < 0 ? "out" : "in"} size={13} />{yen(p.amount)}</span>
+                            </td>
+                            <td className="px-2 py-2.5 text-xs text-muted">{p.by}</td>
+                            <td className="px-4 py-2.5 text-xs text-muted">{p.note || "—"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -595,7 +680,7 @@ export default function RevenueManager() {
         </div>
       )}
 
-      {/* ===== Modal ⚙ 設定 (gộp hết) ===== */}
+      {/* ===== 設定モーダル ===== */}
       {showSettings && (
         <SettingsModal store={store} setStore={setStore} onClose={() => setShowSettings(false)}
           onCsv={exportCsv} onPrint={printMonth} onReset={resetSample} />
@@ -604,7 +689,88 @@ export default function RevenueManager() {
   );
 }
 
-// ================= Settings modal =================
+/* ================= 編集モーダル ================= */
+function EditModal({ line, owners, categories, taxRate, onClose, onSave }: {
+  line: RevLine; owners: string[]; categories: string[]; taxRate: number;
+  onClose: () => void; onSave: (e: EDraft) => void;
+}) {
+  const [e, setE] = useState<EDraft>({
+    customer: line.customer, owner: line.owner, category: line.category, headcount: String(line.headcount || ""),
+    amount: String(line.amount || ""), cost: String(line.cost || ""), invoiceNo: line.invoiceNo, dueDate: line.dueDate, status: line.status,
+  });
+  const ex = Number(e.amount) || 0;
+  const inc = Math.round(ex * (1 + taxRate / 100));
+
+  return (
+    <div className="fixed inset-0 z-[65] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-ink/40" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div><h3 className="text-base font-black text-ink">明細を編集</h3><p className="text-[11px] text-muted">{line.ym} ・ {line.invoiceNo}</p></div>
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface"><Ic n="x" size={16} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-bold text-muted">会社名 *</label>
+            <input value={e.customer} onChange={(ev) => setE((d) => ({ ...d, customer: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">担当</label>
+              <select value={e.owner} onChange={(ev) => setE((d) => ({ ...d, owner: ev.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+                {owners.map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">区分</label>
+              <select value={e.category} onChange={(ev) => setE((d) => ({ ...d, category: ev.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+                {categories.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">人数</label>
+              <input type="number" value={e.headcount} onChange={(ev) => setE((d) => ({ ...d, headcount: ev.target.value }))} className="w-full rounded-xl border border-line px-2 py-2 text-right text-sm outline-none focus:border-brand-500" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-bold text-muted">売上（税抜）*</label>
+            <input type="number" value={e.amount} onChange={(ev) => setE((d) => ({ ...d, amount: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
+            <p className="mt-1 text-right text-[11px] text-slate-400">税込 <b className="text-brand-700">{yen(inc)}</b></p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">請求書番号</label>
+              <input value={e.invoiceNo} onChange={(ev) => setE((d) => ({ ...d, invoiceNo: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">入金期日</label>
+              <input type="date" value={e.dueDate} onChange={(ev) => setE((d) => ({ ...d, dueDate: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">原価（税抜）</label>
+              <input type="number" value={e.cost} onChange={(ev) => setE((d) => ({ ...d, cost: ev.target.value }))} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-muted">状態</label>
+              <select value={e.status} onChange={(ev) => setE((d) => ({ ...d, status: ev.target.value as "forecast" | "confirmed" }))} className="w-full rounded-xl border border-line px-2 py-2 text-sm outline-none focus:border-brand-500">
+                <option value="forecast">予定（見込）</option>
+                <option value="confirmed">確定</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-xl border border-line px-4 py-2 text-sm font-bold text-muted hover:bg-surface">キャンセル</button>
+          <button onClick={() => onSave(e)} className="rounded-xl bg-brand-600 px-5 py-2 text-sm font-bold text-white hover:bg-brand-700">保存する</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= 設定モーダル ================= */
 function SettingsModal({ store, setStore, onClose, onCsv, onPrint, onReset }: {
   store: RevStore; setStore: (fn: (p: RevStore) => RevStore) => void; onClose: () => void;
   onCsv: () => void; onPrint: () => void; onReset: () => void;
@@ -618,7 +784,7 @@ function SettingsModal({ store, setStore, onClose, onCsv, onPrint, onReset }: {
     <div className="flex flex-wrap gap-1.5">
       {items.map((it) => (
         <span key={it} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink">
-          {it}<button onClick={() => onRemove(it)} className="text-slate-400 hover:text-rose-500">×</button>
+          {it}<button onClick={() => onRemove(it)} className="text-slate-400 hover:text-rose-500"><Ic n="x" size={12} /></button>
         </span>
       ))}
     </div>
@@ -629,11 +795,10 @@ function SettingsModal({ store, setStore, onClose, onCsv, onPrint, onReset }: {
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} />
       <div className="relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <h3 className="text-base font-black text-ink">⚙ 設定</h3>
-          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface">✕</button>
+          <h3 className="flex items-center gap-1.5 text-base font-black text-ink"><Ic n="gear" size={16} />設定</h3>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface"><Ic n="x" size={16} /></button>
         </div>
         <div className="space-y-5 overflow-auto p-5">
-          {/* 操作者 + 税率 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-bold text-muted">操作者（履歴に記録）</label>
@@ -644,25 +809,22 @@ function SettingsModal({ store, setStore, onClose, onCsv, onPrint, onReset }: {
               <input type="number" value={S.taxRate} onChange={(e) => setS({ taxRate: Number(e.target.value) || 0 })} className="w-full rounded-xl border border-line px-3 py-2 text-right text-sm font-semibold outline-none focus:border-brand-500" />
             </div>
           </div>
-          {/* 担当マスタ */}
           <div>
             <p className="mb-2 text-sm font-black text-ink">担当マスタ</p>
             {chipList(S.owners, (v) => setS({ owners: S.owners.filter((x) => x !== v) }))}
             <div className="mt-2 flex gap-1.5">
-              <input value={newOwner} onChange={(e) => setNewOwner(e.target.value)} placeholder="＋ 担当を追加" className="w-40 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-xs outline-none focus:border-brand-500" />
+              <input value={newOwner} onChange={(e) => setNewOwner(e.target.value)} placeholder="担当を追加" className="w-40 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-xs outline-none focus:border-brand-500" />
               <button onClick={() => { if (newOwner.trim() && !S.owners.includes(newOwner.trim())) setS({ owners: [...S.owners, newOwner.trim()] }); setNewOwner(""); }} className="rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-bold text-white">追加</button>
             </div>
           </div>
-          {/* 区分マスタ */}
           <div>
             <p className="mb-2 text-sm font-black text-ink">区分マスタ</p>
             {chipList(S.categories, (v) => setS({ categories: S.categories.filter((x) => x !== v) }))}
             <div className="mt-2 flex gap-1.5">
-              <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="＋ 区分を追加" className="w-40 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-xs outline-none focus:border-brand-500" />
+              <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="区分を追加" className="w-40 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-xs outline-none focus:border-brand-500" />
               <button onClick={() => { if (newCat.trim() && !S.categories.includes(newCat.trim())) setS({ categories: [...S.categories, newCat.trim()] }); setNewCat(""); }} className="rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-bold text-white">追加</button>
             </div>
           </div>
-          {/* データ操作 */}
           <div>
             <p className="mb-2 text-sm font-black text-ink">データ操作</p>
             <div className="flex flex-wrap gap-2">

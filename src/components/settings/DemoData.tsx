@@ -10,7 +10,7 @@ import { STORAGE_KEY as K_USER, sampleUsers } from "@/lib/users";
 import { STORAGE_KEY as K_COL, sampleCollect } from "@/lib/collection";
 import { STORAGE_KEY as K_ACC, defaultAccounts } from "@/lib/accounts";
 
-// Danh sách module + hàm sinh dữ liệu mẫu + key localStorage.
+// モジュール一覧 + サンプルデータ生成関数 + localStorageキー。
 const SEEDS: { key: string; label: string; make: () => unknown }[] = [
   { key: K_YOJITSU, label: "予実管理", make: defaultStore },
   { key: K_REVENUE, label: "売上・回収", make: sampleStore },

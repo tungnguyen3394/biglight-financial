@@ -1,7 +1,7 @@
 import Icon from "../Icon";
 import type { StatCard as Stat, Tone } from "@/lib/mock";
 
-// Bảng màu theo tone — dùng chuỗi class đầy đủ để Tailwind không purge nhầm.
+// トーン別カラー — Tailwindのpurge対策で完全なクラス名を使用。
 const TONE: Record<Tone, { chip: string; bar: string }> = {
   brand:  { chip: "bg-brand-50 text-brand-600",   bar: "bg-brand-600" },
   green:  { chip: "bg-emerald-50 text-emerald-600", bar: "bg-emerald-500" },
@@ -30,7 +30,7 @@ export default function StatCard({ stat }: { stat: Stat }) {
 
       <p className="mt-4 text-[26px] font-black tracking-tight text-ink">{stat.value}</p>
 
-      {/* Tiến độ (nếu có) */}
+      {/* 進捗（あれば） */}
       {stat.progress != null && (
         <div className="mt-3">
           <div className="h-2 w-full overflow-hidden rounded-full bg-surface">
@@ -39,7 +39,7 @@ export default function StatCard({ stat }: { stat: Stat }) {
         </div>
       )}
 
-      {/* Delta hoặc dòng phụ */}
+      {/* 増減または補足 */}
       {stat.delta != null && (
         <p className="mt-2.5 flex items-center gap-1 text-xs font-semibold">
           <span className={up ? "text-emerald-600" : "text-rose-600"}>

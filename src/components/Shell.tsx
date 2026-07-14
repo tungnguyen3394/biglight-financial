@@ -9,7 +9,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Sidebar cố định (desktop) */}
+      {/* サイドバー（デスクトップ・固定） */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden lg:block">
         <Sidebar />
       </aside>
@@ -24,7 +24,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Nội dung */}
+      {/* コンテンツ */}
       <div className="lg:pl-64">
         <Header onMenu={() => setMobileOpen(true)} />
         <main className="mx-auto max-w-[1480px] px-5 py-8 sm:px-8 sm:py-10 lg:px-12">{children}</main>

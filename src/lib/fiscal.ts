@@ -1,12 +1,12 @@
-// Năm tài chính BIGLIGHT: 8/1 〜 翌年 7/31.
+// BIGLIGHT会計年度: 8/1 〜 翌年 7/31.
 // "2025年度" = 2025-08-01 〜 2026-07-31.
-// Quý:  Q1 = 8〜10月, Q2 = 11〜1月, Q3 = 2〜4月, Q4 = 5〜7月.
+// 四半期:  Q1 = 8〜10月, Q2 = 11〜1月, Q3 = 2〜4月, Q4 = 5〜7月.
 
 export const FY_START_MONTH = 8;
 
 export const QUARTER_LABELS = ["Q1（8〜10月）", "Q2（11〜1月）", "Q3（2〜4月）", "Q4（5〜7月）"];
 
-// "YYYY-MM-DD" (hoặc "YYYY-MM") → năm tài chính (năm bắt đầu).
+// "YYYY-MM-DD"（または "YYYY-MM"）→ 会計年度（開始年）。
 export function fiscalYearOf(dateStr: string): number {
   const [y, m] = dateStr.split("-").map(Number);
   return m >= FY_START_MONTH ? y : y - 1;
@@ -16,7 +16,7 @@ export function fiscalLabel(fy: number): string {
   return `${fy}年度（${fy}/8〜${fy + 1}/7）`;
 }
 
-// 12 tháng của năm tài chính, dạng "YYYY-MM": ["2025-08", ..., "2026-07"].
+// 会計年度の12か月、"YYYY-MM"形式: ["2025-08", ..., "2026-07"]。
 export function fiscalMonths(fy: number): string[] {
   return Array.from({ length: 12 }, (_, i) => {
     const total = FY_START_MONTH + i;                 // 8..19
@@ -26,25 +26,25 @@ export function fiscalMonths(fy: number): string[] {
   });
 }
 
-// Nhãn tháng hiển thị: "8月", "9月", ..., "7月".
+// 月表示ラベル: "8月", "9月", ..., "7月"。
 export const FY_MONTH_LABELS = fiscalMonths(2000).map((ym) => Number(ym.split("-")[1]) + "月");
 
-// Quý (1..4) trong năm tài chính của 1 ngày.
+// ある日付の会計年度内の四半期（1..4）。
 export function quarterOf(dateStr: string): number {
   const m = Number(dateStr.split("-")[1]);
-  const idx = (m - FY_START_MONTH + 12) % 12;         // 0..11 kể từ tháng 8
+  const idx = (m - FY_START_MONTH + 12) % 12;         // 8月起点で0..11
   return Math.floor(idx / 3) + 1;
 }
 
-// Chỉ số tháng tài chính (0..11) của 1 ngày: 8月=0, ..., 7月=11.
+// ある日付の会計月インデックス（0..11）: 8月=0, ..., 7月=11。
 export function fiscalMonthIndex(dateStr: string): number {
   const m = Number(dateStr.split("-")[1]);
   return (m - FY_START_MONTH + 12) % 12;
 }
 
-// ==================== BỘ SO SÁNH KỲ (dùng chung) ====================
-// cur/prev: mảng 12 tháng THEO NĂM TÀI CHÍNH (index 0 = 8月).
-// i: tháng đang xét (0..11). prev = mảng của năm tài chính TRƯỚC.
+// ==================== 期間比較（共通） ====================
+// cur/prev: 会計年度ベースの12か月配列（index 0 = 8月）。
+// i: 対象月（0..11）。prev = 前会計年度の配列。
 
 export const sumRange = (a: number[], s: number, e: number): number => {
   let t = 0;
@@ -52,7 +52,7 @@ export const sumRange = (a: number[], s: number, e: number): number => {
   return t;
 };
 
-// % thay đổi so với mốc — null nếu mốc = 0 (không so được).
+// 基準に対する変化率 — 基準=0の場合はnull（比較不可）。
 export function deltaPct(cur: number, base: number): number | null {
   if (!base) return null;
   return ((cur - base) / Math.abs(base)) * 100;
@@ -60,14 +60,14 @@ export function deltaPct(cur: number, base: number): number | null {
 
 export type PeriodComparison = {
   month: number;        // 当月
-  prevMonth: number;    // 前月 (tháng 8 → lấy 7月 năm trước)
+  prevMonth: number;    // 前月（8月は前年7月を参照）
   lastYearMonth: number;// 前年同月
-  qtd: number;          // 四半期累計 (từ đầu quý tới tháng i)
-  prevQtd: number;      // cùng kỳ QUÝ TRƯỚC (cùng số tháng)
-  htd: number;          // 半期累計 (nửa kỳ: 上期 8〜1月 / 下期 2〜7月)
-  prevHtd: number;      // cùng kỳ NỬA KỲ TRƯỚC
+  qtd: number;          // 四半期累計（四半期開始から月iまで）
+  prevQtd: number;      // 前四半期の同期間（同月数）
+  htd: number;          // 半期累計（上期 8〜1月 / 下期 2〜7月）
+  prevHtd: number;      // 前半期の同期間
   ytd: number;          // 年度累計
-  lastYearYtd: number;  // 前年 cùng kỳ 累計
+  lastYearYtd: number;  // 前年同期累計
 };
 
 export function compareSeries(cur: number[], prev: number[], i: number): PeriodComparison {

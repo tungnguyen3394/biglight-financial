@@ -47,7 +47,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="border-t border-line p-3">
         <div className="rounded-xl bg-surface px-3 py-2.5 text-[11px] leading-relaxed text-muted">
           <span className="font-bold text-ink">{APP_NAME}</span><br />
-          Giai đoạn 1 — khung hệ thống
+          社内管理システム
         </div>
       </div>
     </div>

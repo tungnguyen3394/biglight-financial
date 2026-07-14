@@ -1,12 +1,12 @@
-// 売上・回収（統合）— GỘP 売上明細 + 売上回収 thành 1 nguồn duy nhất.
+// 売上・回収（統合）— 売上明細と売上回収を1つのデータソースに統合。
 //
-// 1 dòng = 1 công ty × 1 tháng:
+// 1行 = 1社 × 1ヶ月:
 //   種別 定期(recurring)/不定期(spot) ・ 予定(forecast)→確定(confirmed)
-//   金額 lưu 税抜 (chưa thuế) + 消費税率 → 税込 (đã thuế) tự tính = số tiền hóa đơn
+//   金額は税抜で保持 + 消費税率 → 税込を自動計算（＝請求額）
 //   請求書番号 ・ 入金期日 ・ 入金(payments) → 残高(未回収)
-//   監査履歴: ai đăng ký / sửa / lúc nào.
+//   監査履歴: 登録者・更新者・日時を記録。
 //
-// Mục tiêu: 総売上 bao nhiêu, 未回収 bao nhiêu.
+// 目的: 総売上と未回収を把握する。
 
 import { fiscalMonths, fiscalYearOf } from "./fiscal";
 
@@ -60,9 +60,9 @@ export const STATUS_TONE: Record<CollectStatus, string> = {
   OVERPAID: "bg-violet-50 text-violet-600",
 };
 
-// ---- tính thuế ----
-export const taxIn = (l: RevLine): number => Math.round(l.amount * (1 + l.taxRate / 100)); // 税込 (số tiền hóa đơn)
-export const grossOf = (l: RevLine): number => l.amount - l.cost;                            // 粗利 (税抜)
+// ---- 税計算 ----
+export const taxIn = (l: RevLine): number => Math.round(l.amount * (1 + l.taxRate / 100)); // 税込（請求額）
+export const grossOf = (l: RevLine): number => l.amount - l.cost;                            // 粗利（税抜）
 export const paidOf = (l: RevLine): number => l.payments.reduce((t, p) => t + p.amount, 0);
 export const balanceOf = (l: RevLine): number => taxIn(l) - paidOf(l);                        // 未回収 (税込基準)
 export const remainOf = (l: RevLine): number => Math.max(0, balanceOf(l));
@@ -99,7 +99,7 @@ export function endOfNextMonth(ym: string): string {
   return `${ny}-${String(nm).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
 }
 
-// Nhân bản 定期 tới hết năm tài chính.
+// 定期明細を年度末まで複製する。
 export function expandRecurring(base: Omit<RevLine, "id" | "ym" | "seriesId" | "dueDate" | "invoiceNo">, startYm: string, invoicePrefix: string): RevLine[] {
   const months = fiscalMonths(fiscalYearOf(startYm));
   const startIdx = months.indexOf(startYm);
@@ -113,7 +113,7 @@ export function expandRecurring(base: Omit<RevLine, "id" | "ym" | "seriesId" | "
   return out;
 }
 
-// ---------- Dữ liệu mẫu (gộp: 明細 + 請求 + 入金) ----------
+// ---------- サンプルデータ（明細 + 請求 + 入金） ----------
 type Seed = { customer: string; owner: string; amount: number; hc: number };
 const SEED: Seed[] = [
   { customer: "毎味水産(株)", owner: "フン", amount: 316774, hc: 16 },
@@ -142,11 +142,11 @@ export function sampleStore(): RevStore {
   SEED.forEach((c, ci) => {
     months.forEach((ym, mi) => {
       const confirmed = mi <= 10;      // Aug〜June: 確定
-      const paidFull = mi <= 9;        // Aug〜May: đã thu
+      const paidFull = mi <= 9;        // 8月〜5月: 入金済
       const due = endOfNextMonth(ym);
       const amountIn = Math.round(c.amount * 1.1);
       const payments: Payment[] = paidFull ? [{ date: due, amount: amountIn, by: "経理", note: "銀行振込・全額入金" }] : [];
-      // vài case đặc biệt ở tháng 10 (June)
+      // 10番目の月（6月）の特別ケース
       let pay = payments;
       if (mi === 10 && ci === 0) pay = [{ date: due, amount: Math.round(amountIn / 2), by: "経理" }]; // 一部入金
       if (mi === 10 && ci === 1) pay = [{ date: due, amount: amountIn + 20000, by: "経理" }];           // 過入金
@@ -161,7 +161,7 @@ export function sampleStore(): RevStore {
       });
     });
   });
-  // vài 不定期
+  // 不定期（単発）の例
   const spot = (id: string, ym: string, customer: string, owner: string, amount: number, hc: number, cat: string, status: LineStatus, pay: Payment[]): RevLine => ({
     id, ym, customer, owner, category: cat, headcount: hc, amount, taxRate: 10, cost: 0,
     invoiceNo: `INV-${ym.replace("-", "")}-S`, dueDate: endOfNextMonth(ym), recurring: false, status, payments: pay,
@@ -174,7 +174,7 @@ export function sampleStore(): RevStore {
   return { lines, settings: { ...DEFAULT_SETTINGS } };
 }
 
-// Đọc 予算 tháng từ 予実管理.
+// 予実管理から月次予算を読み込む。
 export function readBudgetSeries(fy: number): number[] {
   if (typeof window === "undefined") return Array(12).fill(0);
   try {

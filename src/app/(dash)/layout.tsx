@@ -1,6 +1,6 @@
 import Shell from "@/components/Shell";
 
-// Layout dùng chung cho toàn bộ trang quản trị (sidebar + header).
+// 管理画面全体の共通レイアウト（サイドバー＋ヘッダー）。
 export default function DashLayout({ children }: { children: React.ReactNode }) {
   return <Shell>{children}</Shell>;
 }

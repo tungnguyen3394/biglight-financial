@@ -1,9 +1,9 @@
-// Hàm định dạng dùng chung.
+// 共通フォーマット関数。
 
 export const yen = (n: number): string =>
   "¥" + Math.round(n).toLocaleString("ja-JP");
 
-// Rút gọn số lớn: 12,480,000 -> "1,248万"
+// 大きな数を短縮: 12,480,000 -> "1,248万"
 export const yenMan = (n: number): string => {
   const man = n / 10000;
   return "¥" + man.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + "万";
