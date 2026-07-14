@@ -20,6 +20,7 @@ export type Payment = {
   method?: PayMethod;    // 入金方法
   createdAt?: string;    // 登録日時
 };
+export type Attachment = { id: string; name: string; type: string; size: number; dataUrl: string };
 export type Audit = { at: string; by: string; action: string };
 export type LineStatus = "forecast" | "confirmed";
 export type CollectStatus = "FORECAST" | "OPEN" | "PARTIAL" | "PAID" | "OVERDUE" | "OVERPAID";
@@ -40,6 +41,7 @@ export type RevLine = {
   status: LineStatus;       // 予定/確定
   payments: Payment[];
   note?: string;            // メモ
+  attachments?: Attachment[]; // 添付ファイル（見積書・請求書PDF・画像など）
   seriesId?: string;
   headcount?: number;       // 廃止（旧データ互換のため型のみ保持・未使用）
   createdAt: string; createdBy: string;   // 登録日時 / 登録者

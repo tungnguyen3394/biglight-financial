@@ -6,7 +6,7 @@ import {
   STORAGE_KEY, DEFAULT_SETTINGS, STATUS_LABEL, STATUS_TONE,
   sampleStore, migrateStore, statusOf, taxIn, paidOf, remainOf, balanceOf, daysLate,
   aggregate, expandRecurring, readBudgetSeries, endOfNextMonth, uid, yen,
-  type RevStore, type RevLine, type Payment, type PayMethod,
+  type RevStore, type RevLine, type Payment, type PayMethod, type Attachment, type CollectStatus,
 } from "@/lib/revenue";
 
 const PAY_METHODS: PayMethod[] = ["銀行振込", "現金", "その他"];
@@ -24,7 +24,7 @@ function moneyCells(l: RevLine) {
   else { balText = "¥0"; balClass = "text-emerald-600"; }                      // 完了 = 緑
   return { paidText, paidClass, balText, balClass, fully };
 }
-import { fiscalMonths, fiscalLabel, fiscalYearOf, fiscalMonthIndex, FY_MONTH_LABELS } from "@/lib/fiscal";
+import { fiscalMonths, fiscalLabel, fiscalYearOf, fiscalMonthIndex } from "@/lib/fiscal";
 
 const nowIso = () => new Date().toISOString();
 const fmtDT = (iso: string) => { try { return iso.replace("T", " ").slice(0, 16); } catch { return iso; } };
@@ -46,6 +46,8 @@ const ICONS: Record<string, React.ReactNode> = {
   in: <><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></>,
   out: <><path d="M12 20V9" /><path d="M7 14l5-5 5 5" /><path d="M5 4h14" /></>,
   printer: <><path d="M6 9V3h12v6" /><rect x="4" y="9" width="16" height="8" rx="1.5" /><path d="M8 17h8v4H8z" /></>,
+  clip: <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l8.49-8.49a3 3 0 0 1 4.24 4.24l-8.49 8.49a1 1 0 0 1-1.41-1.41l7.78-7.78" />,
+  download: <><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></>,
 };
 function Ic({ n, size = 16, className = "" }: { n: string; size?: number; className?: string }) {
   return (
@@ -91,6 +93,10 @@ export default function RevenueManager() {
   const [payFee, setPayFee] = useState("");
   const [editPay, setEditPay] = useState<{ line: RevLine; pi: number } | null>(null);
   const [paysForId, setPaysForId] = useState<string | null>(null);
+  const [attachForId, setAttachForId] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [statusF, setStatusF] = useState<"ALL" | CollectStatus>("ALL");
+  const [sortKey, setSortKey] = useState<"date_desc" | "date_asc" | "amount_desc" | "amount_asc" | "name">("date_desc");
   const [custOpen, setCustOpen] = useState(false);
   const [histFor, setHistFor] = useState<RevLine | null>(null);
   const [editFor, setEditFor] = useState<RevLine | null>(null);
@@ -98,6 +104,7 @@ export default function RevenueManager() {
   const [showSettings, setShowSettings] = useState(false);
   const [customerNames, setCustomerNames] = useState<string[]>([]);
   const ready = useRef(false);
+  const quotaWarned = useRef(false);
 
   const S = store.settings;
   const op = S.operator || "管理者";
@@ -117,7 +124,8 @@ export default function RevenueManager() {
   }, []);
   useEffect(() => {
     if (!ready.current) return;
-    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch { /* ignore */ }
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); quotaWarned.current = false; }
+    catch { if (!quotaWarned.current) { quotaWarned.current = true; alert("保存容量の上限に達しました。大きい添付ファイルを削除してください。（今回の変更はこのセッションでは保持されます）"); } }
   }, [store]);
 
   const months = useMemo(() => fiscalMonths(fy), [fy]);
@@ -137,16 +145,26 @@ export default function RevenueManager() {
   }, [fyLines, today]);
 
   const monthAggs = useMemo(() => months.map((m) => aggregate(store.lines.filter((l) => l.ym === m))), [store.lines, months]);
-  const stripMax = Math.max(1, ...monthAggs.map((a) => a.amountEx), ...budget);
   const cur = monthAggs[mi];
   const curRate = budget[mi] ? Math.round((cur.amountEx / budget[mi]) * 100) : 0;
 
-  // 明細は「登録が新しい順」で表示
-  const rows = useMemo(() => store.lines
-    .filter((l) => l.ym === ym)
-    .filter((l) => !ownerF || l.owner === ownerF)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.amount - a.amount),
-  [store.lines, ym, ownerF]);
+  // 明細：検索・担当・状態で絞り込み、指定キーで並び替え
+  const rows = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    const cmp: Record<typeof sortKey, (a: RevLine, b: RevLine) => number> = {
+      date_desc: (a, b) => b.recognitionDate.localeCompare(a.recognitionDate),
+      date_asc: (a, b) => a.recognitionDate.localeCompare(b.recognitionDate),
+      amount_desc: (a, b) => taxIn(b) - taxIn(a),
+      amount_asc: (a, b) => taxIn(a) - taxIn(b),
+      name: (a, b) => a.customer.localeCompare(b.customer, "ja"),
+    };
+    return store.lines
+      .filter((l) => l.ym === ym)
+      .filter((l) => !ownerF || l.owner === ownerF)
+      .filter((l) => statusF === "ALL" || statusOf(l, today) === statusF)
+      .filter((l) => !kw || `${l.customer} ${l.invoiceNo} ${l.category}`.toLowerCase().includes(kw))
+      .sort(cmp[sortKey]);
+  }, [store.lines, ym, ownerF, statusF, q, sortKey, today]);
   const rowAgg = aggregate(rows);
 
   const names = useMemo(() => Array.from(new Set([...customerNames, ...store.lines.map((l) => l.customer)])).sort(), [customerNames, store.lines]);
@@ -219,6 +237,28 @@ export default function RevenueManager() {
       history: [...l.history, { at: nowIso(), by: op, action: `入金削除 ${yen(amount)}` }],
     } : l) }));
     setEditPay(null);
+  }
+  // ファイル添付（3MB/件まで・DataURLで保存）
+  function addAttachments(lineId: string, files: FileList | null) {
+    if (!files || !files.length) return;
+    const MAX = 3 * 1024 * 1024;
+    const arr = Array.from(files);
+    const big = arr.filter((f) => f.size > MAX);
+    if (big.length) alert(`3MBを超えるファイルは添付できません：\n${big.map((f) => f.name).join("\n")}`);
+    const ok = arr.filter((f) => f.size <= MAX);
+    if (!ok.length) return;
+    Promise.all(ok.map((f) => new Promise<Attachment>((res, rej) => {
+      const rd = new FileReader();
+      rd.onload = () => res({ id: uid(), name: f.name, type: f.type, size: f.size, dataUrl: String(rd.result) });
+      rd.onerror = () => rej(rd.error);
+      rd.readAsDataURL(f);
+    }))).then((atts) => {
+      setStore((prev) => ({ ...prev, lines: prev.lines.map((l) => l.id === lineId ? { ...l, attachments: [...(l.attachments || []), ...atts], updatedAt: nowIso(), updatedBy: op, history: [...l.history, { at: nowIso(), by: op, action: `ファイル添付 ${atts.map((a) => a.name).join("・")}` }] } : l) }));
+    }).catch(() => alert("ファイルの読み込みに失敗しました。"));
+  }
+  function removeAttachment(lineId: string, attId: string) {
+    if (!confirm("この添付ファイルを削除しますか？")) return;
+    setStore((prev) => ({ ...prev, lines: prev.lines.map((l) => l.id === lineId ? { ...l, attachments: (l.attachments || []).filter((a) => a.id !== attId), updatedAt: nowIso(), updatedBy: op, history: [...l.history, { at: nowIso(), by: op, action: "ファイル削除" }] } : l) }));
   }
   // 入金モーダルを開く（残高を初期値に）
   function openPay(l: RevLine) {
@@ -302,6 +342,9 @@ export default function RevenueManager() {
   const liveIn = Math.round(liveEx * (1 + S.taxRate / 100));
   const nextYm = (() => { const [y, m] = today.slice(0, 7).split("-").map(Number); const nm = m === 12 ? 1 : m + 1; const ny = m === 12 ? y + 1 : y; return `${ny}-${String(nm).padStart(2, "0")}`; })();
   const paysLine = paysForId ? store.lines.find((l) => l.id === paysForId) ?? null : null;
+  const attachLine = attachForId ? store.lines.find((l) => l.id === attachForId) ?? null : null;
+  const STATUS_FILTERS: ("ALL" | CollectStatus)[] = ["ALL", "FORECAST", "OPEN", "PARTIAL", "PAID", "OVERDUE", "OVERPAID"];
+  const SORT_LABELS: Record<typeof sortKey, string> = { date_desc: "計上日（新しい順）", date_asc: "計上日（古い順）", amount_desc: "金額（多い順）", amount_asc: "金額（少ない順）", name: "会社名" };
 
   return (
     <div className="space-y-5">
@@ -329,11 +372,11 @@ export default function RevenueManager() {
         </div>
       </div>
 
-      {/* ===== 月ナビ ===== */}
+      {/* ===== 月ナビ（左右セレクタのみ・タイムラインなし） ===== */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-white p-3 shadow-card">
-        <button onClick={() => shift(-1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="前月"><Ic n="left" size={18} /></button>
-        <div className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-black text-white">{ym.replace("-", "年")}月</div>
-        <button onClick={() => shift(1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="翌月"><Ic n="right" size={18} /></button>
+        <button onClick={() => shift(-1)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="前月"><Ic n="left" size={18} /></button>
+        <div className="rounded-xl bg-brand-600 px-5 py-2.5 text-base font-black tracking-tight text-white">{ym.replace("-", "年")}月</div>
+        <button onClick={() => shift(1)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="翌月"><Ic n="right" size={18} /></button>
         <span className="ml-1 hidden text-xs font-bold text-muted sm:inline">{fiscalLabel(fy)}</span>
 
         <div className="ml-2 hidden items-center gap-3 rounded-xl bg-surface px-3 py-1.5 text-xs md:flex">
@@ -350,39 +393,35 @@ export default function RevenueManager() {
         <button onClick={() => setShowSettings(true)} className="flex h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="gear" size={15} />設定</button>
       </div>
 
-      {/* ===== 12ヶ月ストリップ ===== */}
-      <div className="rounded-2xl border border-line bg-white p-4 shadow-card">
-        <div className="flex items-end gap-1.5 overflow-x-auto pb-1" style={{ height: 120 }}>
-          {months.map((m, i) => {
-            const a = monthAggs[i]; const b = budget[i];
-            return (
-              <button key={m} onClick={() => setMi(i)} className={`flex min-w-[40px] flex-1 flex-col items-center gap-1 rounded-lg pt-1 ${i === mi ? "bg-brand-50" : "hover:bg-surface"}`}>
-                <div className="relative flex h-[78px] w-full items-end justify-center">
-                  {b > 0 && <div className="absolute left-1 right-1 border-t-2 border-dashed border-amber-400" style={{ bottom: `${(b / stripMax) * 100}%` }} />}
-                  <div className="flex w-3/4 flex-col justify-end">
-                    <div className="w-full rounded-t bg-brand-200" style={{ height: `${(a.forecastEx / stripMax) * 100}%` }} />
-                    <div className="w-full bg-brand-600" style={{ height: `${(a.confirmedEx / stripMax) * 100}%` }} />
-                  </div>
-                </div>
-                <span className={`text-[10px] ${i === mi ? "font-black text-brand-700" : "text-slate-400"}`}>{FY_MONTH_LABELS[i]}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* ===== 明細 ===== */}
       <Panel title={`売上・回収明細 — ${ym.replace("-", "年")}月（${rows.length}件・${taxView === "in" ? "税込" : "税抜"}）`}
         action={
           <div className="flex flex-wrap items-center gap-1.5">
-            <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-bold outline-none focus:border-brand-500">
-              <option value="">担当：すべて</option>
-              {S.owners.map((o) => <option key={o}>{o}</option>)}
-            </select>
             <button onClick={confirmMonth} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700">この月を確定</button>
             <button onClick={() => openNew()} className="flex items-center gap-1 rounded-xl bg-brand-600 px-3.5 py-1.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"><Ic n="plus" size={15} />登録</button>
           </div>
         }>
+        {/* ツールバー：検索・絞り込み・並び替え・出力 */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="会社名・請求書番号で検索…"
+              className="w-56 rounded-xl border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)} className="rounded-xl border border-line bg-white px-2.5 py-2 text-xs font-bold outline-none focus:border-brand-500">
+            <option value="">担当：すべて</option>
+            {S.owners.map((o) => <option key={o}>{o}</option>)}
+          </select>
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value as "ALL" | CollectStatus)} className="rounded-xl border border-line bg-white px-2.5 py-2 text-xs font-bold outline-none focus:border-brand-500">
+            {STATUS_FILTERS.map((s) => <option key={s} value={s}>{s === "ALL" ? "状態：すべて" : STATUS_LABEL[s]}</option>)}
+          </select>
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as typeof sortKey)} className="rounded-xl border border-line bg-white px-2.5 py-2 text-xs font-bold outline-none focus:border-brand-500">
+            {(Object.keys(SORT_LABELS) as (typeof sortKey)[]).map((k) => <option key={k} value={k}>並び替え：{SORT_LABELS[k]}</option>)}
+          </select>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button onClick={exportCsv} className="flex items-center gap-1 rounded-xl border border-line px-3 py-2 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="download" size={14} />CSV</button>
+            <button onClick={printMonth} className="flex items-center gap-1 rounded-xl border border-line px-3 py-2 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Ic n="printer" size={14} />印刷</button>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1000px] text-sm">
             <thead>
@@ -420,6 +459,7 @@ export default function RevenueManager() {
                       <div className="flex justify-end gap-1">
                         <button onClick={() => openPay(r)} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700">入金</button>
                         <button onClick={() => setPaysForId(r.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="入金明細・修正"><Ic n="coins" size={14} /></button>
+                        <button onClick={() => setAttachForId(r.id)} className="relative flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="添付ファイル"><Ic n="clip" size={14} />{(r.attachments?.length ?? 0) > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-black text-white">{r.attachments!.length}</span>}</button>
                         <button onClick={() => setEditFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="売上を編集"><Ic n="pencil" size={14} /></button>
                         <button onClick={() => setHistFor(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="変更履歴"><Ic n="clock" size={14} /></button>
                         <button onClick={() => removeLine(r)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-rose-400 hover:text-rose-500" title="削除"><Ic n="trash" size={14} /></button>
@@ -739,6 +779,7 @@ export default function RevenueManager() {
                             <div className="flex justify-end gap-1">
                               <button onClick={() => openPay(l)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm hover:bg-emerald-700">入金</button>
                               <button onClick={() => setPaysForId(l.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="入金明細・修正"><Ic n="coins" size={13} /></button>
+                              <button onClick={() => setAttachForId(l.id)} className="relative flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="添付ファイル"><Ic n="clip" size={13} />{(l.attachments?.length ?? 0) > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-black text-white">{l.attachments!.length}</span>}</button>
                               <button onClick={() => setEditFor(l)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="売上を編集"><Ic n="pencil" size={13} /></button>
                               <button onClick={() => setHistFor(l)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="変更履歴"><Ic n="clock" size={13} /></button>
                             </div>
@@ -862,6 +903,47 @@ export default function RevenueManager() {
             <div className="mt-4 flex flex-wrap justify-end gap-2">
               {balanceOf(paysLine) < 0 && <button onClick={() => adjustOverpay(paysLine)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white hover:bg-violet-700">過入金を調整</button>}
               <button onClick={() => openPay(paysLine)} className="flex items-center gap-1 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"><Ic n="plus" size={14} />入金を追加</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 添付ファイルモーダル ===== */}
+      {attachLine && (
+        <div className="fixed inset-0 z-[72] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-ink/40" onClick={() => setAttachForId(null)} />
+          <div className="relative w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-black text-ink">添付ファイル</h3>
+                <p className="text-[11px] text-muted">{attachLine.customer} — {attachLine.invoiceNo}</p>
+              </div>
+              <button onClick={() => setAttachForId(null)} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface"><Ic n="x" size={16} /></button>
+            </div>
+            <label className="mb-3 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-line px-4 py-6 text-center hover:border-brand-400 hover:bg-surface">
+              <Ic n="clip" size={20} className="text-brand-500" />
+              <span className="text-sm font-bold text-ink">クリックしてファイルを添付</span>
+              <span className="text-[11px] text-muted">見積書・請求書PDF・画像など（1件3MBまで）</span>
+              <input type="file" multiple className="hidden" onChange={(e) => { addAttachments(attachLine.id, e.target.files); e.currentTarget.value = ""; }} />
+            </label>
+            <div className="max-h-[46vh] space-y-1.5 overflow-auto">
+              {(attachLine.attachments?.length ?? 0) === 0 ? (
+                <p className="rounded-xl border border-dashed border-line px-4 py-5 text-center text-xs text-muted">まだ添付はありません。</p>
+              ) : (
+                attachLine.attachments!.map((a) => (
+                  <div key={a.id} className="flex items-center gap-2 rounded-xl border border-line px-3 py-2">
+                    {a.type.startsWith("image/")
+                      ? <img src={a.dataUrl} alt={a.name} className="h-9 w-9 flex-none rounded-lg object-cover" />
+                      : <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-surface text-[10px] font-black text-muted">{(a.name.split(".").pop() || "?").slice(0, 4).toUpperCase()}</span>}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold text-ink">{a.name}</p>
+                      <p className="text-[10px] text-muted">{a.size < 1024 ? `${a.size}B` : a.size < 1048576 ? `${Math.round(a.size / 1024)}KB` : `${(a.size / 1048576).toFixed(1)}MB`}</p>
+                    </div>
+                    <a href={a.dataUrl} download={a.name} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-brand-500 hover:text-brand-600" title="ダウンロード"><Ic n="download" size={13} /></a>
+                    <button onClick={() => removeAttachment(attachLine.id, a.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-line text-muted hover:border-rose-400 hover:text-rose-500" title="削除"><Ic n="trash" size={13} /></button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
