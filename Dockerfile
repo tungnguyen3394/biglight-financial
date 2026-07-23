@@ -1,11 +1,14 @@
 # ---- deps: cài thư viện ----
 FROM node:20-alpine AS deps
+# OpenSSL cần cho Prisma (tải đúng engine linux-musl-openssl-3.0.x khi npm ci)
+RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
 # ---- builder: build Next.js (standalone) ----
 FROM node:20-alpine AS builder
+RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -14,6 +17,7 @@ RUN npm run build
 
 # ---- runner: image chạy production ----
 FROM node:20-alpine AS runner
+RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

@@ -6,7 +6,9 @@
 // Lưu ý SQLite: không hỗ trợ enum/Decimal → dùng String (ghi chú giá trị) và Int (tiền yên = số nguyên).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Alpine (musl) trong Docker cần engine openssl-3.0.x
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
