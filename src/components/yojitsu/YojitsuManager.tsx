@@ -5,10 +5,12 @@ import Panel from "@/components/ui/Panel";
 import Icon from "@/components/Icon";
 import {
   METRICS, INPUT_METRICS, FY_YEARS, STORAGE_KEY,
-  defaultStore, emptyYear, getSeries, sum, toMan, fromMan, manStr,
+  defaultStore, emptyYear, getSeries, migrateStore, sum, toMan, fromMan, manStr,
   type Store, type InputMetric, type MetricKey,
 } from "@/lib/yojitsu";
 import { fiscalLabel, FY_MONTH_LABELS, fiscalYearOf, fiscalMonthIndex, deltaPct } from "@/lib/fiscal";
+import MikomiTable from "./MikomiTable";
+import MeetingReport from "./MeetingReport";
 
 const yenFull = (n: number) => "¥" + Math.round(n).toLocaleString("ja-JP");
 
@@ -51,22 +53,30 @@ function Delta({ cur, base, good }: { cur: number; base: number; good: boolean }
   return <span className={`font-bold tabular-nums ${ok ? "text-emerald-600" : "text-red-600"}`}>{d >= 0 ? "+" : ""}{d.toFixed(1)}%</span>;
 }
 
+type View = "dash" | "mikomi" | "meeting";
+const VIEW_TABS: { key: View; label: string }[] = [
+  { key: "dash", label: "ダッシュボード" },
+  { key: "mikomi", label: "見込実績表" },
+  { key: "meeting", label: "ミーティング報告書" },
+];
+
 export default function YojitsuManager() {
   const [store, setStore] = useState<Store>(() => defaultStore());
   const [year, setYear] = useState(2025);
+  const [view, setView] = useState<View>("dash");
   const [gran, setGran] = useState<Gran>("quarter");
   const [cum, setCum] = useState(false);
   const [metric, setMetric] = useState<MetricKey>("revenue");
   const [editMonth, setEditMonth] = useState(10);
   const [showBudget, setShowBudget] = useState(false);
-  const [annualDraft, setAnnualDraft] = useState<Record<InputMetric, string>>({ revenue: "", cogs: "", sga: "" });
+  const [annualDraft, setAnnualDraft] = useState<Record<InputMetric, string>>({ revenue: "", cogs: "", sga: "", nonop: "" });
   const [menuOpen, setMenuOpen] = useState(false);
   const ready = useRef(false);
 
   useEffect(() => {
     const iso = new Date().toISOString().slice(0, 10);
     setYear(fiscalYearOf(iso)); setEditMonth(fiscalMonthIndex(iso));
-    try { const raw = window.localStorage.getItem(STORAGE_KEY); if (raw) setStore(JSON.parse(raw) as Store); } catch { /* ignore */ }
+    try { const raw = window.localStorage.getItem(STORAGE_KEY); if (raw) setStore(migrateStore(JSON.parse(raw) as Store)); } catch { /* ignore */ }
     ready.current = true;
   }, []);
   useEffect(() => { if (!ready.current) return; try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch { /* ignore */ } }, [store]);
@@ -84,6 +94,14 @@ export default function YojitsuManager() {
     setStore((prev) => { const y = prev[String(year)] ?? emptyYear(); return { ...prev, [String(year)]: { ...y, plan: { ...y.plan, [m]: Array(12).fill(per) } } }; });
   }
   function resetSample() { if (!confirm("サンプルデータに戻します。よろしいですか？")) return; setStore(defaultStore()); }
+  // 昨年実績の入力（ミーティング報告書の昨年比用）— 前年度の actual に保存
+  function setPrevActual(m: InputMetric, month: number, manV: number) {
+    setStore((prev) => {
+      const fy = String(year - 1); const y = prev[fy] ?? emptyYear();
+      const arr = [...y.actual[m]]; arr[month] = fromMan(manV);
+      return { ...prev, [fy]: { ...y, actual: { ...y.actual, [m]: arr } } };
+    });
+  }
 
   // ヒーロー：主要3指標の通期（年間）
   const heroKeys: MetricKey[] = ["revenue", "gross", "operating"];
@@ -116,14 +134,16 @@ export default function YojitsuManager() {
   return (
     <div className="space-y-6">
       {/* ===== 仕組みの説明（1行） ===== */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-3xl border border-line/70 bg-white px-5 py-3.5 text-sm shadow-card">
-        <span className="font-black text-ink">仕組み：</span>
-        <span className="text-muted"><b className="text-brand-700">予算</b> = 計画</span>
-        <span className="text-muted"><b className="text-emerald-600">実績</b> = 実際</span>
-        <span className="text-muted"><b className="text-ink">差異</b> = 実績 − 予算</span>
-        <span className="text-muted"><b className="text-ink">達成率</b> = 実績 ÷ 予算</span>
-        <span className="hidden text-slate-400 lg:inline">粗利 = 売上 − 原価 ／ 営業利益 = 粗利 − 販管費（自動）</span>
-      </div>
+      {view === "dash" && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-3xl border border-line/70 bg-white px-5 py-3.5 text-sm shadow-card">
+          <span className="font-black text-ink">仕組み：</span>
+          <span className="text-muted"><b className="text-brand-700">予算</b> = 計画</span>
+          <span className="text-muted"><b className="text-emerald-600">実績</b> = 実際</span>
+          <span className="text-muted"><b className="text-ink">差異</b> = 実績 − 予算</span>
+          <span className="text-muted"><b className="text-ink">達成率</b> = 実績 ÷ 予算</span>
+          <span className="hidden text-slate-400 lg:inline">粗利 = 売上 − 原価 ／ 営業利益 = 粗利 − 販管費 ／ 経常利益 = 営業利益 ＋ 営業外収支（自動）</span>
+        </div>
+      )}
 
       {/* ===== ツールバー ===== */}
       <div className="flex flex-wrap items-center gap-2.5 rounded-3xl border border-line/70 bg-white p-3.5 shadow-card">
@@ -131,7 +151,13 @@ export default function YojitsuManager() {
           className="rounded-xl border border-line bg-white px-3 py-2 text-sm font-bold text-ink outline-none focus:border-brand-500">
           {FY_YEARS.map((y) => <option key={y} value={y}>{fiscalLabel(y)}</option>)}
         </select>
-        <span className="text-xs text-muted">会計年度 8/1〜7/31</span>
+        {/* 表示切替：ダッシュボード / 見込実績表 / ミーティング報告書 */}
+        <div className="inline-flex overflow-hidden rounded-xl border border-line">
+          {VIEW_TABS.map((v) => (
+            <button key={v.key} onClick={() => setView(v.key)}
+              className={`px-3.5 py-2 text-xs font-bold transition ${view === v.key ? "bg-brand-600 text-white" : "bg-white text-muted hover:bg-surface"}`}>{v.label}</button>
+          ))}
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
           <button onClick={() => setShowBudget(true)} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">＋ 予算を登録</button>
           <div className="relative">
@@ -148,6 +174,15 @@ export default function YojitsuManager() {
         </div>
       </div>
 
+      {/* ===== ビュー：見込実績表 ===== */}
+      {view === "mikomi" && <MikomiTable yearData={yearData} year={year} />}
+
+      {/* ===== ビュー：ミーティング報告書 ===== */}
+      {view === "meeting" && (
+        <MeetingReport yearData={yearData} prevData={prevData} year={year} onSetPrevActual={setPrevActual} />
+      )}
+
+      {view === "dash" && (<>
       {/* ===== ヒーロー：通期 予算 vs 実績（主要3指標） ===== */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {hero.map((h) => {
@@ -292,7 +327,7 @@ export default function YojitsuManager() {
                       <input type="number" value={toMan(actual) || ""} onChange={(e) => setBook("actual", m.key, editMonth, Number(e.target.value) || 0)}
                         placeholder="0" className="w-32 rounded-lg border border-line bg-white px-2.5 py-1.5 text-right font-semibold text-ink outline-none focus:border-brand-500" />
                     </td>
-                    <td className="py-2.5 text-right font-bold">{plan ? <span className={rateTone(rate, m.key === "revenue")}>{rate}%</span> : <span className="text-slate-300">—</span>}</td>
+                    <td className="py-2.5 text-right font-bold">{plan ? <span className={rateTone(rate, m.key === "revenue" || m.key === "nonop")}>{rate}%</span> : <span className="text-slate-300">—</span>}</td>
                   </tr>
                 );
               })}
@@ -300,12 +335,13 @@ export default function YojitsuManager() {
             <tfoot>
               <tr className="border-t border-line text-xs text-muted">
                 <td className="pt-2.5 font-bold text-ink">自動計算</td>
-                <td className="pt-2.5 text-right" colSpan={3}>粗利 <span className="font-black text-ink">{manStr(series.gross.actual[editMonth])}</span>万 ／ 営業利益 <span className="font-black text-ink">{manStr(series.operating.actual[editMonth])}</span>万</td>
+                <td className="pt-2.5 text-right" colSpan={3}>粗利 <span className="font-black text-ink">{manStr(series.gross.actual[editMonth])}</span>万 ／ 営業利益 <span className="font-black text-ink">{manStr(series.operating.actual[editMonth])}</span>万 ／ 経常利益 <span className="font-black text-ink">{manStr(series.ordinary.actual[editMonth])}</span>万</td>
               </tr>
             </tfoot>
           </table>
         </div>
       </Panel>
+      </>)}
 
       {/* ===== Modal ① 予算登録 ===== */}
       {showBudget && (
@@ -359,6 +395,12 @@ export default function YojitsuManager() {
                     <td className="whitespace-nowrap px-1 py-1.5 text-center text-[9px] text-violet-600">自動</td>
                     {FY_MONTH_LABELS.map((_, mi) => <td key={mi} className={`px-0.5 py-1.5 text-right text-[11px] font-bold tabular-nums ${series.operating.plan[mi] < 0 ? "text-red-600" : "text-violet-700"}`}>{manStr(series.operating.plan[mi])}</td>)}
                     <td className={`px-1.5 py-1.5 text-right text-[11px] font-black tabular-nums ${sum(series.operating.plan) < 0 ? "text-red-600" : "text-violet-700"}`}>{manStr(sum(series.operating.plan))}</td>
+                  </tr>
+                  <tr className="bg-orange-50/50">
+                    <td className="sticky left-0 z-10 whitespace-nowrap bg-orange-50 py-1.5 pr-2 text-left text-[13px] font-black text-orange-700">経常利益</td>
+                    <td className="whitespace-nowrap px-1 py-1.5 text-center text-[9px] text-orange-600">自動</td>
+                    {FY_MONTH_LABELS.map((_, mi) => <td key={mi} className={`px-0.5 py-1.5 text-right text-[11px] font-bold tabular-nums ${series.ordinary.plan[mi] < 0 ? "text-red-600" : "text-orange-700"}`}>{manStr(series.ordinary.plan[mi])}</td>)}
+                    <td className={`px-1.5 py-1.5 text-right text-[11px] font-black tabular-nums ${sum(series.ordinary.plan) < 0 ? "text-red-600" : "text-orange-700"}`}>{manStr(sum(series.ordinary.plan))}</td>
                   </tr>
                 </tbody>
               </table>
