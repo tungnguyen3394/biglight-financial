@@ -2,6 +2,9 @@
 # Caddy tự route finance.biglight.jp -> app:3000 và cấp HTTPS (Let's Encrypt).
 # KHÔNG mở port ở đây — Caddy chung (mạng "web") lo việc đó.
 #   DNS: finance.biglight.jp -> IP_VPS (đã trỏ)
+#
+# TRƯỚC KHI CHẠY: tạo file .env cạnh file này (xem .env.example):
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / NEXTAUTH_SECRET
 #   docker compose up -d --build
 services:
   app:
@@ -9,11 +12,20 @@ services:
     image: biglight-financial:latest
     container_name: biglight-financial
     restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: "file:/app/data/app.db"   # SQLite trong volume (đè giá trị dev trong .env)
+      NEXTAUTH_URL: "https://finance.biglight.jp"
+    volumes:
+      - dbdata:/app/data                       # dữ liệu user/lịch sử login sống qua các lần rebuild
     networks:
       - web
     labels:
       caddy: finance.biglight.jp
       caddy.reverse_proxy: "{{upstreams 3000}}"
+
+volumes:
+  dbdata:
 
 networks:
   web:

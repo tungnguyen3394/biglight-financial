@@ -1,11 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // ハートビート — 60秒ごとに lastSeen を更新（ユーザー一覧のオンライン表示用）
+  useEffect(() => {
+    const ping = () => { fetch("/api/heartbeat", { method: "POST" }).catch(() => { /* ignore */ }); };
+    ping();
+    const t = setInterval(ping, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   return (
     <div className="min-h-screen bg-surface">

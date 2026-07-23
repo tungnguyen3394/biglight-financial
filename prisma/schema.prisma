@@ -1,39 +1,55 @@
-// BIGLIGHT Management System — Schema database ban đầu (Giai đoạn 1).
-// Mục tiêu: đặt nền tảng cho các module. Chưa dùng ở Giai đoạn 1 (UI chạy bằng dữ liệu mẫu),
-// nhưng đã sẵn sàng để `prisma db push` khi bước sang Giai đoạn 2.
+// BIGLIGHT Management System — Database schema.
+// Giai đoạn hiện tại: SQLite (file trong Docker volume) — đủ cho app nội bộ, không cần server DB riêng.
+// Auth: Google OAuth (NextAuth) — bảng User + LoginLog dùng THẬT ngay bây giờ.
+// Các bảng nghiệp vụ (Customer, Contract, Revenue…) là nền cho Giai đoạn 2 (UI hiện chạy localStorage).
 //
-// Nguyên tắc: KHÔNG hard-code danh mục — mọi phân loại (loại chi phí, loại doanh thu,
-// nhóm khách hàng…) đều nằm ở bảng `Category` để cấu hình động.
+// Lưu ý SQLite: không hỗ trợ enum/Decimal → dùng String (ghi chú giá trị) và Int (tiền yên = số nguyên).
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-// ---------- Người dùng / Nhân viên ----------
-enum Role {
-  ADMIN
-  MANAGER
-  STAFF
-  VIEWER
+// ---------- Người dùng (Google login) ----------
+// role:   "ADMIN" | "MANAGER" | "STAFF" | "VIEWER"
+// status: "PENDING"(chờ admin phê duyệt) | "ACTIVE" | "DISABLED"
+model User {
+  id         String    @id @default(cuid())
+  email      String    @unique
+  name       String
+  image      String?   // avatar Google
+  role       String    @default("STAFF")
+  status     String    @default("PENDING")
+  canView    Boolean   @default(true)  // quyền xem
+  canEdit    Boolean   @default(false) // quyền sửa
+  canDelete  Boolean   @default(false) // quyền xóa
+  department String?
+  lastSeenAt  DateTime? // heartbeat → trạng thái online
+  lastLoginAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  logins    LoginLog[]
+  contracts Contract[]
+  okrs      Okr[]
 }
 
-model User {
+// Lịch sử đăng nhập
+model LoginLog {
   id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  role      Role     @default(STAFF)
-  department String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  userId    String
+  email     String
+  at        DateTime @default(now())
+  ip        String?
+  userAgent String?
 
-  contracts   Contract[]
-  okrs        Okr[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, at])
 }
 
 // ---------- Danh mục động (không hard-code) ----------
@@ -73,29 +89,23 @@ model Customer {
 }
 
 // ---------- Hợp đồng ----------
-enum ContractStatus {
-  DRAFT
-  ACTIVE
-  SUSPENDED
-  CLOSED
-}
-
+// status: "DRAFT" | "ACTIVE" | "SUSPENDED" | "CLOSED"
 model Contract {
-  id         String         @id @default(cuid())
-  code       String         @unique
+  id         String    @id @default(cuid())
+  code       String    @unique
   title      String
   customerId String
   ownerId    String?
-  typeCode   String?        // -> Category(type="CONTRACT_TYPE")
-  amount     Decimal        @default(0) @db.Decimal(14, 2)
+  typeCode   String?   // -> Category(type="CONTRACT_TYPE")
+  amount     Int       @default(0) // yên
   startDate  DateTime?
   endDate    DateTime?
-  status     ContractStatus @default(DRAFT)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  status     String    @default("DRAFT")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
-  customer Customer @relation(fields: [customerId], references: [id])
-  owner    User?    @relation(fields: [ownerId], references: [id])
+  customer Customer  @relation(fields: [customerId], references: [id])
+  owner    User?     @relation(fields: [ownerId], references: [id])
   revenues Revenue[]
 }
 
@@ -105,7 +115,7 @@ model Revenue {
   customerId   String
   contractId   String?
   categoryCode String?  // -> Category(type="REVENUE")
-  amount       Decimal  @db.Decimal(14, 2)
+  amount       Int      // yên
   bookedAt     DateTime // ngày ghi nhận doanh thu
   note         String?
   createdAt    DateTime @default(now())
@@ -121,7 +131,7 @@ model Expense {
   id           String   @id @default(cuid())
   categoryCode String?  // -> Category(type="EXPENSE")
   vendor       String?
-  amount       Decimal  @db.Decimal(14, 2)
+  amount       Int      // yên
   spentAt      DateTime
   note         String?
   createdAt    DateTime @default(now())
@@ -130,23 +140,17 @@ model Expense {
 }
 
 // ---------- Công nợ & thu hồi (売掛金・回収) ----------
-enum ReceivableStatus {
-  OPEN      // chưa thu
-  PARTIAL   // thu một phần
-  PAID      // đã thu đủ
-  OVERDUE   // quá hạn
-}
-
+// status: "OPEN" | "PARTIAL" | "PAID" | "OVERDUE"
 model Receivable {
-  id         String           @id @default(cuid())
+  id         String   @id @default(cuid())
   customerId String
   invoiceNo  String?
-  amount     Decimal          @db.Decimal(14, 2)
-  paidAmount Decimal          @default(0) @db.Decimal(14, 2)
+  amount     Int      // yên
+  paidAmount Int      @default(0)
   dueDate    DateTime
-  status     ReceivableStatus @default(OPEN)
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  status     String   @default("OPEN")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   customer    Customer     @relation(fields: [customerId], references: [id])
   collections Collection[]
@@ -158,7 +162,7 @@ model Receivable {
 model Collection {
   id           String   @id @default(cuid())
   receivableId String
-  amount       Decimal  @db.Decimal(14, 2)
+  amount       Int      // yên
   collectedAt  DateTime
   method       String?  // bank / cash / ...
   note         String?
@@ -174,8 +178,8 @@ model BudgetPlan {
   year      Int
   month     Int      // 1-12
   metric    String
-  planned   Decimal  @db.Decimal(14, 2)
-  actual    Decimal  @default(0) @db.Decimal(14, 2)
+  planned   Int      @default(0) // yên
+  actual    Int      @default(0)
   note      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -185,34 +189,28 @@ model BudgetPlan {
 }
 
 // ---------- OKR / KPI ----------
-enum OkrStatus {
-  ON_TRACK
-  AT_RISK
-  BEHIND
-  DONE
-}
-
+// status: "ON_TRACK" | "AT_RISK" | "BEHIND" | "DONE"
 model Okr {
-  id         String     @id @default(cuid())
-  title      String
-  ownerId    String?
-  quarter    String     // "2026-Q3"
-  progress   Int        @default(0) // 0-100
-  status     OkrStatus  @default(ON_TRACK)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  id        String   @id @default(cuid())
+  title     String
+  ownerId   String?
+  quarter   String   // "2026-Q3"
+  progress  Int      @default(0) // 0-100
+  status    String   @default("ON_TRACK")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   owner      User?       @relation(fields: [ownerId], references: [id])
   keyResults KeyResult[]
 }
 
 model KeyResult {
-  id       String  @id @default(cuid())
-  okrId    String
-  title    String
-  target   Float
-  current  Float   @default(0)
-  unit     String?
+  id      String  @id @default(cuid())
+  okrId   String
+  title   String
+  target  Float
+  current Float   @default(0)
+  unit    String?
 
   okr Okr @relation(fields: [okrId], references: [id], onDelete: Cascade)
 }

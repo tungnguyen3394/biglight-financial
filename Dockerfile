@@ -12,7 +12,7 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-# ---- runner: image nhẹ để chạy ----
+# ---- runner: image chạy production ----
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
@@ -22,6 +22,11 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Prisma CLI + schema — để chạy `prisma db push` khởi tạo/migrate SQLite lúc start
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+# Thư mục chứa file SQLite (mount volume vào đây)
+RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 USER nextjs
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node server.js"]

@@ -1,11 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { NAV } from "@/lib/nav";
 
 export default function Header({ onMenu }: { onMenu: () => void }) {
   const pathname = usePathname();
   const current = NAV.find((n) => pathname === n.href || pathname.startsWith(n.href + "/"));
+  const { data: session } = useSession();
+  const [userMenu, setUserMenu] = useState(false);
+  const u = session?.user;
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-white/90 px-4 backdrop-blur sm:px-6">
@@ -39,12 +44,35 @@ export default function Header({ onMenu }: { onMenu: () => void }) {
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.5 21a1.5 1.5 0 0 0 3 0" /></svg>
           <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500" />
         </button>
-        <div className="flex items-center gap-2 rounded-xl px-1.5 py-1 hover:bg-surface">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-black text-brand-700">T</div>
-          <div className="hidden leading-tight sm:block">
-            <div className="text-xs font-bold text-ink">Tung Nguyen</div>
-            <div className="text-[10px] text-muted">Admin</div>
-          </div>
+        <div className="relative">
+          <button onClick={() => setUserMenu((o) => !o)} className="flex items-center gap-2 rounded-xl px-1.5 py-1 hover:bg-surface">
+            {u?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={u.image} alt="" referrerPolicy="no-referrer" className="h-8 w-8 rounded-full object-cover" />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-black text-brand-700">{u?.name?.charAt(0) ?? "?"}</div>
+            )}
+            <div className="hidden leading-tight text-left sm:block">
+              <div className="text-xs font-bold text-ink">{u?.name ?? "…"}</div>
+              <div className="text-[10px] text-muted">{u?.isAdmin ? "Admin" : u?.role ?? ""}</div>
+            </div>
+          </button>
+          {userMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setUserMenu(false)} />
+              <div className="absolute right-0 z-50 mt-1.5 w-52 rounded-2xl border border-line bg-white p-1.5 shadow-card">
+                <div className="border-b border-line/60 px-3 py-2">
+                  <p className="truncate text-xs font-bold text-ink">{u?.name}</p>
+                  <p className="truncate text-[10px] text-muted">{u?.email}</p>
+                </div>
+                <button onClick={() => signOut({ callbackUrl: "/login" })}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-bold text-rose-500 hover:bg-rose-50">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>
+                  ログアウト
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>
