@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   STORAGE_KEY, CONTRACT_TYPES, CUSTOMER_GROUPS, CONTRACT_TONE, sampleCustomers, yen,
   type Customer, type Contract,
@@ -140,7 +141,7 @@ export default function CustomersManager() {
                   className="rounded-xl border border-line px-3 py-1.5 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">
                   {detail.active ? "休止にする" : "取引再開"}
                 </button>
-                <button onClick={() => setDetailId(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる">✕</button>
+                <button onClick={() => setDetailId(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる"><Icon name="close" size={16} /></button>
               </div>
             </div>
 

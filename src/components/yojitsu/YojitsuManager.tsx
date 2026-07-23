@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   METRICS, INPUT_METRICS, FY_YEARS, STORAGE_KEY,
   defaultStore, emptyYear, getSeries, sum, toMan, fromMan, manStr,
@@ -134,7 +135,7 @@ export default function YojitsuManager() {
         <div className="ml-auto flex items-center gap-1.5">
           <button onClick={() => setShowBudget(true)} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">＋ 予算を登録</button>
           <div className="relative">
-            <button onClick={() => setMenuOpen((o) => !o)} className="flex h-9 items-center rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">⚙ 設定</button>
+            <button onClick={() => setMenuOpen((o) => !o)} className="flex h-9 items-center gap-1 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Icon name="gear" size={13} />設定</button>
             {menuOpen && (<>
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 z-50 mt-1.5 w-40 rounded-2xl border border-line bg-white p-1.5 shadow-card">
@@ -314,7 +315,7 @@ export default function YojitsuManager() {
             <div className="bg-gradient-to-r from-brand-600 to-brand-700 px-6 py-4 text-white">
               <div className="flex items-center justify-between">
                 <div><h3 className="text-lg font-black">① 予算登録 — {fiscalLabel(year)}</h3><p className="mt-0.5 text-[11px] opacity-85">年間一括→「均等」で12ヶ月に配分、または各月を直接入力。粗利・営業利益は自動計算。</p></div>
-                <button onClick={() => setShowBudget(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-white/80 hover:bg-white/15">✕</button>
+                <button onClick={() => setShowBudget(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-white/80 hover:bg-white/15" aria-label="閉じる"><Icon name="close" size={16} /></button>
               </div>
             </div>
             <div className="overflow-auto p-4">

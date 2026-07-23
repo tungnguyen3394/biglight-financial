@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import { NAV } from "@/lib/nav";
 import {
   STORAGE_KEY, ROLE_TONE, presetPerms, sampleUsers,
@@ -129,7 +130,7 @@ export default function UsersManager() {
                 <h3 className="text-base font-black text-ink">権限設定 — {target.name}</h3>
                 <p className="text-[11px] text-muted">このユーザーが閲覧できるモジュールを設定します。メニューには有効なモジュールのみ表示されます。</p>
               </div>
-              <button onClick={() => setPermFor(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる">✕</button>
+              <button onClick={() => setPermFor(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる"><Icon name="close" size={16} /></button>
             </div>
 
             <div className="overflow-auto p-5">

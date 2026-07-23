@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Icon from "@/components/Icon";
 import { STORAGE_KEY as K_YOJITSU, defaultStore } from "@/lib/yojitsu";
 import { STORAGE_KEY as K_REVENUE, sampleStore } from "@/lib/revenue";
 import { STORAGE_KEY as K_EXPENSE, sampleExpenses } from "@/lib/expenses";
@@ -46,7 +47,7 @@ export default function DemoData() {
     <div className="rounded-3xl border border-brand-200 bg-brand-50/40 p-6 shadow-card">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h3 className="text-base font-black text-ink">🎬 デモデータ（動作確認用）</h3>
+          <h3 className="flex items-center gap-1.5 text-base font-black text-ink"><Icon name="film" size={16} className="text-brand-600" />デモデータ（動作確認用）</h3>
           <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">
             1クリックで全モジュール（予実・売上回収・支出・顧客契約・OKR・User）にサンプルデータを一括投入。すぐに全画面をチェックできます。
           </p>
@@ -55,8 +56,8 @@ export default function DemoData() {
           </div>
         </div>
         <div className="flex flex-none flex-col gap-2">
-          <button onClick={loadAll} className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700">🎬 デモデータを一括投入</button>
-          <button onClick={clearAll} className="rounded-xl border border-line bg-white px-5 py-2.5 text-sm font-bold text-muted hover:border-rose-400 hover:text-rose-500">🗑 全データを削除</button>
+          <button onClick={loadAll} className="flex items-center justify-center gap-1.5 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700"><Icon name="film" size={14} />デモデータを一括投入</button>
+          <button onClick={clearAll} className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-white px-5 py-2.5 text-sm font-bold text-muted hover:border-rose-400 hover:text-rose-500"><Icon name="trash" size={14} />全データを削除</button>
         </div>
       </div>
       {done && <p className="mt-4 rounded-xl bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-600">{done}</p>}

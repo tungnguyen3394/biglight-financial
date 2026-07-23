@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   STORAGE_KEY, STATUS_LABEL, STATUS_TONE,
   sampleSales, statusOf, paidOf, remainOf, balanceOf, discrepancies, daysLate,
@@ -264,8 +265,8 @@ export default function SalesManager() {
         ))}
       </div>
 
-      {/* ===== 📊 売上サマリー（累計・前期比を1画面で表示）===== */}
-      <Panel title={`📊 売上サマリー（${fiscalLabel(fy)} ・ 対象月 ${FY_MONTH_LABELS[mi]}）`}
+      {/* ===== 売上サマリー（累計・前期比を1画面で表示）===== */}
+      <Panel icon="chart" title={`売上サマリー（${fiscalLabel(fy)} ・ 対象月 ${FY_MONTH_LABELS[mi]}）`}
         action={
           <div className="flex items-center gap-2">
             <select value={mi} onChange={(e) => setMi(Number(e.target.value))}
@@ -310,7 +311,7 @@ export default function SalesManager() {
           </table>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-sky-50 px-4 py-2.5 text-xs">
-          <span className="font-black text-sky-700">🔭 年度見通し（実績＋予定）</span>
+          <span className="flex items-center gap-1.5 font-black text-sky-700"><Icon name="telescope" size={14} />年度見通し（実績＋予定）</span>
           <span className="font-black text-sky-700">{yen(outlook)}</span>
           <span className="text-sky-600">= 実績 {yen(sumRange(actualRev, 0, 11))} ＋ 予定 {yen(sumRange(fcRev, 0, 11))}</span>
         </div>
@@ -344,9 +345,9 @@ export default function SalesManager() {
           </div>
         </Panel>
 
-        <Panel title="⚠️ 延滞レポート（支払遅延企業）">
+        <Panel icon="warning" title="延滞レポート（支払遅延企業）">
           {lateRows.length === 0 ? (
-            <p className="rounded-xl bg-emerald-50 px-4 py-6 text-center text-sm font-bold text-emerald-600">延滞なし 🎉</p>
+            <p className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-50 px-4 py-6 text-center text-sm font-bold text-emerald-600"><Icon name="check" size={16} />延滞なし</p>
           ) : (
             <ul className="space-y-3">
               {lateRows.map((r) => (
@@ -370,7 +371,7 @@ export default function SalesManager() {
 
       {/* ===== 入金差異リスト ===== */}
       {diffRows.length > 0 && (
-        <Panel title="🔍 入金差異リスト（過不足のある取引）"
+        <Panel icon="search" title="入金差異リスト（過不足のある取引）"
           action={<span className="text-[11px] text-slate-400">入金があるのに金額が一致しない取引 — {diffRows.length}件</span>}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">
@@ -567,7 +568,7 @@ export default function SalesManager() {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={printCustomer} className="rounded-xl border border-line px-3 py-1.5 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">明細を印刷 / PDF</button>
-                <button onClick={() => setDetail(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる">✕</button>
+                <button onClick={() => setDetail(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる"><Icon name="close" size={16} /></button>
               </div>
             </div>
 
@@ -638,7 +639,7 @@ export default function SalesManager() {
               {/* この顧客の予定売上 */}
               {detailData.fcRows.length > 0 && (
                 <div>
-                  <h4 className="mb-2 text-sm font-black text-sky-700">🔭 予定売上（見込み）</h4>
+                  <h4 className="mb-2 flex items-center gap-1.5 text-sm font-black text-sky-700"><Icon name="telescope" size={14} />予定売上（見込み）</h4>
                   <div className="overflow-x-auto rounded-xl border border-sky-200">
                     <table className="w-full min-w-[460px] text-sm">
                       <tbody className="divide-y divide-line">
@@ -735,8 +736,8 @@ export default function SalesManager() {
                 </div>
               </div>
               {draft.isForecast && (
-                <p className="rounded-xl bg-sky-50 px-3 py-2 text-[11px] text-sky-700">
-                  💡 予定売上は売掛金・延滞に含まれません。受注が確定したら「実績に確定」を押して実売上に変換してください。
+                <p className="flex items-start gap-1.5 rounded-xl bg-sky-50 px-3 py-2 text-[11px] text-sky-700">
+                  <Icon name="bulb" size={13} className="mt-0.5 shrink-0" />予定売上は売掛金・延滞に含まれません。受注が確定したら「実績に確定」を押して実売上に変換してください。
                 </p>
               )}
             </div>

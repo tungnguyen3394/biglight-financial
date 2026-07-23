@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   STORAGE_KEY, OWNERS, CATEGORIES, sampleLines, aggregate, grossOf, expandRecurring,
   readBudgetSeries, uid, yen, type RevLine,
@@ -166,11 +167,11 @@ export default function UriageManager() {
     <div className="space-y-5">
       {/* ===== 月ナビゲーション ===== */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-white p-3 shadow-card">
-        <button onClick={() => shift(-1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600">◀</button>
+        <button onClick={() => shift(-1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="前月"><Icon name="chevronRight" size={14} className="rotate-180" /></button>
         <div className="rounded-xl bg-brand-600 px-4 py-2 text-center text-white">
           <span className="text-sm font-black">{ym.replace("-", "年")}月</span>
         </div>
-        <button onClick={() => shift(1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600">▶</button>
+        <button onClick={() => shift(1)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-line text-muted hover:border-brand-500 hover:text-brand-600" aria-label="翌月"><Icon name="chevronRight" size={14} /></button>
         <span className="ml-1 text-xs font-bold text-muted">{fiscalLabel(fy)}</span>
 
         <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)}
@@ -188,7 +189,7 @@ export default function UriageManager() {
       </div>
 
       {/* ===== サマリー 当月 + 累計（ミーティング報告書形式） ===== */}
-      <Panel title={`📊 サマリー（${ym.replace("-", "年")}月）`}>
+      <Panel icon="chart" title={`サマリー（${ym.replace("-", "年")}月）`}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead>

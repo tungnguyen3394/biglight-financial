@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon, { type UiIconName } from "@/components/Icon";
 import {
   STORAGE_KEY, QUARTERS, DEPARTMENTS, EMPLOYEES,
   sampleOkrs, krProgress, objProgress, groupProgress, statusOf,
@@ -144,10 +145,10 @@ export default function OkrManager() {
     setObjs(sampleOkrs());
   }
 
-  const section = (title: string, items: Objective[]) => items.length > 0 && (
+  const section = (title: string, items: Objective[], icon?: UiIconName) => items.length > 0 && (
     <div>
       <div className="mb-2 flex items-center gap-3">
-        <h4 className="text-sm font-black text-ink">{title}</h4>
+        <h4 className="flex items-center gap-1.5 text-sm font-black text-ink">{icon && <Icon name={icon} size={15} className="text-brand-600" />}{title}</h4>
         <span className="text-xs font-bold text-muted">{groupProgress(items)}%</span>
         <div className="w-40"><Bar value={groupProgress(items)} small /></div>
       </div>
@@ -180,7 +181,7 @@ export default function OkrManager() {
       <div className="rounded-2xl border border-line bg-gradient-to-br from-brand-600 to-brand-700 p-6 text-white shadow-card">
         <div className="flex flex-wrap items-center gap-6">
           <div>
-            <p className="text-sm font-bold opacity-90">🏢 組織全体の進捗（{quarter}）</p>
+            <p className="flex items-center gap-1.5 text-sm font-bold opacity-90"><Icon name="building" size={15} />組織全体の進捗（{quarter}）</p>
             <p className="mt-1 text-4xl font-black">{orgProgress}%</p>
           </div>
           <div className="min-w-[220px] flex-1">
@@ -193,13 +194,13 @@ export default function OkrManager() {
       </div>
 
       {/* 全社 */}
-      {section("🏢 全社目標", orgObjs)}
+      {section("全社目標", orgObjs, "building")}
 
       {/* 部署 */}
-      {DEPARTMENTS.map((d) => section(`👥 ${d}`, inQuarter.filter((o) => o.level === "dept" && o.owner === d)))}
+      {DEPARTMENTS.map((d) => section(d, inQuarter.filter((o) => o.level === "dept" && o.owner === d), "users"))}
 
       {/* 個人（メンバー別） */}
-      <Panel title="👤 個人目標（メンバー別）">
+      <Panel icon="user" title="個人目標（メンバー別）">
         <div className="space-y-6">
           {EMPLOYEES.map((emp) => {
             const mine = inQuarter.filter((o) => o.level === "user" && o.owner === emp.name);

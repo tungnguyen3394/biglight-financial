@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   STORAGE_KEY, TIER_LABELS, defaultAccounts, addChildAt, renameAt, deleteAt, type CatNode,
 } from "@/lib/accounts";
@@ -20,7 +21,7 @@ function Node({ node, path, tree, onChange }: { node: CatNode; path: string[]; t
   return (
     <div className="py-0.5" style={{ paddingLeft: depth > 1 ? 16 : 0 }}>
       <div className="flex items-center gap-1.5">
-        {canChild ? <button onClick={() => setOpen(!open)} className="h-5 w-5 flex-none text-[10px] text-slate-400">{open ? "▼" : "▶"}</button> : <span className="h-5 w-5 flex-none" />}
+        {canChild ? <button onClick={() => setOpen(!open)} className="flex h-5 w-5 flex-none items-center justify-center text-slate-400"><Icon name="chevronRight" size={11} className={`transition-transform ${open ? "rotate-90" : ""}`} /></button> : <span className="h-5 w-5 flex-none" />}
         <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${depth === 1 ? "bg-brand-50 text-brand-700" : depth === 2 ? "bg-emerald-50 text-emerald-600" : depth === 3 ? "bg-amber-50 text-amber-600" : "bg-violet-50 text-violet-600"}`}>{TIER_LABELS[depth - 1]}</span>
         {editing ? (
           <>
@@ -30,8 +31,8 @@ function Node({ node, path, tree, onChange }: { node: CatNode; path: string[]; t
         ) : (
           <>
             <span className="text-sm font-semibold text-ink">{node.label}</span>
-            <button onClick={() => { setName(node.label); setEditing(true); }} className="text-[10px] text-slate-400 hover:text-brand-600">✎</button>
-            <button onClick={() => { if (confirm(`「${node.label}」を削除しますか？（配下も削除）`)) onChange(deleteAt(tree, path)); }} className="text-[10px] text-slate-400 hover:text-rose-500">✕</button>
+            <button onClick={() => { setName(node.label); setEditing(true); }} className="text-slate-400 hover:text-brand-600" aria-label="名称変更"><Icon name="pencil" size={11} /></button>
+            <button onClick={() => { if (confirm(`「${node.label}」を削除しますか？（配下も削除）`)) onChange(deleteAt(tree, path)); }} className="text-slate-400 hover:text-rose-500" aria-label="削除"><Icon name="close" size={11} /></button>
           </>
         )}
       </div>
@@ -60,7 +61,7 @@ export default function AccountsMaster() {
   useEffect(() => { if (!ready.current) return; try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tree)); } catch { /* ignore */ } }, [tree]);
 
   return (
-    <Panel title="🗂 勘定科目マスタ（大 › 中 › 小 › 細）"
+    <Panel icon="folder" title="勘定科目マスタ（大 › 中 › 小 › 細）"
       action={<button onClick={() => { if (confirm("初期値に戻しますか？")) setTree(defaultAccounts()); }} className="rounded-lg border border-line px-2.5 py-1 text-xs font-bold text-muted hover:border-rose-400 hover:text-rose-500">初期値</button>}>
       <p className="mb-3 text-[11px] text-muted">ここで定義した科目を、支出・回収などの各画面はドロップダウンで選択します。</p>
       <div className="space-y-1">

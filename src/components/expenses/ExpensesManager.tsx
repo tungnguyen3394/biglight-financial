@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   STORAGE_KEY, LEGACY_KEY, TIER_LABELS, MAX_DEPTH, PAY_METHODS, METHOD_TONE,
   defaultTree, sampleExpenses, migrateV1, childrenAt, labelsOf, underPath,
@@ -84,7 +85,7 @@ function CatRow({ node, path, tree, onChange }: {
       <div className="flex items-center gap-1.5">
         {canHaveChildren ? (
           <button onClick={() => setOpen(!open)} className="flex h-5 w-5 flex-none items-center justify-center rounded text-slate-400 hover:bg-surface">
-            <span className={`text-[10px] transition ${open ? "rotate-90" : ""}`}>▶</span>
+            <Icon name="chevronRight" size={11} className={`transition-transform ${open ? "rotate-90" : ""}`} />
           </button>
         ) : <span className="h-5 w-5 flex-none" />}
         <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${depth === 1 ? "bg-brand-50 text-brand-700" : depth === 2 ? "bg-emerald-50 text-emerald-600" : depth === 3 ? "bg-amber-50 text-amber-600" : "bg-violet-50 text-violet-600"}`}>
@@ -100,9 +101,9 @@ function CatRow({ node, path, tree, onChange }: {
         ) : (
           <>
             <span className="text-sm font-semibold text-ink">{node.label}</span>
-            <button onClick={() => { setName(node.label); setEditing(true); }} className="text-[10px] text-slate-400 hover:text-brand-600">✎ 名称</button>
+            <button onClick={() => { setName(node.label); setEditing(true); }} className="flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-brand-600"><Icon name="pencil" size={10} />名称</button>
             <button onClick={() => { if (confirm(`「${node.label}」を削除しますか？（配下の分類も削除されます。既存の支出データは残ります）`)) onChange(deleteAt(tree, path)); }}
-              className="text-[10px] text-slate-400 hover:text-rose-500">✕ 削除</button>
+              className="flex items-center gap-0.5 text-[10px] text-slate-400 hover:text-rose-500"><Icon name="close" size={10} />削除</button>
           </>
         )}
       </div>
@@ -136,8 +137,8 @@ function TreeRows({ nodes, path, records, tree, expanded, toggle }: {
             <button onClick={() => toggle(pk)}
               className={`flex w-full items-center gap-2 border-b border-line/60 py-2.5 pr-2 text-left hover:bg-surface ${depth === 1 ? "bg-surface/60" : ""}`}
               style={{ paddingLeft: (depth - 1) * 22 + 8 }}>
-              <span className={`flex h-5 w-5 flex-none items-center justify-center text-[10px] text-slate-400 transition ${isOpen ? "rotate-90" : ""}`}>
-                {(kids.length > 0 || exact.length > 0) ? "▶" : ""}
+              <span className={`flex h-5 w-5 flex-none items-center justify-center text-slate-400 transition ${isOpen ? "rotate-90" : ""}`}>
+                {(kids.length > 0 || exact.length > 0) ? <Icon name="chevronRight" size={11} /> : null}
               </span>
               <span className={`flex-1 truncate text-sm ${depth === 1 ? "font-black text-ink" : depth === 2 ? "font-bold text-ink" : "font-semibold text-muted"}`}>{n.label}</span>
               {count > 0 && <span className="flex-none rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-muted">{count}件</span>}
@@ -308,7 +309,7 @@ export default function ExpensesManager() {
       {/* ===== 予算超過アラート ===== */}
       {warnings.length > 0 && (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-black text-red-600">⚠️ 予算超過アラート（{month}）</p>
+          <p className="flex items-center gap-1.5 text-sm font-black text-red-600"><Icon name="warning" size={15} />予算超過アラート（{month}）</p>
           <ul className="mt-1.5 space-y-0.5 text-xs text-red-600">
             {warnings.map((w) => (
               <li key={w.key}><b>{w.label}</b>：実績 {yen(w.spent)} ／ 予算 {yen(w.budget)} → <b>{yen(w.spent - w.budget)} 超過（{Math.round((w.spent / w.budget) * 100)}%）</b></li>
@@ -347,15 +348,15 @@ export default function ExpensesManager() {
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <button onClick={() => openNew(true)} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-brand-700">＋ 支出を登録</button>
-            {/* ⚙ 補助ボタンのメニュー */}
+            {/* 補助ボタンのメニュー */}
             <div className="relative">
-              <button onClick={() => setMenuOpen((o) => !o)} className="flex h-9 items-center gap-1 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600">⚙ 設定</button>
+              <button onClick={() => setMenuOpen((o) => !o)} className="flex h-9 items-center gap-1 rounded-xl border border-line px-3 text-xs font-bold text-muted hover:border-brand-500 hover:text-brand-600"><Icon name="gear" size={13} />設定</button>
               {menuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
                   <div className="absolute right-0 z-50 mt-1.5 w-44 rounded-2xl border border-line bg-white p-1.5 shadow-card">
                     {[
-                      { l: "⚙ 分類設定", fn: () => setShowCats(true) },
+                      { l: "分類設定", fn: () => setShowCats(true) },
                       { l: "予算を設定", fn: () => setEditBudget(true) },
                       { l: "印刷 / PDF", fn: printList },
                     ].map((it) => (
@@ -395,9 +396,9 @@ export default function ExpensesManager() {
           );
         })}
 
-        {/* 📅 定期支払スケジュール */}
+        {/* 定期支払スケジュール */}
         <div className="rounded-2xl border border-line bg-white p-5 shadow-card">
-          <p className="mb-2 text-sm font-black text-ink">📅 定期支払（{month}）</p>
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-black text-ink"><Icon name="calendar" size={15} className="text-brand-600" />定期支払（{month}）</p>
           {schedule.length === 0 ? (
             <p className="text-xs text-slate-400">定期支出はありません。</p>
           ) : (
@@ -577,12 +578,12 @@ export default function ExpensesManager() {
           <div className="relative flex max-h-[86vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <div>
-                <h3 className="text-base font-black text-ink">⚙ 分類マスタ設定</h3>
+                <h3 className="flex items-center gap-1.5 text-base font-black text-ink"><Icon name="gear" size={16} className="text-brand-600" />分類マスタ設定</h3>
                 <p className="text-[11px] text-muted">大 › 中 › 小 › 細（第4階層は任意）— 追加・編集・削除が可能。変更は即時保存されます。</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={resetTreeOnly} className="rounded-xl border border-line px-3 py-1.5 text-xs font-bold text-muted hover:border-rose-400 hover:text-rose-500">初期値に戻す</button>
-                <button onClick={() => setShowCats(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる">✕</button>
+                <button onClick={() => setShowCats(false)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface" aria-label="閉じる"><Icon name="close" size={16} /></button>
               </div>
             </div>
             <div className="overflow-auto p-5">

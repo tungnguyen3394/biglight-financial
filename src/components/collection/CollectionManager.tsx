@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
+import Icon from "@/components/Icon";
 import {
   STORAGE_KEY, PAY_METHODS, sampleCollect, itemReport, leafTargets, nameOfTarget,
   collectedOfTarget, addChild, patchNode, deleteNode, moveNode, newTarget, history, uid, yen,
@@ -48,28 +49,54 @@ function NodeRows({ nodes, itemId, path, onPatch, onAdd, onDel, onMove }: {
   );
 }
 
-// レポート用の対象ツリー（読み取り専用）：名称 · 予定 · 実回収 · 未回収。
-function ReportTree({ nodes, path, store, ym }: { nodes: Target[]; path: string[]; store: CollectStore; ym: string }) {
+// 対象1件の回収記録の詳細（末端ノードをクリックすると表示）。
+function TargetDetail({ store, targetId, ym }: { store: CollectStore; targetId: string; ym: string }) {
+  const recs = store.records.filter((r) => r.targetId === targetId).sort((a, b) => b.date.localeCompare(a.date));
+  if (recs.length === 0) return <p className="border-b border-line/40 py-2 pl-10 text-[11px] text-slate-400">回収記録はまだありません。</p>;
   return (
-    <>
-      {[...nodes].sort((a, b) => a.order - b.order).map((n) => {
-        const col = collectedOfTarget(store, n.id, ym);
-        const leaf = n.children.length === 0;
-        return (
-          <div key={n.id}>
-            <div className="flex items-center gap-2 border-b border-line/40 py-1.5 text-xs" style={{ paddingLeft: path.length * 18 + 6 }}>
-              <span className={`flex-1 truncate ${path.length === 0 ? "font-bold text-ink" : "font-semibold text-muted"}`}>{n.name}</span>
-              {n.paidOut > 0 && <span className="w-24 text-right tabular-nums text-rose-600">支出 {yen(n.paidOut)}</span>}
-              {leaf && <span className="w-24 text-right tabular-nums text-slate-500">予定 {yen(n.expected)}</span>}
-              {leaf && <span className="w-24 text-right tabular-nums text-emerald-600">回収 {col ? yen(col) : "—"}</span>}
-              {leaf && <span className={`w-24 text-right font-bold tabular-nums ${n.expected - col > 0 ? "text-amber-600" : "text-slate-300"}`}>未 {yen(Math.max(0, n.expected - col))}</span>}
-            </div>
-            {n.children.length > 0 && <ReportTree nodes={n.children} path={[...path, n.id]} store={store} ym={ym} />}
-          </div>
-        );
-      })}
-    </>
+    <div className="border-b border-line/40 py-1.5 pl-10 pr-2">
+      {recs.map((r) => (
+        <div key={r.id} className={`flex items-center gap-2 py-1 text-[11px] ${r.ym === ym ? "text-ink" : "text-slate-400"}`}>
+          <span className="w-20 tabular-nums">{r.date}</span>
+          <span className="w-20 text-right font-bold tabular-nums text-emerald-600">{yen(r.amount)}</span>
+          <span className="rounded-full bg-surface px-2 py-0.5 font-bold">{r.method}</span>
+          <span className="truncate">{r.memo || ""}</span>
+          {r.ym === ym && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">当月</span>}
+        </div>
+      ))}
+    </div>
   );
+}
+
+// レポート用の対象ツリー — 段階的に展開：大項目 → 子対象 → 回収記録の詳細。
+function ReportNode({ n, depth, store, ym }: { n: Target; depth: number; store: CollectStore; ym: string }) {
+  const [open, setOpen] = useState(false);
+  const col = collectedOfTarget(store, n.id, ym);
+  const leaf = n.children.length === 0;
+  return (
+    <div>
+      <div
+        className="flex cursor-pointer items-center gap-2 border-b border-line/40 py-1.5 text-xs hover:bg-white/70"
+        style={{ paddingLeft: depth * 18 + 6 }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="chevronRight" size={11} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
+        <span className={`flex-1 truncate ${depth === 0 ? "font-bold text-ink" : "font-semibold text-muted"}`}>{n.name}</span>
+        {!leaf && <span className="text-[10px] text-slate-400">子対象 {n.children.length}件</span>}
+        {n.paidOut > 0 && <span className="w-24 text-right tabular-nums text-rose-600">支出 {yen(n.paidOut)}</span>}
+        {leaf && <span className="w-24 text-right tabular-nums text-slate-500">予定 {yen(n.expected)}</span>}
+        {leaf && <span className="w-24 text-right tabular-nums text-emerald-600">回収 {col ? yen(col) : "—"}</span>}
+        {leaf && <span className={`w-24 text-right font-bold tabular-nums ${n.expected - col > 0 ? "text-amber-600" : "text-slate-300"}`}>未 {yen(Math.max(0, n.expected - col))}</span>}
+      </div>
+      {open && (leaf
+        ? <TargetDetail store={store} targetId={n.id} ym={ym} />
+        : [...n.children].sort((a, b) => a.order - b.order).map((c) => <ReportNode key={c.id} n={c} depth={depth + 1} store={store} ym={ym} />))}
+    </div>
+  );
+}
+
+function ReportTree({ nodes, store, ym }: { nodes: Target[]; store: CollectStore; ym: string }) {
+  return <>{[...nodes].sort((a, b) => a.order - b.order).map((n) => <ReportNode key={n.id} n={n} depth={0} store={store} ym={ym} />)}</>;
 }
 
 export default function CollectionManager() {
@@ -155,7 +182,7 @@ export default function CollectionManager() {
       </div>
 
       {/* ===== レポート ===== */}
-      <Panel title={`📊 回収サマリー（${ym}）`} action={<span className="text-[11px] text-slate-400">行をクリックで対象の内訳を表示</span>}>
+      <Panel icon="chart" title={`回収サマリー（${ym}）`} action={<span className="text-[11px] text-slate-400">行をクリック → 対象 → 子対象 → 記録の詳細</span>}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead>
@@ -173,7 +200,7 @@ export default function CollectionManager() {
               {report.map((r) => (
                 <Fragment key={r.item.id}>
                   <tr className="cursor-pointer hover:bg-surface" onClick={() => toggle(r.item.id)}>
-                    <td className="py-3 font-bold text-ink"><span className={`mr-1.5 inline-block text-[10px] text-slate-400 transition ${expanded.has(r.item.id) ? "rotate-90" : ""}`}>▶</span>{r.item.name}</td>
+                    <td className="py-3 font-bold text-ink"><span className="inline-flex items-center gap-1.5"><Icon name="chevronRight" size={12} className={`text-slate-400 transition-transform ${expanded.has(r.item.id) ? "rotate-90" : ""}`} />{r.item.name}</span></td>
                     <td className="py-3 text-right font-bold tabular-nums text-rose-600">{yen(r.paidOut)}</td>
                     <td className="py-3 text-right tabular-nums text-muted">{yen(r.expected)}</td>
                     <td className="py-3 text-right font-bold tabular-nums text-emerald-600">{yen(r.collected)}</td>
@@ -182,7 +209,7 @@ export default function CollectionManager() {
                   </tr>
                   {expanded.has(r.item.id) && (
                     <tr><td colSpan={6} className="bg-surface/60 px-3 py-2">
-                      <ReportTree nodes={r.item.targets} path={[]} store={store} ym={ym} />
+                      <ReportTree nodes={r.item.targets} store={store} ym={ym} />
                     </td></tr>
                   )}
                 </Fragment>
@@ -203,7 +230,8 @@ export default function CollectionManager() {
       </Panel>
 
       {/* ===== MASTER 項目・対象 ===== */}
-      <Panel title="🗂 回収項目マスタ（多階層の対象を設定）">
+      <Panel icon="folder" title="回収項目マスタ（多階層の対象を設定）" collapsible defaultOpen={false}
+        action={<span className="text-[11px] text-slate-400">クリックで開閉</span>}>
         <div className="space-y-4">
           {store.items.sort((a, b) => a.order - b.order).map((it) => (
             <div key={it.id} className="rounded-2xl border border-line p-3.5">
@@ -238,7 +266,7 @@ export default function CollectionManager() {
       </Panel>
 
       {/* ===== 12ヶ月 回収履歴 + 残高 ===== */}
-      <Panel title="📅 回収履歴・残高（12ヶ月）"
+      <Panel icon="history" title="回収履歴・残高（12ヶ月）" collapsible
         action={
           <div className="flex items-center gap-2">
             <select value={fy} onChange={(e) => setFy(Number(e.target.value))} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-bold outline-none focus:border-brand-500">
@@ -276,7 +304,7 @@ export default function CollectionManager() {
       </Panel>
 
       {/* ===== 回収記録 ===== */}
-      <Panel title={`💴 回収記録一覧（${ym}）`} action={<button onClick={openCol} className="rounded-xl bg-emerald-600 px-3.5 py-1.5 text-sm font-bold text-white hover:bg-emerald-700">＋ 回収記録</button>}>
+      <Panel icon="banknote" title={`回収記録一覧（${ym}）`} action={<button onClick={openCol} className="rounded-xl bg-emerald-600 px-3.5 py-1.5 text-sm font-bold text-white hover:bg-emerald-700">＋ 回収記録</button>}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
