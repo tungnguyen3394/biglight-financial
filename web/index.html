@@ -9,14 +9,18 @@
      元のロゴは1254px・860KBあり、タブのアイコンに毎回読ませるには重すぎるため縮小版を置く。 -->
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png">
-<link rel="apple-touch-icon" sizes="180x180" href="/favicon-180.png">
+<!-- iOSのホーム画面アイコンだけは白い下地つき。透明のまま渡すと黒く塗られるため。 -->
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#ffffff">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <!-- Đặt sáng/tối TRƯỚC khi render để không nháy -->
 <script>
 (function(){try{if((localStorage.getItem('bl_yj_theme')||'light')==='dark')document.documentElement.classList.add('dark');}catch(e){}})();
-function toggleTheme(){var d=document.documentElement.classList.toggle('dark');try{localStorage.setItem('bl_yj_theme',d?'dark':'light');}catch(e){}var b=document.getElementById('themeToggle');if(b)b.textContent=d?'☀️':'🌙';}
-window.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('themeToggle');if(b)b.textContent=document.documentElement.classList.contains('dark')?'☀️':'🌙';});
+/* アイコンは絵文字ではなく線画のSVG。絵文字は端末ごとに形も色も変わり、印刷にも残るため使わない。 */
+var SVG_MOON='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+var SVG_SUN='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+function toggleTheme(){var d=document.documentElement.classList.toggle('dark');try{localStorage.setItem('bl_yj_theme',d?'dark':'light');}catch(e){}var b=document.getElementById('themeToggle');if(b)b.innerHTML=d?SVG_SUN:SVG_MOON;}
+window.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('themeToggle');if(b)b.innerHTML=document.documentElement.classList.contains('dark')?SVG_SUN:SVG_MOON;});
 </script>
 <style>
   /* ===== DESIGN SYSTEM — theo CONG-THUC-XAY-DUNG-APP.md §2 =====
@@ -76,11 +80,10 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   #menuBtn{display:flex; align-items:center; justify-content:center; background:transparent; border:none;
     color:var(--text); width:38px; height:38px; border-radius:9px; font-size:18px; cursor:pointer; flex-shrink:0;}
   #menuBtn:hover{background:var(--bg-hover);}
-  /* ブランド: ロゴ ＋ 2段の文字。ロゴは白地なので、暗い画面でもアプリのアイコンとして成立するよう
-     角丸のタイルにして枠を1本入れる（背景に溶けて浮いて見えるのを防ぐ）。 */
+  /* ブランド: ロゴ ＋ 2段の文字。ロゴは背景が透明なので、明るい画面でも暗い画面でも
+     そのまま置ける（白いタイルで囲う必要がない）。 */
   #topbar .brand{display:flex; align-items:center; gap:10px; white-space:nowrap; min-width:0;}
-  #topbar .brand .blogo{height:32px; width:32px; flex:none; border-radius:8px; background:#fff;
-    border:1px solid var(--border); object-fit:contain; padding:1px;}
+  #topbar .brand .blogo{height:32px; width:32px; flex:none; object-fit:contain;}
   #topbar .brand .btxt{display:flex; flex-direction:column; line-height:1.25; min-width:0;}
   #topbar .brand .btxt b{font-size:14.5px; font-weight:800; letter-spacing:.03em; color:var(--text);}
   #topbar .brand .btxt i{font-style:normal; font-size:10.5px; font-weight:600; letter-spacing:.08em; color:var(--text-muted);}
@@ -274,6 +277,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .form-grid input[readonly]{background:var(--surface-2); color:var(--muted); cursor:not-allowed;}
   .form-grid textarea{line-height:1.55; min-height:70px;}
   .full{grid-column:1/-1;}
+  .li{width:15px; height:15px; flex:none; vertical-align:-2.5px;}
   .form-section{grid-column:1/-1; margin:10px 0 2px; padding:6px 11px; font-weight:700; font-size:12.5px;
     color:var(--primary); background:var(--section-bg); border-radius:4px; display:flex; align-items:center; gap:8px;}
   .form-section:first-child{margin-top:0;}
@@ -305,9 +309,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   #loginPage{position:fixed; inset:0; background:var(--bg-page); display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px;}
   .login-card{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:40px 36px; width:404px; max-width:100%;
     box-shadow:0 12px 40px rgba(16,24,40,.08); text-align:center;}
-  .login-logo{width:76px; height:76px; margin:0 auto 14px; display:block; border-radius:18px;
-    background:#fff; border:1px solid var(--border); object-fit:contain; padding:3px;
-    box-shadow:0 6px 18px rgba(16,24,40,.10);}
+  .login-logo{width:84px; height:84px; margin:0 auto 16px; display:block; object-fit:contain;}
   .login-brand{font-size:22px; font-weight:900; color:var(--text); letter-spacing:.06em; margin-bottom:3px;}
   .login-sub{font-size:12.5px; color:var(--muted); margin-bottom:24px; letter-spacing:.04em;}
   .login-note{font-size:11.5px; color:var(--muted); margin-top:18px; line-height:1.7;}
@@ -328,7 +330,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
 <!-- ===== ĐĂNG NHẬP ===== -->
 <div id="loginPage">
   <div class="login-card">
-    <img class="login-logo" src="/favicon-180.png" alt="BIGLIGHT">
+    <img class="login-logo" src="/logo.png" alt="BIGLIGHT">
     <div class="login-brand">BIGLIGHT</div>
     <div class="login-sub">予実管理システム</div>
     <div id="gbtn"></div>
@@ -339,9 +341,9 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
 
 <!-- ===== TOP BAR ===== -->
 <div id="topbar" class="hide">
-  <button id="menuBtn" onclick="toggleSidebar()" title="メニュー">☰</button>
+  <button id="menuBtn" onclick="toggleSidebar()" title="メニュー" aria-label="メニュー"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   <div class="brand">
-    <img class="blogo" src="/favicon-180.png" alt="BIGLIGHT">
+    <img class="blogo" src="/logo.png" alt="BIGLIGHT">
     <span class="btxt brand-word"><b>BIGLIGHT</b><i>予実管理システム</i></span>
   </div>
   <div class="topsearch">
@@ -367,7 +369,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   <main id="main"></main>
 </div>
 
-<button id="themeToggle" onclick="toggleTheme()" title="表示切替">🌙</button>
+<button id="themeToggle" onclick="toggleTheme()" title="表示切替" aria-label="表示切替"></button>
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()"><div class="modal" id="modal"></div></div>
 <div class="modal-bg" id="modalBg2" onclick="if(event.target===this)closeModal2()"><div class="modal" id="modal2"></div></div>
 <div id="toast" style="position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:4000;display:none;
@@ -548,7 +550,7 @@ const ENTITIES = {
   companies: {
     label:'取引先', key:'companies', page:'companies', idPrefix:'CO',
     fields:[
-      {name:'name',    label:'取引先名',   type:'text', req:true, section:'🏢 基本情報', crm:true},
+      {name:'name',    label:'取引先名',   type:'text', req:true, section:'基本情報', secIcon:'building', crm:true},
       {name:'kana',    label:'フリガナ',   type:'text', crm:true},
       {name:'kind',    label:'区分',       type:'select', options:COMPANY_KINDS, help:'得意先＝請求する相手／仕入先＝支払う相手。両方ある会社は「両方」。'},
       {name:'corpNo',  label:'法人番号',   type:'text', crm:true},
@@ -559,7 +561,7 @@ const ENTITIES = {
       {name:'staffName',label:'先方担当者', type:'text', crm:true},
       {name:'field',   label:'分野',       type:'text', crm:true},
       /* ▼ ここから下は CRM に無い＝この システムで手入力する項目（設計 §2.1） */
-      {name:'closingDay', label:'締日',      type:'number', section:'💴 会計情報（このシステムで入力）', help:'例: 末日締めなら 31、20日締めなら 20。'},
+      {name:'closingDay', label:'締日',      type:'number', section:'会計情報（このシステムで入力）', secIcon:'yen', help:'例: 末日締めなら 31、20日締めなら 20。'},
       {name:'paySite',    label:'支払サイト（か月後）', type:'number', help:'締めた月の何か月後に支払われるか。例: 翌月払い=1、翌々月=2。'},
       {name:'payDay',     label:'支払日',    type:'number', help:'例: 末日払い=31、25日払い=25。'},
       {name:'taxCat',     label:'既定の税区分', type:'select', options:TAX_CATS},
@@ -586,7 +588,7 @@ const ENTITIES = {
   expenses: {
     label:'経費', key:'expenses', page:'expenses', idPrefix:'EX',
     fields:[
-      {name:'date',       label:'支払日',   type:'date', req:true, section:'📄 基本'},
+      {name:'date',       label:'支払日',   type:'date', req:true, section:'基本', secIcon:'file'},
       {name:'bookMonth',  label:'計上月',   type:'month', req:true, help:'予実に反映される月。支払日と違う場合は実際に発生した月を入れてください（発生主義）。'},
       {name:'accountCode',label:'勘定科目', type:'account', req:true},
       {name:'vendor',     label:'支払先',   type:'text'},
@@ -601,36 +603,59 @@ const ENTITIES = {
   invoices: {
     label:'請求書', key:'invoices', page:'invoices', idPrefix:'INV',
     fields:[
-      {name:'no',        label:'請求番号',  type:'text', section:'📄 請求情報', ph:'空欄なら自動採番'},
+      {name:'no',        label:'請求番号',  type:'text', section:'請求情報', secIcon:'file', ph:'空欄なら自動採番'},
       {name:'companyId', label:'請求先',    type:'ref', ref:'companies', req:true},
       {name:'bookMonth', label:'計上月',    type:'month', req:true, help:'予実の「売上高」に入る月。入金月ではありません。'},
       {name:'issueDate', label:'発行日',    type:'date'},
       {name:'dueDate',   label:'入金期日',  type:'date', help:'空欄なら取引先の支払サイトから自動計算します。'},
       {name:'status',    label:'状態',      type:'select', options:INVOICE_STATUS},
-      {name:'items',     label:'明細',      type:'items', full:true, section:'📋 明細'},
-      {name:'note',      label:'備考',      type:'textarea', full:true, section:'📝 その他'},
+      {name:'items',     label:'明細',      type:'items', full:true, section:'明細', secIcon:'list'},
+      {name:'note',      label:'備考',      type:'textarea', full:true, section:'その他', secIcon:'pen'},
     ],
     columns:['no','issueDate','companyId','bookMonth','total','paidAmount','balance','dueDate','status'],
   },
   bills: {
     label:'支払請求（買掛）', key:'bills', page:'bills', idPrefix:'BIL',
     fields:[
-      {name:'no',        label:'管理番号',  type:'text', section:'📄 支払情報', ph:'空欄なら自動採番'},
+      {name:'no',        label:'管理番号',  type:'text', section:'支払情報', secIcon:'file', ph:'空欄なら自動採番'},
       {name:'companyId', label:'支払先',    type:'ref', ref:'companies', req:true},
       {name:'bookMonth', label:'計上月',    type:'month', req:true, help:'予実の費用に入る月。支払月ではありません。'},
       {name:'recvDate',  label:'請求書受領日', type:'date'},
       {name:'dueDate',   label:'支払期日',  type:'date', req:true},
       {name:'status',    label:'状態',      type:'select', options:BILL_STATUS},
-      {name:'items',     label:'明細',      type:'items', full:true, section:'📋 明細'},
-      {name:'note',      label:'備考',      type:'textarea', full:true, section:'📝 その他'},
+      {name:'items',     label:'明細',      type:'items', full:true, section:'明細', secIcon:'list'},
+      {name:'note',      label:'備考',      type:'textarea', full:true, section:'その他', secIcon:'pen'},
     ],
     columns:['no','recvDate','companyId','bookMonth','total','paidAmount','balance','dueDate','status'],
   },
 };
 const PAGE_TO_ENTITY = { companies:'companies', workers:'workers', expenses:'expenses', invoices:'invoices', bills:'bills' };
 
-/* ============ アイコン（SVGライン・currentColor 継承） ============ */
+/* ============ アイコン（SVGライン・currentColor 継承） ============
+   絵文字は使わない。端末ごとに形も色も変わり、白黒印刷では潰れ、
+   文字サイズにも揃わないため。線画なら文字色をそのまま継ぐ。 */
 const svgIc = i => '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+i+'</svg>';
+/** 文中・ボタン内で使う小さいアイコン（15px・行に馴染む） */
+const li = d => '<svg class="li" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+d+'</svg>';
+const IC = {
+  doc:      li('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
+  file:     li('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'),
+  print:    li('<path d="M6 9V3h12v6"/><path d="M6 18H4a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/>'),
+  yen:      li('<path d="M7.5 5 12 11l4.5-6"/><path d="M12 11v8M8.5 13.5h7M8.5 16.5h7"/>'),
+  warn:     li('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
+  list:     li('<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>'),
+  pen:      li('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+  building: li('<path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16M16 9h3a1 1 0 0 1 1 1v11M8 7h2M8 11h2M8 15h2"/>'),
+  users:    li('<circle cx="9" cy="7" r="4"/><path d="M3 21v-1a6 6 0 0 1 12 0v1M16 3.1a4 4 0 0 1 0 7.8M23 21v-1a6 6 0 0 0-4-5.6"/>'),
+  chart:    li('<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>'),
+  import:   li('<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>'),
+  close:    li('<path d="M6 6l12 12M18 6 6 18"/>'),
+  check:    li('<path d="m4 12.5 5 5L20 6.5"/>'),
+};
+/** フォームの見出し1行（アイコン＋文字）。宣言側は section と secIcon を書くだけ。 */
+function secHead(f, style){
+  return `<div class="form-section"${style?` style="${style}"`:''}>${IC[f.secIcon]||''}${esc(f.section)}</div>`;
+}
 const ICONS = {
   dashboard: svgIc('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
   target:    svgIc('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>'),
@@ -1494,7 +1519,7 @@ function searchBox(p,ph){
 }
 function filterClearBtn(p){
   const n=fcolCount(p);
-  return n? `<button class="btn secondary" style="border-color:var(--primary);color:var(--primary);font-weight:600;" onclick="fcolClearAll('${p}')">✕ 絞り込み解除 (${n})</button>`
+  return n? `<button class="btn secondary" style="border-color:var(--primary);color:var(--primary);font-weight:600;" onclick="fcolClearAll('${p}')">${IC.close} 絞り込み解除 (${n})</button>`
           : '<span class="muted" style="font-size:11px;align-self:center;">各列見出しの ▼ で絞り込み</span>';
 }
 
@@ -1530,7 +1555,7 @@ function openForm(entKey, id, preset){
   let sec=null;
   const fields = E.fields.map(f=>{
     let hd='';
-    if(f.section && f.section!==sec){ sec=f.section; hd=`<div class="form-section">${esc(f.section)}</div>`; }
+    if(f.section && f.section!==sec){ sec=f.section; hd=secHead(f); }
     const locked = (E.readOnly || (f.crm && row.source==='crm'));
     const v = row[f.name]==null? '' : row[f.name];
     let input='';
@@ -1697,7 +1722,7 @@ function openDetail(entKey, id){
     let sec=null;
     html = E.fields.map(f=>{
       let hd='';
-      if(f.section&&f.section!==sec){ sec=f.section; hd=`<div class="form-section" style="margin-top:12px;">${esc(f.section)}</div>`; }
+      if(f.section&&f.section!==sec){ sec=f.section; hd=secHead(f,'margin-top:12px;'); }
       let v=row[f.name];
       if(f.type==='money') v = v? moneyPlain(v) : '';
       if(f.type==='ref') v = companyName(v);
@@ -1735,10 +1760,10 @@ function docDetailHtml(entKey,row){
     ${kv(isInv?'発行日':'受領日', esc(row.issueDate||row.recvDate||''))}
     ${kv(isInv?'入金期日':'支払期日', esc(row.dueDate||''))}
     ${kv('備考', esc(row.note||''))}
-    <div class="form-section" style="margin-top:14px;">📋 明細</div>
+    <div class="form-section" style="margin-top:14px;">${IC.list} 明細</div>
     <div class="table-wrap"><table><thead><tr><th>科目</th><th>内容</th><th class="r">数量</th><th class="r">単価</th><th class="r">金額</th><th>税</th></tr></thead>
       <tbody>${items||'<tr><td colspan="6" class="empty">明細なし</td></tr>'}</tbody></table></div>
-    ${snap.length?`<div class="form-section" style="margin-top:14px;">👥 請求時点の在籍者（${snap.length}名・確定後は変わりません）</div>
+    ${snap.length?`<div class="form-section" style="margin-top:14px;">${IC.users} 請求時点の在籍者（${snap.length}名・確定後は変わりません）</div>
       <div class="table-wrap"><table><thead><tr><th>氏名</th><th>入社日</th><th>退職日</th>${snap[0].days!=null?'<th class="r">在籍日数</th>':''}</tr></thead>
       <tbody>${snap.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.join||'')}</td><td>${esc(s.exit||'')}</td>${s.days!=null?`<td class="r num">${s.days}</td>`:''}</tr>`).join('')}</tbody></table></div>`:''}
     ${docPaymentHistory(entKey,row)}`;
@@ -1751,7 +1776,7 @@ function docPaymentHistory(entKey,row){
     if(String(isInv?a.invoiceId:a.billId)===String(row.id)) rows.push({date:p.date, amount:a.amount, method:p.method, id:p.id});
   }));
   if(!rows.length) return `<div class="infobar" style="margin-top:12px;">${isInv?'入金':'支払'}の記録はまだありません。</div>`;
-  return `<div class="form-section" style="margin-top:14px;">💴 ${isInv?'入金':'支払'}履歴</div>
+  return `<div class="form-section" style="margin-top:14px;">${IC.yen} ${isInv?'入金':'支払'}履歴</div>
     <div class="table-wrap"><table><thead><tr><th>日付</th><th class="r">金額</th><th>方法</th></tr></thead>
     <tbody>${rows.sort((a,b)=>String(a.date).localeCompare(b.date)).map(r=>
       `<tr><td>${esc(r.date||'')}</td><td class="r num">${moneyPlain(r.amount)}</td><td>${esc(r.method||'')}</td></tr>`).join('')}</tbody></table></div>`;
@@ -1831,8 +1856,8 @@ function viewYojitsu(){
     <button class="btn secondary" onclick="yjCopyBudget()">前年実績から予算を作成</button>
     <button class="btn secondary" onclick="yjAdjustModal()">実績の調整を入力</button>
     <hr>
-    <button class="btn secondary" onclick="exportCsvYojitsu()">📄 CSV出力</button>
-    <button class="btn secondary" onclick="window.print()">🖨 印刷</button>`);
+    <button class="btn secondary" onclick="exportCsvYojitsu()">${IC.doc} CSV出力</button>
+    <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`);
 
   return pageShell({ title:'予実管理', sub:fyLabel(fy)+' ／ 実績のある最終月：'+FY_MONTH_LABELS[i],
     tools, body: kpis+tabs+body });
@@ -2072,7 +2097,7 @@ function viewCompare(){
       ${FY_MONTH_LABELS.map((m,k)=>`<option value="${k}" ${k===i?'selected':''}>${m}を基準に比較</option>`).join('')}</select></div>`;
 
   return pageShell({ title:'期間比較', sub:fyLabel(fy),
-    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">🖨 印刷</button>`),
+    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`),
     body: seg
       +`<div class="panel"><div class="panel-hd"><b>${esc({revenue:'売上高',gross:'売上総利益',operating:'営業利益',ordinary:'経常利益'}[CMP_KEY])}</b><span class="sub">${FY_MONTH_LABELS[i]} 時点</span></div><div class="panel-bd tight">${cmpTable}</div></div>`
       +`<div class="panel"><div class="panel-hd"><b>年度別の推移</b><span class="sub">過去の成績と並べて見る</span></div>
@@ -2122,7 +2147,7 @@ function viewMikomi(){
       }).join('')}</tbody></table></div></div></div>`;
 
   return pageShell({ title:'見込実績表', sub:fyLabel(fy)+' ／ 会議で配る形',
-    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">🖨 印刷（A4横）</button>`),
+    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（A4横）</button>`),
     body: yearTable+qBlocks });
 }
 
@@ -2139,7 +2164,7 @@ function viewInvoices(){
 
   const t=today();
   const overdue=(DB.invoices||[]).filter(i=>INVOICE_OPEN.includes(invoiceStatus(i))&&i.dueDate&&i.dueDate<t&&balanceOfInvoice(i)>0);
-  const alert = overdue.length? `<div class="alertbar">⚠ 入金期日を過ぎた請求が ${overdue.length}件（${moneyPlain(overdue.reduce((s,i)=>s+balanceOfInvoice(i),0))}円）あります。
+  const alert = overdue.length? `<div class="alertbar">${IC.warn} 入金期日を過ぎた請求が ${overdue.length}件（${moneyPlain(overdue.reduce((s,i)=>s+balanceOfInvoice(i),0))}円）あります。
     <button class="btn sm" style="background:#fff;color:var(--danger);border-color:currentColor;margin-left:auto;" onclick="goto('aging')">債権年齢表で確認</button></div>`:'';
 
   const kpis=`<div class="kpi-grid">
@@ -2181,8 +2206,8 @@ function viewInvoices(){
     ${toolsMenu(`
       ${canCreate('invoices')?`<button class="btn secondary" onclick="openForm('invoices')">＋ 個別に請求を作成</button>`:''}
       <hr>
-      <button class="btn secondary" onclick="exportCsvTable('invoices')">📄 CSV出力</button>
-      <button class="btn secondary" onclick="window.print()">🖨 印刷</button>`)}`;
+      <button class="btn secondary" onclick="exportCsvTable('invoices')">${IC.doc} CSV出力</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
 
   return pageShell({ title:'請求管理（売掛金）', count:all.length, shown:rows.length,
     sub:'計上月が予実の売上になります。入金は「入金・消込」で記録します。',
@@ -2294,8 +2319,8 @@ function viewReceipts(){
   ];
   const tools=`${searchBox(p,'取引先で検索')}${filterClearBtn(p)}
     ${canCreate('receipts')?`<button class="btn" onclick="openPayment()">＋ 入金を記録</button>`:''}
-    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payments')">📄 CSV出力</button>
-      <button class="btn secondary" onclick="window.print()">🖨 印刷</button>`)}`;
+    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payments')">${IC.doc} CSV出力</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
 
   return pageShell({ title:'入金・消込', count:list.length, shown:rows.length,
     sub:'入金は予実（売上）に影響しません。売掛金の残高が減ります。',
@@ -2350,7 +2375,7 @@ function drawPaymentModal(){
       <div><label>方法</label><select onchange="PAY_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div><label>備考</label><input value="${attr(c.note||'')}" oninput="PAY_CTX.note=this.value"></div>
     </div>
-    <div class="form-section" style="margin-top:14px;">💴 消込先の請求書
+    <div class="form-section" style="margin-top:14px;">${IC.yen} 消込先の請求書
       <a class="pillbtn pill-save" style="margin-left:auto;" onclick="payAuto()">期日の古い順に自動で割り当て</a></div>
     ${c.companyId? (open.length? `<div class="table-wrap"><table>
         <thead><tr><th>請求番号</th><th>計上月</th><th>期日</th><th class="r">残高</th><th class="r">消込額</th></tr></thead>
@@ -2443,7 +2468,7 @@ function viewAging(){
     </tbody></table></div>`;
 
   return pageShell({ title:'債権年齢表', sub:'期日からの経過日数で区分。61日以上は要対応です。',
-    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">🖨 印刷</button>`),
+    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`),
     body: kpis+table });
 }
 function agingDetail(companyId){
@@ -2474,7 +2499,7 @@ function viewBills(){
   const over=openBills().filter(b=>b.dueDate&&b.dueDate<t);
   const soon=openBills().filter(b=>b.dueDate&&b.dueDate>=t&&b.dueDate<=addDays(t,7));
 
-  const alert = over.length? `<div class="alertbar">⚠ 支払期日を過ぎた支払が ${over.length}件（${moneyPlain(over.reduce((s,b)=>s+balanceOfBill(b),0))}円）あります。</div>`:'';
+  const alert = over.length? `<div class="alertbar">${IC.warn} 支払期日を過ぎた支払が ${over.length}件（${moneyPlain(over.reduce((s,b)=>s+balanceOfBill(b),0))}円）あります。</div>`:'';
   const kpis=`<div class="kpi-grid">
     <div class="kpi"><div class="lbl">未払残高</div><div class="num">${moneyPlain(apTotal())}</div><div class="sub">${openBills().length}件</div></div>
     <div class="kpi"><div class="lbl">7日以内に支払</div><div class="num ${soon.length?'minus':''}">${moneyPlain(soon.reduce((s,b)=>s+balanceOfBill(b),0))}</div><div class="sub">${soon.length}件</div></div>
@@ -2508,8 +2533,8 @@ function viewBills(){
   ];
   const tools=`${searchBox(p,'支払先・番号で検索')}${filterClearBtn(p)}
     ${canCreate('bills')?`<button class="btn" onclick="openForm('bills')">＋ 支払請求を登録</button>`:''}
-    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('bills')">📄 CSV出力</button>
-      <button class="btn secondary" onclick="window.print()">🖨 印刷</button>`)}`;
+    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('bills')">${IC.doc} CSV出力</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
 
   return pageShell({ title:'支払管理（買掛金）', count:all.length, shown:rows.length,
     sub:'仕入先からの請求を登録します。計上月が予実の費用になります。',
@@ -2547,7 +2572,7 @@ function viewPayouts(){
   ];
   const tools=`${searchBox(p,'支払先で検索')}${filterClearBtn(p)}
     ${canCreate('payouts')?`<button class="btn" onclick="openPayout()">＋ 支払を記録</button>`:''}
-    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payouts')">📄 CSV出力</button>`)}`;
+    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payouts')">${IC.doc} CSV出力</button>`)}`;
   return pageShell({ title:'支払実行', count:all.length, shown:rows.length,
     sub:'支払は予実（費用）に影響しません。買掛金の残高が減ります。',
     tools, body: kpis+dataTable(p, rows, cols, { allRows:all, onRow:r=>`openPayout('${r.id}')` }) });
@@ -2590,7 +2615,7 @@ function drawPayoutModal(){
       <div><label>方法</label><select onchange="PO_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div class="full"><label>備考</label><input value="${attr(c.note||'')}" oninput="PO_CTX.note=this.value"></div>
     </div>
-    <div class="form-section" style="margin-top:14px;">💴 消込先
+    <div class="form-section" style="margin-top:14px;">${IC.yen} 消込先
       <a class="pillbtn pill-save" style="margin-left:auto;" onclick="poAuto()">期日の古い順に自動で割り当て</a></div>
     ${c.companyId? (open.length?`<div class="table-wrap"><table>
       <thead><tr><th>番号</th><th>計上月</th><th>期日</th><th class="r">残高</th><th class="r">消込額</th></tr></thead>
@@ -2666,7 +2691,7 @@ function viewCashflow(){
     <span class="muted" style="font-size:11.5px;">請求書の入金期日と、支払請求の支払期日から自動で計算しています。</span></div>`;
 
   return pageShell({ title:'資金繰り', sub:'いつ・いくら足りなくなるかを先に知るための表',
-    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">🖨 印刷</button>`),
+    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`),
     body: seg+kpis+`<div class="table-wrap"><table>
       <thead><tr><th>期間</th><th class="r">入金予定</th><th class="r">支払予定</th><th class="r">差引</th><th class="r">残高見込</th><th></th></tr></thead>
       <tbody>${body}</tbody></table></div>` });
@@ -2707,8 +2732,8 @@ function viewExpenses(){
   ];
   const tools=`${searchBox(p,'支払先・科目で検索')}${filterClearBtn(p)}
     ${canCreate('expenses')?`<button class="btn" onclick="openForm('expenses',null,{date:today(),bookMonth:thisMonth()})">＋ 経費を登録</button>`:''}
-    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('expenses')">📄 CSV出力</button>
-      <button class="btn secondary" onclick="window.print()">🖨 印刷</button>`)}`;
+    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('expenses')">${IC.doc} CSV出力</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
   return pageShell({ title:'経費管理', count:all.length, shown:rows.length,
     sub:'買掛を通さず、その場で払った費用。計上月が予実の販管費になります。',
     tools, body:`<div class="kpi-grid">
@@ -2747,7 +2772,7 @@ function viewCompanies(){
   const tools=`${searchBox(p,'取引先名で検索')}${filterClearBtn(p)}
     ${canCreate('companies')?`<button class="btn" onclick="openForm('companies',null,{kind:'得意先',closingDay:31,paySite:1,payDay:31,taxCat:'課税10%'})">＋ 取引先を追加</button>`:''}
     ${toolsMenu(`<button class="btn secondary" onclick="goto('crmlink')">CRMから取り込む</button>
-      <hr><button class="btn secondary" onclick="exportCsvTable('companies')">📄 CSV出力</button>`)}`;
+      <hr><button class="btn secondary" onclick="exportCsvTable('companies')">${IC.doc} CSV出力</button>`)}`;
 
   return pageShell({ title:'取引先管理', count:all.length, shown:rows.length,
     sub:`CRM連携 ${crmN}社 ／ 手入力 ${manN}社。CRMに無い会社（仕入先など）はここで追加します。`,
@@ -2758,14 +2783,14 @@ function viewCompanies(){
 function companyExtraDetail(c){
   const rules=rulesOfCompany(c.id);
   const n=workersInMonth(c.id, thisMonth(), 'month_end').length;
-  return `<div class="form-section" style="margin-top:14px;">💴 取引状況</div>
+  return `<div class="form-section" style="margin-top:14px;">${IC.yen} 取引状況</div>
     ${kv('売掛残高', `<b class="num">${moneyPlain(arBalanceOf(c.id))}</b> 円`)}
     ${kv('買掛残高', `<b class="num">${moneyPlain(apBalanceOf(c.id))}</b> 円`)}
     ${kv('今月の在籍者', n?`${n}名`:'—')}
     ${kv('請求ルール', rules.length? rules.map(r=>esc(ruleText(r))).join('<br>')+
       `<div style="margin-top:6px;"><a class="pillbtn pill-manage" onclick="closeModal();openRules('${c.id}')">ルールを編集</a></div>`
       : `<span class="muted">未設定</span> <a class="pillbtn pill-new" onclick="closeModal();openRules('${c.id}')">ルールを作る</a>`)}
-    ${c._crmDiff&&c._crmDiff.length? `<div class="warnbar" style="margin-top:10px;">⚠ CRMの内容と手入力が違う項目があります：${esc(c._crmDiff.join('、'))}</div>`:''}`;
+    ${c._crmDiff&&c._crmDiff.length? `<div class="warnbar" style="margin-top:10px;">${IC.warn} CRMの内容と手入力が違う項目があります：${esc(c._crmDiff.join('、'))}</div>`:''}`;
 }
 function ruleText(r){
   if(r.kind==='per_worker') return `${r.name||'支援委託料'}：${moneyPlain(r.unitPrice)}円 × 在籍者数（${(COUNT_MODES.find(m=>m.k===(r.countMode||'month_end'))||{}).label}）`;
@@ -2853,7 +2878,7 @@ function viewWorkers(){
     sub:'CRMの写しです。ここでは編集できません。人数は請求（支援委託料）の計算に使われます。',
     tools:`${searchBox(p,'氏名・IDで検索')}${filterClearBtn(p)}
       ${toolsMenu(`<button class="btn secondary" onclick="goto('crmlink')">CRMと同期する</button>
-        <button class="btn secondary" onclick="workerTrend()">📈 月別の在籍者数</button>`)}`,
+        <button class="btn secondary" onclick="workerTrend()">${IC.chart} 月別の在籍者数</button>`)}`,
     body:`<div class="kpi-grid">
       <div class="kpi"><div class="lbl">今月の在籍者</div><div class="num">${active}名</div></div>
       <div class="kpi"><div class="lbl">登録者（累計）</div><div class="num">${all.length}名</div></div>
@@ -2959,7 +2984,7 @@ function viewOkr(){
     tools:`<select onchange="setOkrPeriod(this.value)" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;">
         ${periods.map(p=>`<option value="${attr(p)}" ${p===period?'selected':''}>${esc(p)}</option>`).join('')}</select>
       ${canCreate('okr')?`<button class="btn" onclick="okrForm()">＋ 目標を追加</button>`:''}
-      ${toolsMenu(`<button class="btn secondary" onclick="window.print()">🖨 印刷</button>`)}`,
+      ${toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`,
     body: kpis + (objs.length? OKR_LEVELS.map(lv=>{
       const list=byLevel(lv); if(!list.length) return '';
       return `<div class="section-title" style="margin:16px 0 8px;">${esc(lv)}の目標</div>`+list.map(card).join('');
@@ -3111,7 +3136,7 @@ function viewDashboard(){
     </div>
 
     ${overdue.length? `<div class="dash-section c-red"><div class="dash-head clickable" onclick="goto('aging')">
-        ⚠ 入金期日を過ぎた請求<span class="cnt">${overdue.length}件 ・ ${moneyPlain(overdue.reduce((s,x)=>s+balanceOfInvoice(x),0))}円 →</span></div>
+        ${IC.warn} 入金期日を過ぎた請求<span class="cnt">${overdue.length}件 ・ ${moneyPlain(overdue.reduce((s,x)=>s+balanceOfInvoice(x),0))}円 →</span></div>
       <div class="table-wrap" style="border:0;border-radius:0;"><table>
         <thead><tr><th>請求番号</th><th>取引先</th><th>期日</th><th class="r">残高</th><th>経過</th></tr></thead>
         <tbody>${overdue.slice(0,6).map(x=>`<tr><td>${esc(x.no)}</td><td>${esc(companyName(x.companyId).replace(/<[^>]+>/g,''))}</td>
@@ -3142,7 +3167,7 @@ function viewDashboard(){
 function viewCrmLink(){
   return pageShell({ title:'CRM連携', sub:'crm.biglight.jp から 所属機関・特定技能者・雇用（在籍期間）を取り込みます。取り込みは一方向で、CRMには何も書き戻しません。',
     tools:`${(isAdmin()||myRole()==='Manager')?`<button class="btn" onclick="crmSyncNow()">今すぐ同期</button>`:''}
-      ${toolsMenu(`<button class="btn secondary" onclick="crmCsvModal()">📥 CSVから取り込む（予備）</button>`)}`,
+      ${toolsMenu(`<button class="btn secondary" onclick="crmCsvModal()">${IC.import} CSVから取り込む（予備）</button>`)}`,
     body:`<div id="crmStatus"><div class="empty">読み込み中…</div></div>
       <div class="panel"><div class="panel-hd"><b>取り込まれる内容</b></div><div class="panel-bd">
         <table style="font-size:12.5px;"><tbody>
@@ -3205,7 +3230,7 @@ function crmCsvModal(){
         <option value="assignments">雇用（在籍期間）</option></select></div>
       <div class="full"><label>CSVの中身（1行目に列見出し）</label>
         <textarea id="csvText" style="min-height:170px;font-family:ui-monospace,monospace;font-size:12px;" placeholder="ID,所属機関名,フリガナ,..."></textarea>
-        <div class="fhelp">列見出しで判断します。並び順は自由です。CRMの「📊Excel／CSV」出力をそのまま貼れます。</div></div>
+        <div class="fhelp">列見出しで判断します。並び順は自由です。CRMの「Excel／CSV」出力をそのまま貼れます。</div></div>
     </div>
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
       <button class="btn" onclick="crmCsvGo()">取り込む</button></div>`,'lg');
