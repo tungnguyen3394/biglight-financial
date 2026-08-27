@@ -1,32 +1,60 @@
-# Deploy: gắn app vào Caddy DÙNG CHUNG có sẵn trên VPS (caddy-docker-proxy).
-# Caddy tự route finance.biglight.jp -> app:3000 và cấp HTTPS (Let's Encrypt).
-# KHÔNG mở port ở đây — Caddy chung (mạng "web") lo việc đó.
-#   DNS: finance.biglight.jp -> IP_VPS (đã trỏ)
+# BIGLIGHT 予実管理システム — 3サービス構成
+#   web (nginx) : 画面(index.html) を配信 ＋ /api を api へ中継
+#                 → 画面とAPIが同一オリジンになるので CORS が発生しない
+#                   （CRMで拡張機能にサブドメインを遮断された事故の再発防止）
+#   api         : Express + PostgreSQL
+#   db          : PostgreSQL 16（データはボリュームに保存）
 #
-# TRƯỚC KHI CHẠY: tạo file .env cạnh file này (xem .env.example):
-#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / NEXTAUTH_SECRET
-#   docker compose up -d --build
+# Caddy（共有・ネットワーク "web"）が finance.biglight.jp を web:80 に流します。
+#
+# 起動:  docker compose up -d --build
 services:
-  app:
-    build: .
-    image: biglight-financial:latest
-    container_name: biglight-financial
+  web:
+    image: nginx:alpine
+    container_name: yojitsu-web
+    restart: unless-stopped
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [api]
+    networks: [web, internal]
+    labels:
+      caddy: finance.biglight.jp
+      caddy.reverse_proxy: "{{upstreams 80}}"
+
+  api:
+    build: ./backend
+    container_name: yojitsu-api
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: "file:/app/data/app.db"   # SQLite trong volume (đè giá trị dev trong .env)
-      NEXTAUTH_URL: "https://finance.biglight.jp"
+      PORT: "4000"
+      DATABASE_URL: "postgres://yojitsu:${DB_PASSWORD:-changeme}@db:5432/yojitsu"
+    depends_on: [db]
+    networks: [internal]
+
+  db:
+    image: postgres:16-alpine
+    container_name: yojitsu-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yojitsu
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-changeme}"
+      POSTGRES_DB: yojitsu
+      TZ: Asia/Tokyo
     volumes:
-      - dbdata:/app/data                       # dữ liệu user/lịch sử login sống qua các lần rebuild
-    networks:
-      - web
-    labels:
-      caddy: finance.biglight.jp
-      caddy.reverse_proxy: "{{upstreams 3000}}"
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yojitsu"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  dbdata:
+  pgdata:
 
 networks:
   web:
-    external: true
+    external: true      # Caddy と共有（CRMと同じ）
+  internal:

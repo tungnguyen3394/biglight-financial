@@ -1,14 +1,21 @@
-/node_modules
-/.next
-/out
-/build
+# 依存関係（どの階層でも）
+node_modules/
+backend/dist/
+
+# 旧 Next.js 版のビルド成果物
+.next/
+out/
+build/
 next-env.d.ts
+*.tsbuildinfo
+
+# 環境変数（鍵が入るので絶対にコミットしない）
 .env
 .env*.local
-*.tsbuildinfo
-.DS_Store
 
-# Database
+# ローカルDB・データ
 *.db
 *.db-journal
 /data
+
+.DS_Store
