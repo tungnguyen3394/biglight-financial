@@ -12,42 +12,59 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAIL || 'n-tung@biglight.jp')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
 
 type TokenInfo = { email: string; name?: string; picture?: string }
+/** 断る場合は必ず「なぜ」を返す。理由の分からない拒否は調査に何時間もかかる。 */
+type VerifyResult = { info?: TokenInfo; reason?: string; detail?: string }
 
 // Bộ nhớ đệm token đã xác thực — Google giới hạn tần suất, mà mỗi thao tác lại gọi 1 lần.
 const tokenCache = new Map<string, { info: TokenInfo; exp: number }>()
 
-async function verifyGoogleToken(token: string): Promise<TokenInfo | null> {
+async function verifyGoogleToken(token: string): Promise<VerifyResult> {
   const hit = tokenCache.get(token)
-  if (hit && hit.exp > Date.now()) return hit.info
+  if (hit && hit.exp > Date.now()) return { info: hit.info }
   try {
     const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(token))
-    if (!r.ok) return null
+    if (!r.ok) return { reason: 'bad-token', detail: 'Google tokeninfo HTTP ' + r.status }
     const d: any = await r.json()
     const email = String(d.email || '').toLowerCase()
-    if (!email || d.email_verified === 'false') return null
+    if (!email) return { reason: 'no-email' }
+    if (String(d.email_verified) === 'false') return { reason: 'email-unverified', detail: email }
     // Chỉ tài khoản trong domain công ty. Đây là hàng rào ngoài cùng.
-    if (ALLOWED_DOMAIN && !email.endsWith('@' + ALLOWED_DOMAIN)) return null
-    if (process.env.GOOGLE_CLIENT_ID && d.aud !== process.env.GOOGLE_CLIENT_ID) return null
+    if (ALLOWED_DOMAIN && !email.endsWith('@' + ALLOWED_DOMAIN)) {
+      return { reason: 'domain-mismatch', detail: `${email} ≠ @${ALLOWED_DOMAIN}` }
+    }
+    // aud = このトークンが「どのクライアントID向けに」発行されたか。
+    // 画面と .env で違うIDを使っていると必ずここで落ちる。理由を明示する。
+    const want = process.env.GOOGLE_CLIENT_ID || ''
+    if (want && d.aud !== want) {
+      return { reason: 'aud-mismatch', detail: `token=${String(d.aud).slice(0, 24)}… server=${want.slice(0, 24)}…` }
+    }
     const info: TokenInfo = { email, name: d.name, picture: d.picture }
     const expMs = (Number(d.exp) * 1000) || (Date.now() + 300_000)
     tokenCache.set(token, { info, exp: Math.min(expMs, Date.now() + 300_000) })
     if (tokenCache.size > 500) tokenCache.clear()
-    return info
-  } catch { return null }
+    return { info }
+  } catch (e: any) {
+    return { reason: 'network', detail: String(e?.message || e).slice(0, 200) }
+  }
 }
 
 /** Lấy email từ header. null = chưa đăng nhập / token hỏng. */
 export async function verifyBearer(req: any): Promise<string | null> {
   const m = /^Bearer (.+)$/.exec(String(req.headers['authorization'] || ''))
   if (!m) return null
-  const info = await verifyGoogleToken(m[1])
-  return info ? info.email : null
+  const v = await verifyGoogleToken(m[1])
+  if (!v.info) console.warn('[AUTH] トークン拒否:', v.reason, v.detail || '')
+  return v.info ? v.info.email : null
 }
 
 /** Xác thực + tạo/nâng cấp hồ sơ. Dùng ở /auth/google lúc đăng nhập. */
 export async function loginWithToken(token: string, ip: string, ua: string) {
-  const info = await verifyGoogleToken(token)
-  if (!info) return null
+  const v = await verifyGoogleToken(token)
+  if (!v.info) {
+    console.warn('[AUTH] ログイン拒否:', v.reason, v.detail || '')
+    return { error: v.reason || 'bad-token', detail: v.detail || '' }
+  }
+  const info = v.info
   const isAdmin = ADMIN_EMAILS.includes(info.email)
   // Người trong domain được duyệt sẵn (active). Ngoài domain đã bị chặn ở trên.
   await pool.query(

@@ -910,10 +910,21 @@ function connectSSE(){
 }
 setInterval(()=>{ if(GTOKEN && document.visibilityState==='visible') pullDiff(); }, 60000);
 
-/* ============ 認証 — Google Identity Services ============ */
-function initGoogle(){
-  if(!window.google||!google.accounts||!google.accounts.id){ setTimeout(initGoogle,300); return; }
-  google.accounts.id.initialize({ client_id: GOOGLE_CID, callback: onGoogleCredential, auto_select:false });
+/* ============ 認証 — Google Identity Services ============
+   クライアントIDはサーバー（/config）から取る。画面に直接書くと .env と
+   食い違ったときに aud-mismatch になり、原因が見えないまま止まる。
+   /config が取れないときだけ、下の既定値を使う。 */
+let GOOGLE_CID_EFF = GOOGLE_CID;
+async function initGoogle(){
+  try{
+    const r = await fetch(API_BASE+'/config');
+    if(r.ok){ const c = await r.json(); if(c.googleClientId) GOOGLE_CID_EFF = c.googleClientId; }
+  }catch(e){ /* サーバーが落ちていても、ボタンは出す */ }
+  renderGoogleBtn();
+}
+function renderGoogleBtn(){
+  if(!window.google||!google.accounts||!google.accounts.id){ setTimeout(renderGoogleBtn,300); return; }
+  google.accounts.id.initialize({ client_id: GOOGLE_CID_EFF, callback: onGoogleCredential, auto_select:false });
   google.accounts.id.renderButton(document.getElementById('gbtn'),
     { theme:'outline', size:'large', width:320, text:'signin_with', locale:'ja' });
 }
@@ -923,8 +934,12 @@ async function onGoogleCredential(resp){
     const r = await fetch(API_BASE+'/auth/google', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ credential: resp.credential }) });
     const d = await r.json();
-    if(!r.ok){ err.textContent = d.error==='invalid-token-or-domain'
-        ? '@biglight.jp のアカウントでログインしてください。' : ('ログインできません（'+(d.error||r.status)+'）'); return; }
+    if(!r.ok){
+      // 「なぜ入れないのか」を必ず出す。管理者が調べられるよう技術的な内訳も添える。
+      err.innerHTML = esc(d.message || ('ログインできません（'+(d.error||r.status)+'）'))
+        + (d.detail? `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${esc(d.detail)}</div>`:'');
+      return;
+    }
     GTOKEN = resp.credential; SESSION = d;
     try{ localStorage.setItem(TOKEN_KEY, GTOKEN); localStorage.setItem(AUTH_KEY, JSON.stringify(d)); }catch(e){}
     await afterLogin();

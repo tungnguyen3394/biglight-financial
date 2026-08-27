@@ -127,11 +127,31 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 app.get('/version', (_req, res) => res.json({ apiContract: API_CONTRACT, minClientContract: MIN_CLIENT_CONTRACT, rev: globalRev, epoch: stateEpoch }))
 
 /* ===================== Đăng nhập ===================== */
+/* 画面が使うクライアントIDは「サーバーの .env」を唯一の正とする。
+   HTMLに直接書いてあると、.env と食い違ったときに aud-mismatch で
+   「@biglight.jp で入ってください」とだけ出て原因が分からなくなる（2026-08-27 実際に発生）。 */
+app.get('/config', (_req, res) => {
+  res.json({
+    googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+    allowedDomain: process.env.ALLOWED_DOMAIN || 'biglight.jp',
+    apiContract: API_CONTRACT,
+  })
+})
+
 app.post('/auth/google', async (req, res) => {
   const token = String(req.body?.credential || req.body?.token || '')
   if (!token) return res.status(400).json({ error: 'no token' })
-  const me = await loginWithToken(token, ipOf(req), String(req.headers['user-agent'] || '').slice(0, 300))
-  if (!me) return res.status(401).json({ error: 'invalid-token-or-domain' })
+  const me: any = await loginWithToken(token, ipOf(req), String(req.headers['user-agent'] || '').slice(0, 300))
+  if (me && me.error) {
+    const msg: any = {
+      'domain-mismatch':  '@' + (process.env.ALLOWED_DOMAIN || 'biglight.jp') + ' のアカウントでログインしてください。',
+      'aud-mismatch':     '設定エラー: 画面とサーバーのクライアントIDが違います。管理者にご連絡ください。',
+      'email-unverified': 'メールアドレスが未確認のアカウントです。',
+      'bad-token':        'ログイン情報を確認できませんでした。もう一度お試しください。',
+      'network':          'Googleに接続できませんでした。時間をおいてお試しください。',
+    }
+    return res.status(401).json({ error: me.error, detail: me.detail, message: msg[me.error] || 'ログインできませんでした。' })
+  }
   res.json(me)
 })
 
