@@ -147,6 +147,28 @@ _db.keyResults = [{ id:'K1', objectiveId:'O1', title:'年度売上', target:2400
 eq('KR の現在値は実績から', ctx.krCurrent(_db.keyResults[0]), 120000);
 eq('達成率 50%', Math.round(ctx.krRate(_db.keyResults[0])), 50);
 
+console.log('\n― 費用管理（月次費用表）―');
+_db.costItems = [
+  { id:'CI1', name:'事務所家賃',     accountCode:'6200', kind:'fixed',    monthly:220000, taxCat:'課税10%', vendor:'大家' },
+  { id:'CI2', name:'クラウド利用料', accountCode:'6220', kind:'fixed',    monthly:33000,  taxCat:'課税10%' },
+  { id:'CI3', name:'旅費交通費',     accountCode:'6300', kind:'variable', monthly:0,      taxCat:'課税10%' },
+  { id:'CI4', name:'旧リース',       accountCode:'6900', kind:'fixed',    monthly:11000,  taxCat:'課税10%', endYm:'2025-09' },
+];
+eq('終了月の月までは入力できる', ctx.costItemActive(_db.costItems[3],'2025-09'), true);
+eq('終了月を過ぎたら入力できない', ctx.costItemActive(_db.costItems[3],'2025-10'), false);
+ctx.setCostCell('CI1','2025-10',231000);
+eq('マスを打つと expenses が1行できる', _db.expenses.filter(e=>e.costItemId==='CI1').length, 1);
+eq('マスの値（税込）', ctx.costCellAmount('CI1','2025-10'), 231000);
+eq('税抜は予実と同じ式', ctx.netOfGross(231000,'課税10%'), 210000);
+eq('10月の販管費（税抜）に入る', ctx.actualSeries(2025,'sga')[2], 210000);
+eq('表の行は費目マスタの数', ctx.costRowsOf(2025).rows.length, 4);
+eq('定期が先・変動が後に並ぶ', ctx.costRowsOf(2025).rows.map(r=>r.it.id), ['CI1','CI2','CI4','CI3']);
+eq('期間外のマスは null（旧リースの10月）', ctx.costRowsOf(2025).rows[2].cells[2], null);
+eq('費目なしの経費は別行にまとまる', ctx.costOtherByMonth(2025).n, 2);
+ctx.setCostCell('CI1','2025-10',0);
+eq('0にするとマスごと消える', ctx.costCellAmount('CI1','2025-10'), 0);
+eq('消したら予実からも消える', ctx.actualSeries(2025,'sga')[2], 0);
+
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',

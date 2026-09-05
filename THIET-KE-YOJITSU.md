@@ -128,7 +128,16 @@ Công ty không có quy tắc nào → không bị bỏ sót: màn hình 請求�
 | `payments` | 入金 | `date · companyId · amount · fee · allocations[{invoiceId, amount}]` |
 | `bills` | 支払請求 (買掛) | `no · companyId · bookMonth · recvDate · dueDate · items[] · total · status` |
 | `payouts` | 支払実行 | `date · companyId · amount · allocations[{billId, amount}]` |
-| `expenses` | 経費 (trả ngay, không qua 買掛) | `date · bookMonth · accountCode · vendor · amount · deptCode` |
+| `expenses` | 経費 (trả ngay, không qua 買掛) | `date · bookMonth · accountCode · vendor · amount · taxCat · deptCode · **costItemId**` |
+| `costItems` | 費目マスタ — **hàng** của 月次費用表 | `name · accountCode · kind(fixed/variable) · monthly(月額予定・税込) · taxCat · vendor · method · startYm · endYm` |
+
+**費用管理 = 月次費用表 (quyết định 2026-09-05).** Không nhập từng phiếu. Màn hình là **1 bảng**: 費目 (hàng) × 12 tháng (cột).
+Mỗi ô = **1 dòng `expenses`** khoá bằng `costItemId + bookMonth`, nhập **税込**. Vì ô vẫn là `expenses` nên 予実
+không phải đổi gì (`actualSeries` vẫn quy về 税抜 bằng `taxCat`). Ô = 0/để trống → xoá luôn dòng đó.
+`monthly` là mốc so sánh: lệch ≥10% thì ô đổi màu → nhìn ra ngay khoản nào bị tăng giá.
+`endYm` = tháng cuối còn hiệu lực (hợp đồng đã huỷ) → các tháng sau không nhập được nữa.
+Chi phí nhập lẻ trước đây (`costItemId` rỗng) **không bị giấu**: gom thành hàng 「個別入力」, bấm vào xem chi tiết.
+Số chính thức để quyết toán vẫn là 試算表 của 会計事務所 — bảng này để **theo dõi**, không thay kế toán.
 
 **Luật kế toán (viết ra để không ai làm sai về sau):**
 
@@ -195,7 +204,7 @@ autoSource: { type:'workers', metric:'active' }                 // 在籍者数
 ─ マスタ ─
   取引先管理        công ty (CRM + tay), 請求ルール
   特定技能者        mirror CRM (chỉ đọc) + số người theo tháng/công ty
-  経費管理          支出
+  費用管理          月次費用表 — 費目 × 12か月の1枚（定期費用の増減を見る）
   勘定科目          cây tài khoản
   CRM連携           trạng thái đồng bộ, log, nút 今すぐ同期, nạp CSV
 ─ システム ─

@@ -296,6 +296,11 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .cellin:hover{border-color:var(--border-strong); background:var(--input-bg);}
   .cellin:focus{border-color:var(--primary); background:var(--input-bg); box-shadow:0 0 0 2px var(--primary-soft); outline:none;}
   .cellin.dirty{background:var(--warning-soft);}
+  .cellin.over{background:var(--danger-soft); color:var(--danger-hover); font-weight:700;
+    box-shadow:inset 3px 0 0 var(--danger);}
+  .cellin.under{background:var(--success-soft); color:var(--success); box-shadow:inset 3px 0 0 var(--success);}
+  .grprow td{background:var(--surface-2); font-weight:700; font-size:11.5px; color:var(--muted); letter-spacing:.03em;}
+  td.curcol{box-shadow:inset 0 0 0 1px var(--primary-soft);}
   .plus{color:var(--plus);} .minus{color:var(--minus);} .zero{color:var(--zero);}
   .rate{font-size:11px; font-weight:700;}
   .bar{height:6px; border-radius:99px; background:var(--border); overflow:hidden; min-width:52px;}
@@ -542,6 +547,7 @@ const BILL_OPEN       = ['確定','一部支払','期日超過'];
 const PAY_METHODS     = ['銀行振込','現金','口座振替','クレジット','相殺','その他'];
 const BILLING_KINDS   = [{k:'per_worker',label:'人数×単価（支援委託料）'},{k:'fixed',label:'月額固定'},{k:'spot',label:'都度（自動生成しない）'}];
 const COUNT_MODES     = [{k:'month_end',label:'月末在籍'},{k:'month_start',label:'月初在籍'},{k:'prorate',label:'日割り'}];
+const COST_KINDS      = [{k:'fixed',label:'定期（毎月かかる）'},{k:'variable',label:'変動（月によって変わる）'}];
 const OKR_LEVELS      = ['会社','部門','個人'];
 const OKR_STATUS      = ['順調','注意','遅延','完了','中止'];
 
@@ -599,6 +605,25 @@ const ENTITIES = {
       {name:'note',       label:'摘要',     type:'textarea', full:true},
     ],
     columns:['date','bookMonth','accountCode','vendor','amount','method','note'],
+  },
+  /* 費目マスタ — 月次費用表の「行」。金額そのものは expenses に入る（1マス=1行）。 */
+  costItems: {
+    label:'費目', key:'costItems', page:'expenses', idPrefix:'CI',
+    fields:[
+      {name:'name',        label:'費目名',   type:'text', req:true, section:'基本', secIcon:'file', ph:'例: 事務所家賃'},
+      {name:'accountCode', label:'勘定科目', type:'account', req:true, help:'予実のどの費用に入るかを決めます。'},
+      {name:'kind',        label:'区分',     type:'select', options:COST_KINDS, req:true,
+        help:'定期＝毎月ほぼ同じ額（家賃・通信・リース）。変動＝月によって変わる（旅費・交際費）。'},
+      {name:'monthly',     label:'月額予定（税込）', type:'money',
+        help:'定期費用の目安。実績がここから10%以上ズレると表のマスに色が付きます。'},
+      {name:'taxCat',      label:'税区分',   type:'select', options:TAX_CATS,
+        help:'予実は税抜で見ます。この区分で税込→税抜に直します。'},
+      {name:'vendor',      label:'支払先',   type:'text'},
+      {name:'method',      label:'支払方法', type:'select', options:PAY_METHODS},
+      {name:'startYm',     label:'開始月',   type:'month', section:'期間・メモ', secIcon:'pen', help:'空欄なら制限なし。'},
+      {name:'endYm',       label:'終了月',   type:'month', help:'解約した月を入れると、その後の月は表で入力できなくなります。'},
+      {name:'note',        label:'メモ',     type:'textarea', full:true, ph:'契約番号・値上げの経緯など'},
+    ],
   },
   invoices: {
     label:'請求書', key:'invoices', page:'invoices', idPrefix:'INV',
@@ -700,7 +725,7 @@ const NAV_GROUPS = [
   { gid:'ms', label:'マスタ', items:[
     {id:'companies', label:'取引先管理',  icon:'company'},
     {id:'workers',   label:'特定技能者',  icon:'worker'},
-    {id:'expenses',  label:'経費管理',    icon:'expense'},
+    {id:'expenses',  label:'費用管理',    icon:'expense'},
     {id:'crmlink',   label:'CRM連携',     icon:'link'},
   ]},
   { gid:'sy', label:'システム', items:[
@@ -830,7 +855,7 @@ async function pullDiff(){
 /** 空の器を用意（データを作るのではない。null 参照で画面が落ちないようにするだけ） */
 function ensureShape(){
   ['companies','workers','assignments','billingRules','invoices','payments','bills','payouts',
-   'expenses','budgets','forecasts','actualAdjust','objectives','keyResults','checkins',
+   'expenses','costItems','budgets','forecasts','actualAdjust','objectives','keyResults','checkins',
    'accounts','departments'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
   if(!DB.userPerms) DB.userPerms={};
   if(!DB.settings)  DB.settings={};
@@ -2714,34 +2739,293 @@ function cfSaveStart(){
 /* ============================================================================
    マスタ系の画面
    ========================================================================== */
-function viewExpenses(){
-  const p='expenses';
-  const all=(DB.expenses||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
-  const q=(SEARCH[p]||'').toLowerCase();
-  let rows=q? all.filter(r=>((r.vendor||'')+accountLabel(r.accountCode)+(r.note||'')).toLowerCase().includes(q)) : all.slice();
-  rows=rows.filter(r=>fcolPass(p,r));
-  const thisM=all.filter(e=>(e.bookMonth||e.date||'').slice(0,7)===thisMonth());
-  const cols=[
-    {key:'date', label:'支払日', date:true, val:r=>esc(r.date||'')},
-    {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
-    {key:'accountCode', label:'勘定科目', raw:r=>accountLabel(r.accountCode), val:r=>esc(accountLabel(r.accountCode))},
-    {key:'vendor', label:'支払先', val:r=>esc(r.vendor||'')},
-    {key:'amount', label:'金額（税込）', cls:'r', noFilter:true, val:r=>`<b class="num">${moneyPlain(r.amount)}</b>`},
-    {key:'method', label:'方法', val:r=>esc(r.method||'')},
-    {key:'note', label:'摘要', noFilter:true, val:r=>esc(r.note||'')},
-  ];
-  const tools=`${searchBox(p,'支払先・科目で検索')}${filterClearBtn(p)}
-    ${canCreate('expenses')?`<button class="btn" onclick="openForm('expenses',null,{date:today(),bookMonth:thisMonth()})">＋ 経費を登録</button>`:''}
-    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('expenses')">${IC.doc} CSV出力</button>
-      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
-  return pageShell({ title:'経費管理', count:all.length, shown:rows.length,
-    sub:'買掛を通さず、その場で払った費用。計上月が予実の販管費になります。',
-    tools, body:`<div class="kpi-grid">
-      <div class="kpi"><div class="lbl">今月の経費</div><div class="num">${moneyPlain(thisM.reduce((s,e)=>s+num(e.amount),0))}</div><div class="sub">${thisM.length}件</div></div>
-      <div class="kpi"><div class="lbl">年度累計</div><div class="num">${moneyPlain(all.filter(e=>fyOf((e.bookMonth||e.date||'').slice(0,7))===CUR_FY).reduce((s,e)=>s+num(e.amount),0))}</div></div>
-    </div>`+dataTable(p, rows, cols, { allRows:all, onRow:r=>`openForm('expenses','${r.id}')` }) });
+/* ============================================================================
+   ⑬ 費用管理 — 月次費用表（表は1枚だけ）
+   ----------------------------------------------------------------------------
+   ★ 考え方（2026-09-05 決定）:
+     ・領収書を1枚ずつ入力する台帳ではない。正しい数字は会計事務所が持っている。
+     ・この画面の目的はただ一つ —「毎月かかる費用が、いくらで、増えていないか」。
+     ・だから 費目（行）× 月（列）の1枚の表。マスに税込金額を直接打つだけ。
+     ・1マス ＝ expenses の1行（costItemId ＋ bookMonth）。だから予実の計算は
+       今までのまま動く（actualSeries が expenses を税抜に直して費用に入れる）。
+   ========================================================================== */
+const COST_DIFF_PCT = 0.10;      // 月額予定からこれ以上ズレたらマスに色を付ける
+
+/** 表に出す費目（定期が先・科目順）。active===false は出さない。 */
+function costItemsSorted(){
+  return (DB.costItems||[]).filter(c=>c && c.active!==false).slice().sort((a,b)=>
+    ((a.kind==='variable')-(b.kind==='variable')) ||
+    String(a.accountCode||'').localeCompare(String(b.accountCode||'')) ||
+    String(a.name||'').localeCompare(String(b.name||''),'ja'));
+}
+/** その費目がその月に生きているか（開始月・終了月） */
+function costItemActive(it, ym){
+  if(!it) return false;
+  if(it.startYm && ym < String(it.startYm).slice(0,7)) return false;
+  if(it.endYm   && ym > String(it.endYm).slice(0,7))   return false;
+  return true;
+}
+/** 表の1マスに対応する expenses の行 */
+function costCell(costItemId, ym){
+  return (DB.expenses||[]).find(e=>e && String(e.costItemId)===String(costItemId)
+    && (e.bookMonth||'').slice(0,7)===ym) || null;
+}
+function costCellAmount(costItemId, ym){ const r=costCell(costItemId,ym); return r? num(r.amount) : 0; }
+/** 税込 → 税抜（actualSeries と同じ式でなければ予実とズレる） */
+function netOfGross(gross, taxCat){
+  return Math.round(num(gross)/(1+(TAX_RATE[taxCat||'課税10%']||0)));
+}
+/** マスに書き込む。空欄・0 にすると行ごと消す（残すと「0円の費用」が残ってしまう）。 */
+function setCostCell(costItemId, ym, amount){
+  const it = findById('costItems', costItemId); if(!it) return;
+  const v = num(amount);
+  const r = costCell(costItemId, ym);
+  if(!r){
+    if(!v) return;
+    commitRecord('expenses', { costItemId:String(costItemId), bookMonth:ym, date:'',
+      accountCode:it.accountCode||'', vendor:it.vendor||'', amount:v,
+      taxCat:it.taxCat||'課税10%', method:it.method||'', note:it.name||'' }, {});
+    return;
+  }
+  if(!v){ DB.expenses=(DB.expenses||[]).filter(x=>String(x.id)!==String(r.id)); markDeleted('expenses', r.id); return; }
+  r.amount=v;
+  r.accountCode=it.accountCode||r.accountCode;
+  r.taxCat=it.taxCat||r.taxCat||'課税10%';
+  r.vendor=it.vendor||r.vendor||'';
+  r.note=it.name||r.note||'';
+  r.updatedAt=new Date().toISOString(); r.updatedBy=(SESSION&&SESSION.email)||'';
+  markDirty('expenses', r);
+}
+function onCostInput(el, costItemId, mi){
+  fmtMoneyInput(el); el.classList.add('dirty');
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>{
+    setCostCell(costItemId, fyMonths(CUR_FY)[mi], el.value);
+    el.classList.remove('dirty'); syncBadge(); costRerenderSoon();
+  }, 500);
+}
+/** 合計を描き直す。ただし入力中は待つ — 打っている最中に画面が入れ替わるのが一番困る。 */
+let _costRT=null;
+function costRerenderSoon(){
+  clearTimeout(_costRT);
+  _costRT = setTimeout(()=>{
+    const a = document.activeElement;
+    if(a && a.classList && a.classList.contains && a.classList.contains('cellin')) return costRerenderSoon();
+    if(CURRENT_PAGE==='expenses') renderPage('expenses');
+  }, 900);
 }
 
+/** 費目 × 12か月（税込）。期間外のマスは null。 */
+function costRowsOf(fy){
+  const months = fyMonths(fy);
+  const rows = costItemsSorted().map(it=>({
+    it,
+    kind: it.kind==='variable'?'variable':'fixed',
+    cells: months.map(ym => costItemActive(it,ym) ? costCellAmount(it.id,ym) : null),
+  }));
+  return { months, rows };
+}
+/** 費目のない経費（過去の個別入力・CSV取込）。隠さずに1行にまとめて出す。 */
+function costOtherByMonth(fy){
+  const months=fyMonths(fy), idx={}; months.forEach((m,i)=>idx[m]=i);
+  const gross=Array(12).fill(0), net=Array(12).fill(0); let n=0;
+  (DB.expenses||[]).forEach(e=>{
+    if(!e || e.costItemId) return;
+    const i=idx[(e.bookMonth||e.date||'').slice(0,7)]; if(i==null) return;
+    gross[i]+=num(e.amount); net[i]+=netOfGross(e.amount, e.taxCat); n++;
+  });
+  return { gross, net, n };
+}
+
+function viewExpenses(){
+  const fy=CUR_FY, months=fyMonths(fy);
+  const { rows } = costRowsOf(fy);
+  const other = costOtherByMonth(fy);
+  const canE = canEdit('expenses');
+  const cur = thisMonth();
+  const curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
+  const fixed = rows.filter(r=>r.kind==='fixed'), varia = rows.filter(r=>r.kind==='variable');
+
+  /* ---- 月別の合計 ---- */
+  const totGross=Array(12).fill(0), totNet=Array(12).fill(0);
+  rows.forEach(r=>r.cells.forEach((v,i)=>{ if(!v) return; totGross[i]+=v; totNet[i]+=netOfGross(v, r.it.taxCat); }));
+  for(let i=0;i<12;i++){ totGross[i]+=other.gross[i]; totNet[i]+=other.net[i]; }
+  const totTax = totGross.map((v,i)=>v-totNet[i]);
+
+  const arrOf  = list => { const a=Array(12).fill(0); list.forEach(r=>r.cells.forEach((v,i)=>{ if(v) a[i]+=v; })); return a; };
+  const planOf = list => list.reduce((s,r)=>s+num(r.it.monthly),0);
+  /** 平均は「数字が入っている月」だけで割る。12で割ると、期の途中では必ず小さく出てしまう
+      （2か月しか実績が無い家賃が 43,083円/月 に見える。実際は 258,500円/月）。 */
+  const avgOf  = arr => { const n=arr.filter(v=>v).length;
+    return n? moneyPlain(Math.round(arr.reduce((s,v)=>s+v,0)/n)) : '<span class="zero">—</span>'; };
+
+  /* ---- KPI ---- */
+  const kCur  = curIdx>=0? totGross[curIdx] : 0;
+  const kPrev = curIdx>0 ? totGross[curIdx-1] : 0;
+  const planNow = curIdx>=0 ? fixed.filter(r=>r.cells[curIdx]!=null).reduce((s,r)=>s+num(r.it.monthly),0) : planOf(fixed);
+  const actNow  = curIdx>=0 ? fixed.reduce((s,r)=>s+(r.cells[curIdx]||0),0) : 0;
+  const missing = curIdx>=0 ? fixed.filter(r=>r.cells[curIdx]!=null && !r.cells[curIdx] && num(r.it.monthly)) : [];
+
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">今月の費用（税込）</div><div class="num">${moneyPlain(kCur)}</div>
+      <div class="sub">前月比 ${kPrev?pct(kCur,kPrev,{reverse:true}):'<span class="zero">—</span>'}</div></div>
+    <div class="kpi"><div class="lbl">定期費用 月額予定</div><div class="num">${moneyPlain(planNow)}</div>
+      <div class="sub">${fixed.length}費目</div></div>
+    <div class="kpi"><div class="lbl">今月 定期の実績</div><div class="num ${actNow>planNow&&planNow?'minus':''}">${moneyPlain(actNow)}</div>
+      <div class="sub">予定との差 ${planNow?`<b class="${actNow-planNow>0?'minus':'plus'}">${actNow-planNow>0?'+':''}${moneyPlain(actNow-planNow)}</b>`:'—'}</div></div>
+    <div class="kpi"><div class="lbl">年度累計（税抜）</div><div class="num">${moneyPlain(totNet.reduce((s,v)=>s+v,0))}</div>
+      <div class="sub">この額が予実の費用に入ります</div></div>
+  </div>`;
+
+  const alert = missing.length? `<div class="alertbar">${IC.warn} ${FY_MONTH_LABELS[curIdx]}の定期費用が ${missing.length}件 未入力です（${missing.map(r=>esc(r.it.name)).join('、')}）。
+    ${canE?`<button class="btn sm" style="background:#fff;color:var(--danger);border-color:currentColor;margin-left:auto;" onclick="costReflect()">月額予定で埋める</button>`:''}</div>` : '';
+
+  /* ---- 表 ---- */
+  const NCOL = 4+12+2;
+  const grp = (label,hint) => `<tr class="grprow"><td colspan="${NCOL}">${esc(label)}${hint?` <span style="font-weight:400;">${esc(hint)}</span>`:''}</td></tr>`;
+
+  const cellHtml = (r,i) => {
+    const v = r.cells[i];
+    if(v==null) return `<td class="r"><span class="zero">—</span></td>`;
+    if(!canE) return `<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`;
+    let cls='cellin';
+    const plan=num(r.it.monthly);
+    if(r.kind==='fixed' && plan && v){
+      const d=(v-plan)/plan;
+      if(d>=COST_DIFF_PCT) cls+=' over'; else if(d<=-COST_DIFF_PCT) cls+=' under';
+    }
+    return `<td class="r ${i===curIdx?'curcol':''}"><input class="${cls}" value="${v?moneyPlain(v):''}"
+      inputmode="numeric" oninput="onCostInput(this,'${attr(r.it.id)}',${i})"></td>`;
+  };
+
+  const rowHtml = r => {
+    const tot = r.cells.reduce((s,c)=>s+(c||0),0);
+    const nMon = r.cells.filter(c=>c).length;
+    return `<tr>
+      <td><a onclick="openForm('costItems','${attr(r.it.id)}')" style="cursor:pointer;font-weight:600;">${esc(r.it.name||'(名称なし)')}</a>
+        ${r.it.vendor?`<div class="muted" style="font-size:11px;">${esc(r.it.vendor)}</div>`:''}</td>
+      <td class="muted" style="font-size:11.5px;">${esc(accountLabel(r.it.accountCode))}</td>
+      <td class="muted" style="font-size:11.5px;">${esc(TAX_CATS.indexOf(r.it.taxCat)>=0?r.it.taxCat:'課税10%')}</td>
+      <td class="r num muted">${num(r.it.monthly)?moneyPlain(r.it.monthly):'<span class="zero">—</span>'}</td>
+      ${r.cells.map((_,i)=>cellHtml(r,i)).join('')}
+      <td class="r num"><b>${moneyPlain(tot)}</b></td>
+      <td class="r num muted">${nMon?moneyPlain(Math.round(tot/nMon)):'<span class="zero">—</span>'}</td></tr>`;
+  };
+
+  const sumRow = (label, arr, plan) => `<tr class="totrow">
+    <td>${esc(label)}</td><td></td><td></td>
+    <td class="r num">${plan?moneyPlain(plan):''}</td>
+    ${arr.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+    <td class="r num">${moneyPlain(arr.reduce((s,v)=>s+v,0))}</td>
+    <td class="r num">${avgOf(arr)}</td></tr>`;
+
+  const otherRow = other.n? grp('個別入力（費目が未設定）','※ 過去に1件ずつ登録した分。費目を作って移すと、この表で管理できます。')+
+    `<tr><td><b>費目なしの経費</b><div class="muted" style="font-size:11px;">${other.n}件</div></td><td></td><td></td>
+      <td class="r"><span class="zero">—</span></td>
+      ${other.gross.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?`<a onclick="costOtherList(${i})" style="cursor:pointer;color:var(--primary);">${moneyPlain(v)}</a>`:'<span class="zero">—</span>'}</td>`).join('')}
+      <td class="r num"><b>${moneyPlain(other.gross.reduce((s,v)=>s+v,0))}</b></td><td></td></tr>` : '';
+
+  const empty = !rows.length && !other.n;
+  const table = empty? `<div class="warnbar">まだ費目がありません。「＋ 費目を追加」から、毎月かかるもの（家賃・通信・リース・給与…）を登録してください。
+      登録すると、この画面が12か月ぶんの入力表になります。</div>`
+    : `<div class="table-wrap"><table class="stick1">
+      <thead><tr>
+        <th style="min-width:170px;">費目</th><th style="min-width:110px;">勘定科目</th><th style="min-width:78px;">税区分</th>
+        <th class="r" style="min-width:92px;">月額予定</th>
+        ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:106px;">${m}</th>`).join('')}
+        <th class="r" style="min-width:112px;">年間計</th>
+        <th class="r" style="min-width:98px;" title="数字が入っている月だけで割った平均">月平均</th></tr></thead>
+      <tbody>
+        ${fixed.length? grp('定期費用（毎月かかるもの）','月額予定から10%以上ズレたマスに色が付きます')+fixed.map(rowHtml).join('')+sumRow('定期費用 計', arrOf(fixed), planOf(fixed)) : ''}
+        ${varia.length? grp('変動費（月によって変わるもの）','')+varia.map(rowHtml).join('')+sumRow('変動費 計', arrOf(varia), 0) : ''}
+        ${otherRow}
+        <tr class="totrow"><td><b>合計（税込・実際に出ていくお金）</b></td><td></td><td></td><td class="r num">${moneyPlain(planOf(fixed))}</td>
+          ${totGross.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+          <td class="r num">${moneyPlain(totGross.reduce((s,v)=>s+v,0))}</td>
+          <td class="r num">${avgOf(totGross)}</td></tr>
+        <tr><td class="muted">うち消費税</td><td></td><td></td><td></td>
+          ${totTax.map(v=>`<td class="r num muted">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+          <td class="r num muted">${moneyPlain(totTax.reduce((s,v)=>s+v,0))}</td><td></td></tr>
+        <tr class="totrow"><td><b>合計（税抜 → 予実の費用へ）</b></td><td></td><td></td><td></td>
+          ${totNet.map(v=>`<td class="r num">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+          <td class="r num">${moneyPlain(totNet.reduce((s,v)=>s+v,0))}</td><td></td></tr>
+      </tbody></table></div>`;
+
+  const tools=`
+    ${canCreate('expenses')?`<button class="btn" onclick="openForm('costItems',null,{kind:'fixed',taxCat:'課税10%'})">＋ 費目を追加</button>`:''}
+    ${canE&&fixed.length?`<button class="btn secondary" onclick="costReflect()">定期費用を反映</button>`:''}
+    ${toolsMenu(`
+      <button class="btn secondary" onclick="exportCsvCost()">${IC.doc} 月次費用表をCSV</button>
+      <button class="btn secondary" onclick="exportCsvTable('expenses')">${IC.doc} 明細をCSV</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>
+      <hr>
+      ${canCreate('expenses')?`<button class="btn secondary" onclick="openForm('expenses',null,{date:today(),bookMonth:thisMonth()})">個別に経費を1件だけ登録</button>`:''}`)}`;
+
+  return pageShell({ title:'費用管理（月次費用表）', count:rows.length,
+    sub:'毎月かかる費用を1枚の表で見ます。金額は<b>税込</b>で入力（実際に出ていく額）。予実には自動で<b>税抜</b>で入ります。正式な決算数値は会計事務所の試算表が優先です。',
+    tools, body: alert+kpis+table+
+      `<div class="infobar" style="margin-top:10px;">マスに数字を打つだけで保存されます。費目名をクリックすると月額予定・支払先・契約期間を編集できます。</div>` });
+}
+
+/* ---- 費目が未設定の経費を見る（隠さない） ---- */
+function costOtherList(mi){
+  const ym=fyMonths(CUR_FY)[mi];
+  const list=(DB.expenses||[]).filter(e=>e&&!e.costItemId&&(e.bookMonth||e.date||'').slice(0,7)===ym);
+  openModal(`<h3>${esc(ym)} — 費目が未設定の経費</h3>
+    <div class="mdsub">1件ずつ登録された分です。行をクリックすると内容を直せます。</div>
+    <div class="table-wrap"><table><thead><tr><th>支払日</th><th>勘定科目</th><th>支払先</th><th class="r">金額（税込）</th><th>摘要</th></tr></thead>
+    <tbody>${list.length? list.map(e=>`<tr class="clickable" onclick="closeModal();openForm('expenses','${attr(e.id)}')">
+      <td>${esc(e.date||'')}</td><td>${esc(accountLabel(e.accountCode))}</td><td>${esc(e.vendor||'')}</td>
+      <td class="r num">${moneyPlain(e.amount)}</td><td>${esc(e.note||'')}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty">ありません。</td></tr>'}</tbody></table></div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+
+/* ---- 定期費用を月額予定で埋める（空欄だけ・入力済みは触らない） ---- */
+function costReflect(){
+  if(!canEdit('expenses')){ toast('入力の権限がありません。','err'); return; }
+  const months=fyMonths(CUR_FY), cur=thisMonth();
+  const sel=Math.max(0, months.indexOf(cur));
+  const n=(DB.costItems||[]).filter(c=>c&&c.active!==false&&c.kind!=='variable'&&num(c.monthly)).length;
+  openModal(`<h3>定期費用を反映</h3>
+    <div class="mdsub">「定期」の費目の<b>月額予定</b>を、<b>空欄の月だけ</b>に入れます。すでに入っている数字は書き換えません。</div>
+    <div class="form-grid">
+      <div class="full"><label>対象月</label><select id="rfM">
+        ${months.map((m,i)=>`<option value="${i}" ${i===sel?'selected':''}>${FY_MONTH_LABELS[i]}（${m}）</option>`).join('')}</select></div>
+      <div class="full"><label style="display:flex;gap:7px;align-items:center;font-weight:500;cursor:pointer;">
+        <input type="checkbox" id="rfAll" style="width:auto;"> ${CUR_FY}年度の12か月すべてに入れる</label></div>
+    </div>
+    <div class="infobar" style="margin-top:10px;">対象になる定期費目：<b>${n}件</b>（月額予定が入っているもの）</div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="costReflectGo()">反映する</button></div>`);
+}
+function costReflectGo(){
+  const months=fyMonths(CUR_FY);
+  const all=document.getElementById('rfAll').checked;
+  const idxs = all? months.map((_,i)=>i) : [Number(document.getElementById('rfM').value)];
+  let n=0;
+  costItemsSorted().filter(it=>it.kind!=='variable' && num(it.monthly)).forEach(it=>{
+    idxs.forEach(i=>{
+      const ym=months[i];
+      if(!costItemActive(it,ym)) return;
+      if(costCell(it.id,ym)) return;               // 入力済みには触らない
+      setCostCell(it.id, ym, num(it.monthly)); n++;
+    });
+  });
+  closeModal(); renderPage('expenses');
+  toast(n? `${n}マスに入力しました。`:'入れる場所がありませんでした（すべて入力済みです）。', n?'ok':'err');
+}
+
+function exportCsvCost(){
+  const { rows } = costRowsOf(CUR_FY);
+  const out=[['費目','勘定科目','区分','支払先','税区分','月額予定',...FY_MONTH_LABELS,'年間計']];
+  rows.forEach(r=>out.push([ r.it.name, accountLabel(r.it.accountCode), r.kind==='fixed'?'定期':'変動',
+    r.it.vendor||'', r.it.taxCat||'課税10%', num(r.it.monthly)||'',
+    ...r.cells.map(c=>c==null?'':c), r.cells.reduce((s,c)=>s+(c||0),0) ]));
+  const o=costOtherByMonth(CUR_FY);
+  if(o.n) out.push(['個別入力（費目なし）','—','—','','','', ...o.gross, o.gross.reduce((s,v)=>s+v,0)]);
+  downloadCsv(`月次費用表_${CUR_FY}年度`, out);
+}
 function viewCompanies(){
   const p='companies';
   const all=(DB.companies||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
@@ -3112,7 +3396,7 @@ function viewDashboard(){
       <li><b>取引先管理</b>で会社ごとの<b>請求ルール</b>（単価×人数など）と支払サイトを設定 → <a onclick="goto('companies')" style="color:var(--primary);cursor:pointer;">取引先へ</a></li>
       <li><b>請求管理</b>で「請求を作成（月まとめ）」→ 内容を確認して確定 → <a onclick="goto('invoices')" style="color:var(--primary);cursor:pointer;">請求へ</a></li>
       <li><b>予実管理</b>で年間予算を入力（前年実績からの作成も可） → <a onclick="goto('yojitsu')" style="color:var(--primary);cursor:pointer;">予実へ</a></li>
-      <li>入金・支払・経費を記録すると、実績と資金繰りが自動で埋まります</li>
+      <li>入金・支払を記録し、費用管理の表を埋めると、実績と資金繰りが自動で計算されます</li>
     </ol></div></div>`:'';
 
   return pageShell({ title:'ダッシュボード', sub:fyLabel(fy)+' ／ '+FY_MONTH_LABELS[i]+'時点',
@@ -3281,7 +3565,7 @@ async function userSet(email, field, value){
   loadUsers();
 }
 const PERM_PAGES=[['yojitsu','予実管理'],['invoices','請求管理'],['receipts','入金・消込'],['bills','支払管理'],
-  ['payouts','支払実行'],['expenses','経費管理'],['companies','取引先管理'],['okr','OKR'],['workers','特定技能者']];
+  ['payouts','支払実行'],['expenses','費用管理'],['companies','取引先管理'],['okr','OKR'],['workers','特定技能者']];
 function permModal(email, role){
   const cur=(DB.userPerms||{})[email]||{};
   openModal(`<h3>個別の権限 — ${esc(email)}</h3>
@@ -3318,7 +3602,7 @@ function viewAudit(){
       <button class="${AUDIT_TAB==='restore'?'on':''}" onclick="setAuditTab('restore')">データ復元</button>
     </div><div id="auditBox"><div class="empty">読み込み中…</div></div>` });
 }
-const AUDIT_ENT={ invoices:'請求書', payments:'入金', bills:'支払請求', payouts:'支払実行', expenses:'経費',
+const AUDIT_ENT={ invoices:'請求書', payments:'入金', bills:'支払請求', payouts:'支払実行', expenses:'費用', costItems:'費目',
   companies:'取引先', budgets:'予算', forecasts:'見込', actualAdjust:'実績調整', billingRules:'請求ルール',
   objectives:'目標', keyResults:'Key Result', workers:'特定技能者', assignments:'雇用', profiles:'アカウント', app_state:'データ全体' };
 function auditFieldLabel(entity, f){

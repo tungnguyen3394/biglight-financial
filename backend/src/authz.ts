@@ -11,7 +11,7 @@ export const COLL_PAGE: Record<string, string> = {
   companies: 'companies', billingRules: 'companies', workers: 'workers',
   invoices: 'invoices', payments: 'receipts',
   bills: 'bills', payouts: 'payouts',
-  expenses: 'expenses',
+  expenses: 'expenses', costItems: 'expenses',
   budgets: 'yojitsu', forecasts: 'yojitsu', actualAdjust: 'yojitsu',
   accounts: 'settings', departments: 'settings',
   objectives: 'okr', keyResults: 'okr', checkins: 'okr',
