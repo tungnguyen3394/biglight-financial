@@ -1,0 +1,60 @@
+name: Deploy finance.biglight.jp
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ここからのデプロイは「おまけ」です。
+# 本命は VPS 側の systemd タイマー（vps/autodeploy.sh）で、そちらは 2分以内に
+# 勝手に反映します。GitHub に VPS の秘密鍵を預けなくて済むぶん安全です。
+#
+# それでも Actions から即座に反映させたい場合は、このリポジトリの
+#   Settings › Secrets and variables › Actions › New repository secret
+# に次の4つを入れてください。1つでも欠けていると、このジョブは
+# 「失敗」ではなく「スキップ」になります（赤いバツ通知が飛ばないように）。
+#   VPS_HOST     194.233.85.198
+#   VPS_USER     root
+#   VPS_PORT     22
+#   VPS_SSH_KEY  VPSに登録した秘密鍵の中身（-----BEGIN … END----- まで全部）
+#
+# ※ VPS_SSH_KEY は CRM リポジトリからコピーできません。GitHub の secrets は
+#   一度入れると誰も読み出せない仕様です。新しく鍵を作って VPS の
+#   /root/.ssh/authorized_keys に公開鍵を足してください。
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: secrets が入っているか確認
+        id: chk
+        # ★ secrets は env 経由で渡す。VPS_SSH_KEY は複数行なので、シェルの中に
+        #   ${{ }} で直接展開すると行が割れてスクリプトが壊れる。
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          KEY:  ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then
+            echo "VPS_HOST / VPS_SSH_KEY が未設定のため、ここからのデプロイはスキップします。"
+            echo "VPS 側の systemd タイマー（yojitsu-autodeploy）が2分以内に反映します。"
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: SSH で VPS を更新
+        if: steps.chk.outputs.go == 'yes'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -e
+            # パスを直書きしない — 動いているコンテナ自身に居場所を聞く。
+            DIR="$(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')"
+            cd "$DIR"
+            # deploy.sh が git reset --hard から --build まで全部やる（何度流しても同じ結果）。
+            bash deploy.sh

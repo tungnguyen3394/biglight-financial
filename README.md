@@ -73,6 +73,35 @@ node test/smoke.js web/index.html
 
 ---
 
+## デプロイ — push するだけ
+
+VPS 側に **2分ごとに GitHub を見に行くタイマー** を入れてあります。`git push origin main` すれば、
+2分以内に finance.biglight.jp が新しくなります。手で何かする必要はありません。
+
+**最初の1回だけ**、VPS でこれを実行してタイマーを仕込みます：
+
+```bash
+ssh root@194.233.85.198
+cd $(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
+git pull origin main
+bash vps/autodeploy.sh          # ← タイマー登録 ＋ 溜まっている分を即デプロイ
+```
+
+| したいこと | コマンド（VPS上） |
+|---|---|
+| 動いているか見る | `systemctl list-timers yojitsu-autodeploy.timer` |
+| ログを見る | `journalctl -u yojitsu-autodeploy -n 50 --no-pager` |
+| 2分待たずに反映 | `/usr/local/bin/yojitsu-autodeploy.sh` |
+| 止める | `systemctl disable --now yojitsu-autodeploy.timer` |
+
+> **なぜ GitHub Actions を本命にしないのか**
+> Actions から入るには VPS の秘密鍵を GitHub に預ける必要があり、鍵が漏れると VPS ごと取られます。
+> タイマー方式は VPS が外へ `git fetch` するだけなので、外から入る穴を1つも開けません。
+> `.github/workflows/deploy.yml` も置いてありますが、secrets（`VPS_HOST` / `VPS_USER` / `VPS_PORT` /
+> `VPS_SSH_KEY`）を入れるまでは黙ってスキップします。
+
+---
+
 ## 数字の約束（ここを間違えると全部ずれます）
 
 | 事柄 | 決まり |
