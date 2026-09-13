@@ -57,8 +57,11 @@ export const COLLECTIONS: CollectionDef[] = [
   { id: 'payouts', crmKey: 'payouts', label: '支払実行', page: 'payouts', readScope: 'payouts.read', basic: true,
     note: '支払の記録と、どの支払請求に充てたか（allocations）' },
 
-  { id: 'expenses', crmKey: 'expenses', label: '経費', page: 'expenses', readScope: 'expenses.read', basic: true,
-    note: '買掛を通さない即払いの費用。金額は税込で入る' },
+  { id: 'expenses', crmKey: 'expenses', label: '費用（月次費用表のマス）', page: 'expenses', readScope: 'expenses.read', basic: true,
+    note: '買掛を通さない費用。金額は税込。costItemId があれば月次費用表の1マス' },
+
+  { id: 'cost_items', crmKey: 'costItems', label: '費目マスタ', page: 'expenses', readScope: 'cost_items.read', basic: true,
+    note: '月次費用表の行（家賃・通信など）。金額そのものは expenses に入る' },
 
   { id: 'budgets', crmKey: 'budgets', label: '予算', page: 'yojitsu', readScope: 'budgets.read', basic: true,
     note: '年度×月×勘定科目の予算額（税抜）' },

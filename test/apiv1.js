@@ -243,6 +243,14 @@ console.log('\n■ 台帳と、外に出してはいけないもの');
     ok(`台帳 ${c.id} の配列名 ${c.crmKey} は実在する`, new RegExp('\\b' + c.crmKey + '\\s*:').test(authz) || ['workers', 'assignments', 'accounts'].includes(c.crmKey));
   }
   ok('台帳の id は重複しない', new Set(C.COLLECTIONS.map(c => c.id)).size === C.COLLECTIONS.length);
+  /* 逆向きの見張り: 画面を増やして台帳に足し忘れると、外からその表だけ見えない状態になる。
+     authz.ts の COLL_PAGE（＝書き込み権限の表）に載っている配列は、全部ここに要る。 */
+  {
+    const body = (authz.match(/COLL_PAGE[^{]*{([\s\S]*?)}/) || ['', ''])[1];
+    const keys = Array.from(body.matchAll(/([A-Za-z][A-Za-z0-9]*)\s*:/g)).map(m => m[1]);
+    const missing = keys.filter(k => !C.COLLECTIONS.some(c => c.crmKey === k));
+    ok('authz.ts にある表は全部 台帳にある（足し忘れ検出）', missing.length === 0, '足りない: ' + missing.join(', '));
+  }
   ok('スコープは台帳から生える', K.SCOPES.length === C.COLLECTIONS.length + K.AGGREGATE_SCOPES.length);
 
   const w = C.publicRow(C.collectionById('workers'), state.workers[0]);
