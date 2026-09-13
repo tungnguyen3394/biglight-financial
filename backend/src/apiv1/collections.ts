@@ -63,6 +63,9 @@ export const COLLECTIONS: CollectionDef[] = [
   { id: 'cost_items', crmKey: 'costItems', label: '費目マスタ', page: 'expenses', readScope: 'cost_items.read', basic: true,
     note: '月次費用表の行（家賃・通信など）。金額そのものは expenses に入る' },
 
+  { id: 'properties', crmKey: 'properties', label: '物件（建物）', page: 'properties', readScope: 'properties.read', basic: true,
+    note: '借りている建物の契約（貸主・期間・家賃・共益費）。毎月の金額は費目から集まる' },
+
   { id: 'budgets', crmKey: 'budgets', label: '予算', page: 'yojitsu', readScope: 'budgets.read', basic: true,
     note: '年度×月×勘定科目の予算額（税抜）' },
 

@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -24,7 +24,7 @@ const ctx = {
   localStorage:{ getItem:()=>null, setItem:noop, removeItem:noop },
   document:{ getElementById:()=>el, querySelector:()=>null, querySelectorAll:()=>[], addEventListener:noop,
     createElement:()=>el, body:el },
-  window:{ innerWidth:1400, addEventListener:noop },
+  window:{ innerWidth:1400, addEventListener:noop, scrollTo:noop },
   history:{ replaceState:noop }, EventSource: function(){ this.addEventListener = noop; },
   navigator:{}, alert:noop, confirm:()=>true, Blob:function(){}, URL:{ createObjectURL:()=>'', revokeObjectURL:noop },
 };
@@ -250,16 +250,22 @@ eq('やることが無ければ空', ctx.notifItems().length, 0);
 Object.assign(_db, keep);
 eq('戻したら また出る', ctx.notifItems().length>0, true);
 
-['guideAr','guideAp','guideYj','guideMs','guidePromise'].forEach(fn=>{
-  try{ const h=ctx[fn](); const ok=typeof h==='string'&&h.length>200;
-    console.log((ok?'  ok  ':'  NG  ')+fn+'  →  '+(ok?h.length+' 文字':'空')); ok?pass++:fail++;
-  }catch(e){ console.log('  NG  '+fn+'  →  '+e.message); fail++; }
+/* ガイドは左メニューから作る: どの区も表が出て、画面を足しても書き忘れが起きない */
+ctx.__x.SECTIONS.forEach(sec=>{
+  try{ const h=ctx.guideSection(sec); const ok=typeof h==='string'&&h.length>150;
+    console.log((ok?'  ok  ':'  NG  ')+'入力ガイド: '+sec.label+'  →  '+(ok?h.length+' 文字':'空')); ok?pass++:fail++;
+  }catch(e){ console.log('  NG  入力ガイド: '+sec.label+'  →  '+e.message); fail++; }
 });
+eq('ガイドは全画面を載せる（書き忘れ検出）',
+  ctx.__x.SECTIONS.flatMap(s=>s.tabs.map(t=>t.id)).filter(id=>!ctx.__x.PAGE_GUIDE[id]), []);
+eq('メニューは8項目', ctx.__x.SECTIONS.length, 8);
+try{ const h=ctx.guidePromise(); const ok=h.length>200;
+  console.log((ok?'  ok  ':'  NG  ')+'数字の約束  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
 
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',
- 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging'].forEach(fn => {
+ 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging','viewProperties'].forEach(fn => {
   try {
     const h = ctx[fn]();
     const ok = typeof h === 'string' && h.length > 80;
@@ -278,5 +284,67 @@ console.log('\n― 画面が落ちずに描けるか ―');
   }catch(e){ console.log(`  NG  viewLedger(${side}/${tab})  →  `+e.message); fail++; }
 });
 
-console.log(`\n結果: ${pass} 件成功 / ${fail} 件失敗\n`);
-process.exit(fail ? 1 : 0);
+/* ══════════════════════════════════════════════════════════════════════
+   デモデータ — 入れて・確かめて・消す
+   本物が巻き込まれないことまで見る（ここが一番大事） ══════════════════ */
+(async ()=>{
+  console.log('\n― デモデータ ―');
+  /* 本物のデータを1件置いておく。消したあとも残っていなければならない */
+  const realId='REAL-KEEP';
+  _db.invoices.push({ id:realId, no:'REAL-001', companyId:'C1', bookMonth:'2025-09', dueDate:'2025-10-31',
+    status:'確定', items:[{accountCode:'4100', amount:12345, taxCat:'課税10%'}] });
+  const before={}; Object.keys(_db).forEach(k=>{ if(Array.isArray(_db[k])) before[k]=_db[k].length; });
+
+  await ctx.demoSeed();
+  const n = ctx.demoCount();
+  eq('デモが入った（件数）', n>300, true);
+  eq('取引先は9社', _db.companies.filter(c=>c.demo).length, 9);
+  eq('物件は4件', _db.properties.filter(p=>p.demo).length, 4);
+  eq('14か月 × 3社 の請求', _db.invoices.filter(i=>i.demo).length, 42);
+  eq('全部に【デモ】の印', _db.companies.filter(c=>c.demo).every(c=>c.name.startsWith('【デモ】')), true);
+
+  /* 会社ごとに払い方のくせが違う ＝ タイムラインの色が全部見られる */
+  const sakura=_db.companies.find(c=>c.name.includes('さくら製作所'));
+  const kita  =_db.companies.find(c=>c.name.includes('北関東物流'));
+  eq('さくらは期日内100%', ctx.ledPerf(sakura.id,'ar').rate, 100);
+  eq('北関東はいま超過中がある', ctx.ledPerf(kita.id,'ar').openOver>0, true);
+  eq('北関東は遅れの平均が出る', ctx.ledPerf(kita.id,'ar').avgLate>0, true);
+  eq('台帳の残高＝売掛残高（さくら）', ctx.ledEvents(sakura.id,'ar').pop().bal, ctx.arBalanceOf(sakura.id));
+  eq('台帳の残高＝売掛残高（北関東）', ctx.ledEvents(kita.id,'ar').pop().bal, ctx.arBalanceOf(kita.id));
+
+  /* 物件に費用が集まっているか */
+  const pr = ctx.propRowsOf(ctx.__x.CUR_FY ? ctx.__x.CUR_FY : 2025);
+  const rowsWithMoney = ctx.propRowsOf(2025).rows.filter(r=>r.cells.some(v=>v>0));
+  eq('物件ごとに毎月の金額が集まる', rowsWithMoney.length>0, true);
+  eq('家賃は買掛（支払請求から読む）', ctx.propRowsOf(2025).rows[0].items.some(r=>r.ap), true);
+  const soon=_db.properties.filter(p=>{ const d=ctx.propDaysLeft(p); return d!==null && d<=90; });
+  eq('満了が近い物件がデモに入っている', soon.length>0, true);
+  eq('ベルが契約満了を知らせる', ctx.notifItems().some(x=>x.key==='prop-end'), true);
+
+  /* 予実にもちゃんと乗る */
+  eq('デモで売上が立つ', ctx.actualSeries(2025,'revenue').some(v=>v>0), true);
+  eq('デモで売上原価が立つ（通訳費）', ctx.actualSeries(2025,'cogs').some(v=>v>0), true);
+  eq('デモで販管費が立つ（家賃・光熱費）', ctx.actualSeries(2025,'sga').some(v=>v>0), true);
+
+  /* 画面がデモの量でも落ちないか（少量の作り物より、こちらが本番に近い） */
+  ['viewDashboard','viewInvoices','viewReceipts','viewAging','viewBills','viewPayouts','viewApAging',
+   'viewCashflow','viewExpenses','viewProperties','viewCompanies','viewYojitsu','viewMikomi'].forEach(fn=>{
+    try{ const h=ctx[fn](); const ok=typeof h==='string'&&h.length>80;
+      console.log((ok?'  ok  ':'  NG  ')+fn+'（デモ入り）  →  '+(ok?h.length+' 文字':'空')); ok?pass++:fail++;
+    }catch(e){ console.log('  NG  '+fn+'（デモ入り）  →  '+e.message); fail++; }
+  });
+  ctx.setLedCo(kita.id); ctx.setLedTab('timeline');
+  try{ const h=ctx.viewLedger(); const ok=h.length>2000;
+    console.log((ok?'  ok  ':'  NG  ')+'viewLedger（デモ・タイムライン）  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
+
+  /* 消す: デモだけが消え、本物は残る */
+  await ctx.demoRemove(true);
+  eq('デモは全部消えた', ctx.demoCount(), 0);
+  eq('本物の請求は残っている', !!_db.invoices.find(i=>i.id===realId), true);
+  eq('本物の件数に戻っている', _db.invoices.length, before.invoices);
+  eq('本物の取引先も無事', _db.companies.length, before.companies);
+
+  console.log(`\n結果: ${pass} 件成功 / ${fail} 件失敗\n`);
+  process.exit(fail? 1:0);
+})().catch(e=>{ console.error('  NG  デモデータのテストが落ちました → '+(e&&e.message)+'\n'+(e&&e.stack||'').split('\n').slice(0,4).join('\n')); process.exit(1); });
+/* ※ ここに process.exit を書かないこと。上は非同期なので、書くと途中で殺してしまう。 */

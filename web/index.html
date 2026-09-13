@@ -263,6 +263,18 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
     display:flex; flex-direction:column; gap:6px;}
   .more-panel .btn{justify-content:flex-start; width:100%;}
   .more-panel hr{border:none; border-top:1px solid var(--border); margin:2px 0;}
+  /* 画面の上のタブ＝「同じ仕事の、見方の違い」。ページの中のタブ(.tabs)とは形を変えて、
+     どちらの階層にいるかが一目で分かるようにする。 */
+  .sectabs{display:flex; gap:6px; margin:0 0 14px; overflow-x:auto; padding-bottom:2px;}
+  .sectabs button{border:1px solid var(--border-strong); background:var(--card); color:var(--text-secondary);
+    border-radius:999px; padding:7px 15px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap;}
+  .sectabs button:hover{border-color:var(--primary); color:var(--primary);}
+  .sectabs button.on{background:var(--primary); border-color:var(--primary); color:#fff;}
+  .sectabs button .n{display:inline-block; margin-left:6px; background:var(--danger); color:#fff;
+    border-radius:999px; padding:0 6px; font-size:10.5px; line-height:16px; font-variant-numeric:tabular-nums;}
+  .sectabs button.on .n{background:rgba(255,255,255,.28);}
+  @media print{ .sectabs{display:none !important;} }
+
   .tabs{display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:14px; overflow-x:auto;}
   .tabs button{border:0; background:none; font-family:inherit; font-size:13.5px; color:var(--muted);
     padding:9px 14px; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;}
@@ -467,12 +479,12 @@ const ROLE_DEFAULT = {
   Admin: null,   // すべて可
   Manager: {
     yojitsu:{c:1,e:1,d:1}, invoices:{c:1,e:1,d:0}, receipts:{c:1,e:1,d:0},
-    bills:{c:1,e:1,d:0}, payouts:{c:1,e:1,d:0}, expenses:{c:1,e:1,d:0},
+    bills:{c:1,e:1,d:0}, payouts:{c:1,e:1,d:0}, expenses:{c:1,e:1,d:0}, properties:{c:1,e:1,d:1},
     companies:{c:1,e:1,d:0}, okr:{c:1,e:1,d:1}, settings:{c:1,e:1,d:0}, workers:{c:0,e:0,d:0},
   },
   Staff: {
     yojitsu:{c:1,e:1,d:0}, invoices:{c:1,e:1,d:0}, receipts:{c:1,e:1,d:0},
-    bills:{c:1,e:1,d:0}, payouts:{c:1,e:1,d:0}, expenses:{c:1,e:1,d:0},
+    bills:{c:1,e:1,d:0}, payouts:{c:1,e:1,d:0}, expenses:{c:1,e:1,d:0}, properties:{c:1,e:1,d:0},
     companies:{c:1,e:1,d:0}, okr:{c:0,e:1,d:0}, settings:{c:0,e:0,d:0}, workers:{c:0,e:0,d:0},
   },
   Viewer: {},
@@ -596,6 +608,9 @@ const PAY_METHODS     = ['銀行振込','現金','口座振替','クレジット
 const BILLING_KINDS   = [{k:'per_worker',label:'人数×単価（支援委託料）'},{k:'fixed',label:'月額固定'},{k:'spot',label:'都度（自動生成しない）'}];
 const COUNT_MODES     = [{k:'month_end',label:'月末在籍'},{k:'month_start',label:'月初在籍'},{k:'prorate',label:'日割り'}];
 const COST_KINDS      = [{k:'fixed',label:'定期（毎月かかる）'},{k:'variable',label:'変動（月によって変わる）'}];
+/* 物件（建物）。★ ENTITIES より前に置くこと。 */
+const PROPERTY_KINDS = ['社宅・寮','事務所','駐車場','倉庫','その他'];
+const PROP_ALERT_DAYS = 90;                 // 契約満了がこの日数以内なら知らせる
 /* 費目の払い方。★ ENTITIES より前に置くこと（宣言より先に読まれると画面が真っ白になる）。 */
 const PAY_MODES = [{k:'即払い', label:'即払い（経費として毎月打つ）'},
                    {k:'買掛',   label:'買掛（毎月の支払請求を作る・期日で管理）'}];
@@ -658,6 +673,28 @@ const ENTITIES = {
     ],
     columns:['date','bookMonth','accountCode','vendor','amount','method','note'],
   },
+  /* 物件（建物）マスタ — 借りている建物の契約。毎月の金額は費目から集まる。 */
+  properties: {
+    label:'物件（建物）', key:'properties', page:'properties', idPrefix:'PR',
+    fields:[
+      {name:'name',    label:'物件名',   type:'text', req:true, section:'基本', secIcon:'building', ph:'例: レオパレス○○ 101'},
+      {name:'kind',    label:'用途',     type:'select', options:PROPERTY_KINDS},
+      {name:'address', label:'住所',     type:'text', full:true},
+      {name:'companyId', label:'貸主・管理会社', type:'ref', ref:'companies', quickAdd:'仕入先',
+        help:'家賃の支払先。一覧に無ければ「＋ 新しい取引先を作る」で作れます。'},
+      {name:'rooms',    label:'部屋数',   type:'number'},
+      {name:'capacity', label:'入居可能人数', type:'number'},
+      {name:'contractStart', label:'契約開始', type:'date', section:'契約・お金', secIcon:'yen'},
+      {name:'contractEnd',   label:'契約満了', type:'date',
+        help:'空欄なら期限なし。満了の90日前から画面と通知に出ます（更新の交渉には時間が要るため）。'},
+      {name:'rent',    label:'家賃（月額・税込）', type:'money'},
+      {name:'kyoeki',  label:'共益費（月額）',     type:'money'},
+      {name:'parking', label:'駐車場代（月額）',   type:'money'},
+      {name:'deposit', label:'敷金・保証金',       type:'money'},
+      {name:'note',    label:'メモ', type:'textarea', full:true, ph:'更新条件・解約予告の期間・鍵の本数など'},
+    ],
+    columns:['name','kind','companyId','contractEnd','rent'],
+  },
   /* 費目マスタ — 月次費用表の「行」。金額そのものは expenses に入る（1マス=1行）。 */
   costItems: {
     label:'費目', key:'costItems', page:'expenses', idPrefix:'CI',
@@ -672,6 +709,8 @@ const ENTITIES = {
         help:'期日は この会社の 締日・支払サイト・支払日 から決まります。一覧に無ければ「＋ 新しい取引先」で作れます。'},
       {name:'payMode',     label:'払い方',   type:'select', options:PAY_MODES,
         help:'即払い＝月次費用表に金額を打つ（経費）。買掛＝毎月の支払請求を作り、期日と残高で管理する。'},
+      {name:'propertyId',  label:'物件（建物）', type:'ref', ref:'properties',
+        help:'家賃・電気・水道・ガスなど、建物にかかるものはここで物件を選びます。物件ごとの表に集まります。'},
       {name:'monthly',     label:'月額予定（税込）', type:'money',
         help:'定期費用の目安。実績がここから10%以上ズレると表のマスに色が付きます。'},
       {name:'taxCat',      label:'税区分',   type:'select', options:TAX_CATS,
@@ -760,43 +799,47 @@ const ICONS = {
   report:    svgIc('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 14v3M12 10v7M17 7v10"/>'),
 };
 
-/* ============ メニュー — 仕事の流れ順（公式 §3.2） ============ */
-const NAV_GROUPS = [
-  { gid:'', label:'', items:[ {id:'dashboard', label:'ダッシュボード', icon:'dashboard'} ]},
-  { gid:'yj', label:'予実管理', items:[
-    {id:'yojitsu', label:'予実管理',   icon:'target'},
-    {id:'compare', label:'期間比較',   icon:'compare'},
-    {id:'mikomi',  label:'見込実績表', icon:'report'},
-  ]},
-  { gid:'ar', label:'債権（売掛金）', items:[
-    {id:'invoices', label:'請求管理',   icon:'invoice'},
-    {id:'receipts', label:'入金・消込', icon:'wallet'},
-    {id:'aging',    label:'債権年齢表', icon:'aging'},
-  ]},
-  { gid:'ap', label:'債務（買掛金）', items:[
-    {id:'bills',    label:'支払管理',   icon:'bill'},
-    {id:'payouts',  label:'支払実行',   icon:'cash'},
-    {id:'apaging',  label:'債務年齢表', icon:'aging'},
-    {id:'cashflow', label:'資金繰り',   icon:'compare'},
-  ]},
-  { gid:'ok', label:'目標', items:[
-    {id:'okr', label:'OKR / KPI', icon:'flag'},
-  ]},
-  { gid:'ms', label:'マスタ', items:[
-    {id:'companies', label:'取引先管理',  icon:'company'},
-    {id:'ledger',    label:'取引先台帳',  icon:'ledger'},
-    {id:'workers',   label:'特定技能者',  icon:'worker'},
-    {id:'expenses',  label:'費用管理',    icon:'expense'},
-    {id:'crmlink',   label:'CRM連携',     icon:'link'},
-  ]},
-  { gid:'sy', label:'システム', items:[
-    {id:'users',    label:'ユーザー管理', icon:'users'},
-    {id:'apilink',  label:'API・AI連携',  icon:'link'},
-    {id:'audit',    label:'操作履歴',     icon:'audit'},
-    {id:'settings', label:'設定',         icon:'gear'},
-  ]},
+/* ============ メニュー — 仕事の流れ順（公式 §3.2） ============
+   ★ 2026-09-13: 18項目・7グループは多すぎて、どこに何があるか覚えられなかった
+     （利用者の指摘）。「1つの仕事＝1つの項目」に絞り、その中の見方の違いは
+     画面の上のタブに移しました。左メニューは8項目。隠したのではなく、
+     同じ問いに答える画面どうしを1つにまとめています（公式 §0.2）。
+   ★ 画面IDは変えていません。権限・リンク・ベル・ガイドはそのまま動きます。 */
+const SECTIONS = [
+  { id:'dashboard', label:'ダッシュボード', icon:'dashboard', tabs:[
+    {id:'dashboard', label:'ダッシュボード'} ]},
+  { id:'sec-ar', label:'請求・入金', icon:'invoice', tabs:[
+    {id:'invoices', label:'請求管理'},
+    {id:'receipts', label:'入金・消込'},
+    {id:'aging',    label:'未回収（年齢表）'} ]},
+  { id:'sec-ap', label:'支払', icon:'bill', tabs:[
+    {id:'bills',    label:'支払管理'},
+    {id:'payouts',  label:'支払実行'},
+    {id:'apaging',  label:'未払（年齢表）'},
+    {id:'cashflow', label:'資金繰り'} ]},
+  { id:'sec-co', label:'取引先', icon:'company', tabs:[
+    {id:'companies', label:'一覧'},
+    {id:'ledger',    label:'台帳（履歴・タイムライン）'},
+    {id:'workers',   label:'特定技能者'} ]},
+  { id:'sec-cost', label:'費用・物件', icon:'expense', tabs:[
+    {id:'expenses',   label:'月次費用表'},
+    {id:'properties', label:'物件（建物）'} ]},
+  { id:'sec-yj', label:'予実管理', icon:'target', tabs:[
+    {id:'yojitsu', label:'予実'},
+    {id:'compare', label:'期間比較'},
+    {id:'mikomi',  label:'見込実績表'} ]},
+  { id:'sec-okr', label:'目標 OKR', icon:'flag', tabs:[
+    {id:'okr', label:'OKR / KPI'} ]},
+  { id:'sec-sys', label:'設定', icon:'gear', tabs:[
+    {id:'settings', label:'勘定科目・基本'},
+    {id:'crmlink',  label:'CRM連携'},
+    {id:'users',    label:'ユーザー'},
+    {id:'apilink',  label:'API・AI連携'},
+    {id:'audit',    label:'操作履歴'} ]},
 ];
-const ALL_PAGES = NAV_GROUPS.flatMap(g=>g.items.map(i=>i.id));
+const ALL_PAGES  = SECTIONS.flatMap(s=>s.tabs.map(t=>t.id));
+const SECTION_OF = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ SECTION_OF[t.id]=sec; }));
+const PAGE_LABEL = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ PAGE_LABEL[t.id]=t.label; }));
 
 /* ============ ⑥ 共通部品 ============ */
 const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -944,7 +987,7 @@ function markDeleted(k, id){
   if(!PENDING.changed[k]) PENDING.changed[k]=[];
   schedulePush();
 }
-let _pushTimer=null, _pushing=false;
+let _pushTimer=null, _pushing=false, _confirmShrink=false;
 function schedulePush(){ clearTimeout(_pushTimer); _pushTimer=setTimeout(pushDelta, 400); }
 function pendingCount(){
   let n=0; Object.values(PENDING.changed).forEach(a=>n+=a.length);
@@ -955,6 +998,9 @@ async function pushDelta(retry){
   if(!pendingCount()) return;
   _pushing = true;
   const body = { changed:{...PENDING.changed}, deleted:{...PENDING.deleted}, since:SERVER_REV, epoch:SERVER_EPOCH };
+  /* 安全装置（縮小ガード）を外すのは、デモデータを消すときだけ。
+     ここを常に true にしてはいけない — 事故のときに止めてくれるのがこの装置。 */
+  if(_confirmShrink) body.confirmShrink = true;
   try{
     const r = await fetch(API_BASE+'/state-delta', { method:'PUT', headers:headers(), body:JSON.stringify(body) });
     const d = await r.json().catch(()=>({}));
@@ -1136,25 +1182,24 @@ function toggleSidebar(){
 function renderNav(){
   const nav=document.getElementById('navList');
   const badges = navBadges();
-  nav.innerHTML = NAV_GROUPS.map(g=>{
-    const items = g.items.filter(it=>canSee(it.id));
-    if(!items.length) return '';
-    const body = items.map(it=>{
-      const b = badges[it.id];
-      return `<button class="navitem${CURRENT_PAGE===it.id?' active':''}" onclick="goto('${it.id}')" title="${attr(it.label)}">
-        ${ICONS[it.icon]||ICONS.dashboard}<span>${esc(it.label)}</span>${b?`<span class="nbdg">${b>99?'99+':b}</span>`:''}</button>`;
-    }).join('');
-    if(!g.gid) return body;
-    const open = PREFS.navOpen[g.gid] !== false;
-    const gsum = items.reduce((s,it)=>s+(badges[it.id]||0),0);
-    return `<button class="nav-grp${open?' open':''}" onclick="toggleNavGrp('${g.gid}')">
-        <span>${esc(g.label)}</span>${gsum?`<span class="gbdg">${gsum>99?'99+':gsum}</span>`:''}
-        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 6 6 6-6 6"/></svg>
-      </button><div class="nav-grp-body${open?' open':''}" id="grp-${g.gid}">${body}</div>`;
+  nav.innerHTML = SECTIONS.map(sec=>{
+    const tabs = sec.tabs.filter(t=>canSee(t.id));
+    if(!tabs.length) return '';
+    const b = tabs.reduce((n,t)=>n+(badges[t.id]||0),0);
+    const on = SECTION_OF[CURRENT_PAGE]===sec;
+    /* 押すと、その仕事で最初に開く画面（最初の見られるタブ）へ */
+    return `<button class="navitem${on?' active':''}" onclick="goto('${tabs[0].id}')" title="${attr(sec.label)}">
+      ${ICONS[sec.icon]||ICONS.dashboard}<span>${esc(sec.label)}</span>${b?`<span class="nbdg">${b>99?'99+':b}</span>`:''}</button>`;
   }).join('');
 }
-function toggleNavGrp(gid){
-  PREFS.navOpen[gid] = !(PREFS.navOpen[gid]!==false); savePrefs(); renderNav();
+/** 画面の上のタブ（同じ仕事の、見方の違い）。1つしか無いときは出さない。 */
+function sectionTabs(page){
+  const sec=SECTION_OF[page]; if(!sec) return '';
+  const tabs=sec.tabs.filter(t=>canSee(t.id));
+  if(tabs.length<2) return '';
+  const badges=navBadges();
+  return `<div class="sectabs">${tabs.map(t=>`<button class="${t.id===page?'on':''}" onclick="goto('${t.id}')">${esc(t.label)}${
+    badges[t.id]?`<span class="n">${badges[t.id]}</span>`:''}</button>`).join('')}</div>`;
 }
 /** バッジ＝「まだ誰も手を付けていない仕事の数」。取れないときは出さない（公式 §0.6） */
 function navBadges(){
@@ -1177,6 +1222,7 @@ function goto(page){
 function renderPage(page){
   const el=document.getElementById('main');
   if(!DB){ el.innerHTML='<div class="empty">読み込み中…</div>'; return; }
+  const bar = sectionTabs(page);
   try{
     switch(page){
       case 'dashboard': el.innerHTML=viewDashboard(); break;
@@ -1195,6 +1241,7 @@ function renderPage(page){
       case 'ledger':    el.innerHTML=viewLedger();    break;
       case 'workers':   el.innerHTML=viewWorkers();   break;
       case 'expenses':  el.innerHTML=viewExpenses();  break;
+      case 'properties':el.innerHTML=viewProperties();break;
       case 'crmlink':   el.innerHTML=viewCrmLink();   renderCrmStatus(); break;
       case 'users':     el.innerHTML=viewUsers();     loadUsers(); break;
       case 'audit':     el.innerHTML=viewAudit();     loadAudit(); break;
@@ -1207,6 +1254,7 @@ function renderPage(page){
     el.innerHTML = `<div class="alertbar">画面の表示中にエラーが発生しました：${esc(err.message)}<br>
       <span style="font-weight:400;">この内容を管理者にお伝えください。データは失われていません。</span></div>`;
   }
+  if(bar) el.innerHTML = bar + el.innerHTML;
   syncBadge();
   try{ notifBadge(); }catch(e){ /* 通知が数えられなくても画面は出す */ }
 }
@@ -2854,6 +2902,161 @@ function cfSaveStart(){
 }
 
 /* ============================================================================
+   物件（建物）管理 — 借りている建物ごとに、契約と毎月のお金をまとめて見る
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-13）:「家賃・電気・水道…を、借りている建物ごとに
+   きちんと管理したい。そこもタイムラインで見たい」
+
+   考え方:
+     ・物件は「契約の器」。貸主（＝支払先）・期間・家賃・共益費・駐車場代を持つ
+     ・毎月の実際の金額は 費目マスタ（月次費用表）から来る。費目に物件を紐づけると
+       この画面に集まる。金額の出どころを二重に持たない（公式 §0.3）
+     ・契約満了が近い物件はベルと画面で先に言う。更新の交渉には時間が要るため
+   ========================================================================== */
+/** 物件 × 12か月（税込）。費目（月次費用表）の行を物件ごとに束ねたもの。 */
+function propRowsOf(fy){
+  const months = fyMonths(fy);
+  const all = costRowsOf(fy).rows;
+  const props = (DB.properties||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  const rows = props.map(pr=>{
+    const items = all.filter(r=>String(r.it.propertyId||'')===String(pr.id));
+    const cells = months.map((m,i)=>items.reduce((s,r)=>s+(r.cells[i]||0),0));
+    return { pr, items, cells, plan:num(pr.rent)+num(pr.kyoeki)+num(pr.parking) };
+  });
+  /* 物件に紐づいていない費目は「物件なし」で1行にまとめる（隠すと合わなくなる） */
+  const orphan = all.filter(r=>!r.it.propertyId);
+  return { months, rows, orphan, orphanCells: months.map((m,i)=>orphan.reduce((s,r)=>s+(r.cells[i]||0),0)) };
+}
+/** 契約満了まで何日か。契約満了が空なら null（＝期限なし・自動更新） */
+function propDaysLeft(pr){
+  if(!pr || !pr.contractEnd) return null;
+  return daysBetween(today(), String(pr.contractEnd).slice(0,10));
+}
+function propEndBadge(pr){
+  const d=propDaysLeft(pr);
+  if(d===null) return '<span class="muted" style="font-size:11.5px;">期限なし</span>';
+  if(d<0)  return `<span class="badge b-red">満了済み（${-d}日前）</span>`;
+  if(d<=PROP_ALERT_DAYS) return `<span class="badge b-amber">あと${d}日</span>`;
+  return `<span class="muted" style="font-size:11.5px;">${esc(String(pr.contractEnd).slice(0,10))}</span>`;
+}
+
+function viewProperties(){
+  const fy=CUR_FY;
+  const { months, rows, orphan, orphanCells } = propRowsOf(fy);
+  const cur=thisMonth(), curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
+  const canC=canCreate('properties');
+
+  const soon=rows.filter(r=>{ const d=propDaysLeft(r.pr); return d!==null && d<=PROP_ALERT_DAYS; });
+  const planTotal=rows.reduce((s,r)=>s+r.plan,0);
+  const yearTotal=rows.reduce((s,r)=>s+r.cells.reduce((t,v)=>t+v,0),0);
+  const monthNow=curIdx>=0? rows.reduce((s,r)=>s+(r.cells[curIdx]||0),0) : 0;
+
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">物件</div><div class="num">${rows.length}</div>
+      <div class="sub">${rows.filter(r=>r.pr.kind==='社宅・寮').length}件が社宅・寮</div></div>
+    <div class="kpi"><div class="lbl">月額の固定費</div><div class="num">${moneyPlain(planTotal)}</div>
+      <div class="sub">家賃＋共益費＋駐車場（契約の額）</div></div>
+    <div class="kpi"><div class="lbl">${curIdx>=0?FY_MONTH_LABELS[curIdx]+'の実績':'今月の実績'}</div>
+      <div class="num ${monthNow>planTotal&&planTotal?'minus':''}">${moneyPlain(monthNow)}</div>
+      <div class="sub">光熱費まで含めた実際の額</div></div>
+    <div class="kpi"><div class="lbl">${fy}年度の合計</div><div class="num">${moneyPlain(yearTotal)}</div>
+      <div class="sub">税込・出ていったお金</div></div>
+  </div>`;
+
+  const alert = soon.length? `<div class="alertbar">${IC.warn} 契約満了が近い物件が ${soon.length}件あります
+      （${soon.map(r=>esc(r.pr.name)+'：'+(propDaysLeft(r.pr)<0?'満了済み':'あと'+propDaysLeft(r.pr)+'日')).join('、')}）。
+      更新・解約の連絡は早めに。</div>`:'';
+
+  const NCOL = 4+12+1;
+  const rowHtml = r => `<tr onclick="propertyDetail('${attr(r.pr.id)}')" style="cursor:pointer;">
+    <td><b>${esc(r.pr.name||'(名称なし)')}</b>
+      <div class="muted" style="font-size:10.5px;">${esc(r.pr.kind||'')}${r.pr.address?' ／ '+esc(r.pr.address):''}</div></td>
+    <td style="font-size:11.5px;">${r.pr.companyId? coLink(r.pr.companyId,'ap') : '<span class="zero">—</span>'}</td>
+    <td>${propEndBadge(r.pr)}</td>
+    <td class="r num muted">${r.plan?moneyPlain(r.plan):'<span class="zero">—</span>'}</td>
+    ${r.cells.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+    <td class="r num"><b>${moneyPlain(r.cells.reduce((s,v)=>s+v,0))}</b></td></tr>`;
+
+  const totals=months.map((m,i)=>rows.reduce((s,r)=>s+(r.cells[i]||0),0));
+
+  const table = rows.length? `<div class="table-wrap"><table class="stick1">
+      <thead><tr><th style="min-width:190px;">物件</th><th style="min-width:130px;">貸主・管理会社</th>
+        <th style="min-width:104px;">契約満了</th><th class="r" style="min-width:96px;">月額（契約）</th>
+        ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:96px;">${m}</th>`).join('')}
+        <th class="r" style="min-width:110px;">年間計</th></tr></thead>
+      <tbody>
+        ${rows.map(rowHtml).join('')}
+        ${orphan.length? `<tr class="grprow"><td colspan="${NCOL}">物件に紐づいていない費目（通信・リースなど、建物に関係しないもの）</td></tr>
+          <tr><td><b>物件なし</b><div class="muted" style="font-size:10.5px;">${orphan.length}費目</div></td><td></td><td></td><td></td>
+          ${orphanCells.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+          <td class="r num">${moneyPlain(orphanCells.reduce((s,v)=>s+v,0))}</td></tr>`:''}
+        <tr class="totrow"><td><b>物件の合計</b></td><td></td><td></td>
+          <td class="r num">${moneyPlain(planTotal)}</td>
+          ${totals.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+          <td class="r num">${moneyPlain(yearTotal)}</td></tr>
+      </tbody></table></div>`
+    : `<div class="warnbar">まだ物件がありません。「＋ 物件を追加」から、借りている建物（社宅・寮・事務所・駐車場）を登録してください。
+        登録したら、費用管理の費目に その物件を選ぶと、ここに毎月の金額が集まります。</div>`;
+
+  return pageShell({ title:'物件（建物）', count:rows.length,
+    sub:`借りている建物ごとの契約と、毎月かかったお金。${fyLabel(fy)}`,
+    tools:`${canC?`<button class="btn" onclick="openForm('properties')">＋ 物件を追加</button>`:''}
+      ${toolsMenu(`<button class="btn secondary" onclick="exportCsvProperties()">${IC.doc} CSV出力</button>
+        <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`,
+    body: alert+kpis+table+
+      `<div class="fhelp" style="margin-top:8px;">金額の出どころは 費用管理（月次費用表）です。費目に物件を選ぶと、この表に集まります。
+        家賃を「買掛」にしておくと、毎月の支払請求が自動で作られ、支払期日と残高でも追えます。</div>` });
+}
+
+/** 1物件の中身: 契約の条件 ＋ 費目ごとの12か月 */
+function propertyDetail(id){
+  const pr=findById('properties',id); if(!pr) return;
+  const fy=CUR_FY, { rows }=propRowsOf(fy);
+  const me=rows.find(r=>String(r.pr.id)===String(id)) || { items:[], cells:Array(12).fill(0), plan:0 };
+  const cur=thisMonth(), curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
+  const line=(lb,v)=>kv(lb,v);
+
+  openModal(`<h3>${esc(pr.name||'')} <span style="font-size:12px;color:var(--muted);font-weight:400;">${esc(pr.kind||'')}</span></h3>
+    <div class="form-section">${IC.building} 契約
+      ${canEdit('properties')?`<a class="pillbtn pill-save" style="margin-left:auto;" onclick="closeModal();openForm('properties','${pr.id}')">編集</a>`:''}</div>
+    ${line('住所', esc(pr.address||'—'))}
+    ${line('貸主・管理会社', pr.companyId? coLink(pr.companyId,'ap') : '—')}
+    ${line('契約期間', `${esc(String(pr.contractStart||'—').slice(0,10))} 〜 ${esc(String(pr.contractEnd||'—').slice(0,10))}　${propEndBadge(pr)}`)}
+    ${line('月額（契約）', `家賃 <b class="num">${moneyPlain(pr.rent)}</b>${num(pr.kyoeki)?` ／ 共益費 <b class="num">${moneyPlain(pr.kyoeki)}</b>`:''}${num(pr.parking)?` ／ 駐車場 <b class="num">${moneyPlain(pr.parking)}</b>`:''}　＝ <b class="num">${moneyPlain(me.plan)}</b> 円`)}
+    ${num(pr.deposit)?line('敷金・保証金', `<b class="num">${moneyPlain(pr.deposit)}</b> 円`):''}
+    ${pr.rooms||pr.capacity?line('部屋・定員', `${pr.rooms?esc(pr.rooms)+'部屋':''}${pr.rooms&&pr.capacity?' ／ ':''}${pr.capacity?esc(pr.capacity)+'名まで':''}`):''}
+    ${pr.note?line('メモ', esc(pr.note)):''}
+
+    <div class="form-section" style="margin-top:14px;">${IC.yen} ${fyLabel(fy)}の費用（費目ごと・税込）</div>
+    ${me.items.length? `<div class="table-wrap"><table>
+      <thead><tr><th style="min-width:130px;">費目</th><th style="min-width:92px;">勘定科目</th>
+        ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:84px;">${m}</th>`).join('')}
+        <th class="r" style="min-width:96px;">年間計</th></tr></thead>
+      <tbody>${me.items.map(r=>`<tr>
+        <td>${esc(r.it.name||'')}${r.ap?' <span class="badge b-blue">買掛</span>':''}</td>
+        <td class="muted" style="font-size:11.5px;">${esc(accountLabel(r.it.accountCode))}</td>
+        ${r.cells.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+        <td class="r num"><b>${moneyPlain(r.cells.reduce((s,v)=>s+(v||0),0))}</b></td></tr>`).join('')}
+        <tr class="totrow"><td><b>合計</b></td><td></td>
+          ${me.cells.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+          <td class="r num">${moneyPlain(me.cells.reduce((s,v)=>s+v,0))}</td></tr>
+      </tbody></table></div>`
+      : `<div class="warnbar">この物件に紐づいた費目がまだありません。<br>
+          費用管理 › ＋費目を追加 で「家賃」「電気代」などを作り、<b>物件</b>にこの建物を選んでください。</div>`}
+    <div class="modal-actions split">
+      <button class="btn secondary" onclick="closeModal();goto('expenses')">費用管理へ</button>
+      <button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+function exportCsvProperties(){
+  const { months, rows } = propRowsOf(CUR_FY);
+  const head=['物件','用途','貸主','住所','契約開始','契約満了','月額（契約）',...months,'年間計'];
+  const body=rows.map(r=>[r.pr.name||'', r.pr.kind||'', String(companyName(r.pr.companyId)).replace(/<[^>]+>/g,''),
+    r.pr.address||'', r.pr.contractStart||'', r.pr.contractEnd||'', r.plan,
+    ...r.cells, r.cells.reduce((s,v)=>s+v,0)]);
+  downloadCsv(`物件別費用_${CUR_FY}年度`, [head,...body]);
+}
+
+/* ============================================================================
    ⑪'' 買掛の自動作成（定期支払）と 債務年齢表
    ----------------------------------------------------------------------------
    利用者の指示（2026-09-13）:
@@ -4168,6 +4371,12 @@ function notifItems(){
       n:miss.length, go:"goto('expenses')", sub:miss.slice(0,4).map(r=>r.it.name).join('、')+(miss.length>4?' ほか':'') });
   }
 
+  /* ── 契約満了が近い物件（更新の交渉には時間が要る） ── */
+  const endSoon=(DB.properties||[]).filter(pr=>{ const d=propDaysLeft(pr); return d!==null && d<=PROP_ALERT_DAYS; });
+  if(endSoon.length) out.push({ sev:'warn', key:'prop-end', label:'契約満了が近い物件',
+    n:endSoon.length, go:"goto('properties')",
+    sub:endSoon.map(pr=>`${pr.name}：${propDaysLeft(pr)<0?'満了済み':'あと'+propDaysLeft(pr)+'日'}`).join('、') });
+
   /* ── 資金が足りなくなる週 ── */
   const cash=cashPlanByWeek(8); let run=num(DB.settings&&DB.settings.cashStart);
   let short=null;
@@ -4201,8 +4410,8 @@ function renderNotif(){
   };
   m.innerHTML =
     `<div class="nm-head">入力ガイド</div>
-     <div class="nm-chips">${[['ar','請求・入金'],['ap','支払'],['yj','予実・目標'],['ms','マスタ・連携']]
-        .map(a=>`<button onclick="toggleNotif(event);openGuide('${a[0]}')">${esc(a[1])}</button>`).join('')}</div>
+     <div class="nm-chips">${SECTIONS.filter(x=>x.id!=='dashboard'&&x.tabs.some(t=>canSee(t.id)))
+        .map(x=>`<button onclick="toggleNotif(event);openGuide('${x.id}')">${esc(x.label)}</button>`).join('')}</div>
      <div class="nm-head">やること${items.length?`（${items.length}件）`:''}</div>
      ${items.length? items.map(row).join('') : '<div class="nm-empty">いま手を打つことはありません。</div>'}
      <div class="nm-head">最近の更新</div><div id="nmLog"><div class="nm-empty">読み込み中…</div></div>`;
@@ -4240,18 +4449,67 @@ function markNotifSeen(){ try{ localStorage.setItem(NOTIF_SEEN_KEY, today()); }c
    入力ガイド — 「どの画面に・何を・いつ入れるか」を1枚に
    ----------------------------------------------------------------------------
    README には書いてあるが、README は誰も開かない。毎日触る場所の隣に置く。
+   ★ 中身は左メニュー（SECTIONS）から作ります。画面を足したら PAGE_GUIDE に1行
+     足すだけで、ガイドにもメニューにも同時に出ます（名前を2か所で書かない）。
    ========================================================================== */
-const GUIDE_AREAS=[['ar','請求・入金（売掛）'],['ap','支払（買掛）'],['yj','予実・目標'],['ms','マスタ・連携']];
-function openGuide(area){
-  area = area || 'ar';                      // 何も指定せず開いたら、いちばん使う「請求・入金」から
-  const A=GUIDE_AREAS.find(x=>x[0]===area);
-  openModal(`<h3>入力ガイド${A?`　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(A[1])}</span>`:''}</h3>
+/** 画面ごとの「入れるもの」「どこに効くか」。順番は、はじめて使う人がなぞる順。 */
+const PAGE_GUIDE = {
+  dashboard:  { step:'', what:'（入力はありません）', effect:'今日の数字：売上・未回収・支払予定・目標' },
+
+  invoices:   { step:'③', what:'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>。単発は「＋ 個別に請求を作成」',
+                effect:'確定して初めて<b>売上</b>と<b>売掛金</b>になります' },
+  receipts:   { step:'④', what:'入金を記録し、<b>どの請求に充てるか</b>を決める（1回の振込で複数可）',
+                effect:'売掛残高が減ります。損益は動きません' },
+  aging:      { step:'⑤', what:'（入力なし）どの会社がどれだけ遅れているかを見る',
+                effect:'61日以上は要対応。会社名から台帳へ飛べます' },
+
+  bills:      { step:'③', what:'<b>定期の支払を作成（月まとめ）</b>、または個別に登録 → <b>確定</b>',
+                effect:'確定して初めて<b>買掛金</b>になります。明細（勘定科目）が無いと予実に入りません' },
+  payouts:    { step:'④', what:'支払を記録し、どの支払請求に充てるかを決める',
+                effect:'買掛残高が減ります。損益は動きません' },
+  apaging:    { step:'⑤', what:'（入力なし）自社が期日を過ぎている支払を見る',
+                effect:'こちらは相手の信用に関わります' },
+  cashflow:   { step:'⑥', what:'通帳の<b>開始残高</b>だけ（設定 › 資金繰りの開始残高）',
+                effect:'入金予定 − 支払予定 で、週ごと・月ごとの残高見込み' },
+
+  companies:  { step:'①', what:'会社名・区分と <b>締日・支払サイト・支払日</b>。さらに <b>請求ルール</b>（人数×単価／月額固定／都度）',
+                effect:'入金期日・年齢表・資金繰り・台帳の色、すべてのもとになります' },
+  ledger:     { step:'', what:'（入力なし）1社の履歴（通帳）と12か月のタイムライン',
+                effect:'期日を守る会社かどうかが色で分かります。印刷すると残高確認書' },
+  workers:    { step:'', what:'（入力なし・CRMから取り込み）',
+                effect:'人数×単価の請求の根拠になります' },
+
+  expenses:   { step:'②', what:'<b>費目</b>を作る：勘定科目・<b>支払先</b>・<b>物件</b>・<b>払い方</b>（即払い／買掛）・月額予定。あとは毎月マスに金額を打つだけ',
+                effect:'税抜に直して予実の費用へ。買掛にすると支払請求と期日で管理できます' },
+  properties: { step:'②', what:'借りている建物：貸主・契約期間・家賃・共益費・駐車場代',
+                effect:'物件ごとの12か月の費用。契約満了の90日前から知らせます' },
+
+  yojitsu:    { step:'①', what:'年間の<b>予算</b>（前年実績×○%からも作れます）。必要なら<b>見込</b>と<b>実績調整</b>',
+                effect:'予実の予算列・着地見込。実績は伝票から自動で出ます' },
+  compare:    { step:'', what:'（入力なし）先月・前年・他の年度と比べる', effect:'伸びているか、落ちているか' },
+  mikomi:     { step:'', what:'（入力なし）会議に出す形', effect:'四半期・累積・年間×前年比' },
+
+  okr:        { step:'⑤', what:'目標（Objective）と主要成果（KR）。KRは予実から<b>自動で取れます</b>',
+                effect:'手で写さないこと。写すと必ずズレます' },
+
+  settings:   { step:'①', what:'<b>勘定科目</b>（収益／売上原価／販管費／営業外）・資金繰りの開始残高',
+                effect:'予実の行になります' },
+  crmlink:    { step:'①', what:'CRMから 所属機関・特定技能者・在籍期間を取り込む（CSVでも可）',
+                effect:'CRMから来た項目は同期で上書き。<b>締日・サイト・口座・請求ルールは触られません</b>' },
+  users:      { step:'', what:'役割（管理者／経営／経理／閲覧）とページごとの権限', effect:'見える画面・できる操作が変わります' },
+  apilink:    { step:'', what:'外部システムやAIに<b>読ませる</b>ための鍵。1人1鍵', effect:'読むだけ。金額は書き換えられません' },
+  audit:      { step:'', what:'（入力なし）誰が・いつ・どの項目を いくら→いくら に', effect:'消したデータもここから戻せます' },
+};
+function openGuide(secId){
+  const secs=SECTIONS.filter(x=>x.tabs.some(t=>canSee(t.id)));
+  const sec=secs.find(x=>x.id===secId) || secs.find(x=>x.id==='sec-ar') || secs[0];
+  if(!sec) return;
+  openModal(`<h3>入力ガイド　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(sec.label)}</span></h3>
     ${guidePromise()}
-    <div class="tabs" style="margin-top:12px;">
-      ${GUIDE_AREAS.map(a=>`<button class="${a[0]===area?'on':''}" onclick="openGuide('${a[0]}')">${esc(a[1])}</button>`).join('')}
+    <div class="sectabs" style="margin-top:12px;">
+      ${secs.map(x=>`<button class="${x.id===sec.id?'on':''}" onclick="openGuide('${x.id}')">${esc(x.label)}</button>`).join('')}
     </div>
-    <div style="max-height:58vh;overflow-y:auto;padding-right:4px;">${
-      area==='ap'? guideAp() : area==='yj'? guideYj() : area==='ms'? guideMs() : guideAr()}</div>
+    <div style="max-height:54vh;overflow-y:auto;padding-right:4px;">${guideSection(sec)}</div>
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">閉じる</button></div>`,'lg');
 }
 /** どの区を見ても最初に目に入るところ。ここを間違えると全部ずれる。 */
@@ -4264,55 +4522,278 @@ function guidePromise(){
     ・<b>実績は保存していません</b>。請求書・支払請求・費用から毎回計算しています<br>
     ・会計年度は <b>8月1日〜翌7月31日</b>（Q1=8〜10月）</div>`;
 }
-function _gRow(step, where, what, res){
-  return `<tr><td style="white-space:nowrap;"><b>${esc(step)}</b></td>
-    <td style="white-space:nowrap;"><a onclick="closeModal();goto('${where[0]}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(where[1])}</a></td>
-    <td>${what}</td><td class="muted" style="font-size:11.5px;">${res}</td></tr>`;
-}
-function _gTbl(rows){
+function guideSection(sec){
+  const tabs=sec.tabs.filter(t=>canSee(t.id));
+  const rows=tabs.map(t=>{
+    const g=PAGE_GUIDE[t.id]||{what:'',effect:''};
+    return `<tr><td style="white-space:nowrap;text-align:center;">${esc(g.step||'')}</td>
+      <td style="white-space:nowrap;"><a onclick="closeModal();goto('${t.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(t.label)}</a></td>
+      <td>${g.what||''}</td><td class="muted" style="font-size:11.5px;">${g.effect||''}</td></tr>`;
+  }).join('');
   return `<div class="table-wrap" style="margin-top:10px;"><table>
-    <thead><tr><th style="min-width:54px;">順番</th><th style="min-width:120px;">画面</th><th>入れるもの</th><th style="min-width:190px;">どこに効くか</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+      <thead><tr><th style="min-width:44px;">順番</th><th style="min-width:120px;">画面</th>
+        <th>入れるもの</th><th style="min-width:200px;">どこに効くか</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${GUIDE_NOTE[sec.id]? `<div class="fhelp" style="margin-top:8px;">${GUIDE_NOTE[sec.id]}</div>`:''}`;
 }
-function guideAr(){
-  return _gTbl(
-    _gRow('①',['companies','取引先管理'],'会社名と <b>締日・支払サイト・支払日</b>。ここが入金期日のもとになります','期日・年齢表・資金繰り・台帳の色')
-   +_gRow('②',['companies','取引先管理'],'<b>請求ルール</b>（人数×単価／月額固定／都度）','「請求を作成（月まとめ）」に出てきます')
-   +_gRow('③',['invoices','請求管理'],'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>','確定して初めて売上と売掛金になります')
-   +_gRow('④',['receipts','入金・消込'],'入金を記録し、<b>どの請求に充てるか</b>を決める','売掛残高が減ります（損益は動きません）')
-   +_gRow('⑤',['aging','債権年齢表'],'（入力なし）超過している会社を見る','61日以上は要対応')
-   +_gRow('⑥',['ledger','取引先台帳'],'（入力なし）1社の履歴と12か月の帯を見る','期日を守る会社かどうかが色で分かります'))
-  +`<div class="fhelp" style="margin-top:8px;">単発の請求は 請求管理 の「＋ 個別に請求を作成」。
-     入金が請求より多いとき（過入金）はそのまま記録できます。残りは「未消込」として残り、ベルにも出ます。</div>`;
+/** 区ごとの「よくある迷いどころ」。表に書くと長くなるものだけ。 */
+const GUIDE_NOTE = {
+  'sec-ar':'入金が請求より多いとき（過入金）もそのまま記録できます。残りは「未消込」として残り、ベルにも出ます。<br>'
+    +'請求を「確定」しないと、売上にも売掛金にも入りません。',
+  'sec-ap':'支払請求に<b>明細（勘定科目）</b>が無いと、金額が予実の費用に入りません（一覧に「明細なし」の札が出ます）。<br>'
+    +'毎月同じ額を払うもの（家賃・リース・保守）は、費用管理で費目を「買掛」にしておくと毎月の支払請求が自動で作られます。',
+  'sec-co':'CRMに無い会社（仕入先・大家さんなど）はここで追加します。締日・支払サイト・支払日を入れると、期日が自動で決まります。',
+  'sec-cost':'費目に<b>物件</b>を選ぶと、物件（建物）の画面に毎月の金額が集まります。家賃・電気・水道・ガスはここで紐づけてください。',
+  'sec-yj':'実績はどこにも保存していません。請求書・支払請求・費用を直せば、予実は自動で直ります。',
+  'sec-sys':'確定した伝票は削除できません（取消のみ）。金額の変更は管理者・マネージャーだけです。',
+};
+/* ============================================================================
+   デモデータ — 画面の動きを実際の形で確かめるための、作り物のデータ
+   ----------------------------------------------------------------------------
+   ★★ 絶対の約束（公式 §0.4／2026-07-31 の事故から）:
+      データが空だからといって、アプリが勝手にデモを作ることは 絶対に ありません。
+      入るのは、管理者がこのボタンを押したときだけ。
+   ★ 入れたものには全部 demo:true の印と【デモ】の名前を付けます。
+      「デモを消す」はその印が付いた行だけを消します。本物には触れません。
+   ★ 何が入るか: 取引先9社（得意先3・仕入先6）／物件4／費目15／
+      14か月ぶんの 請求・入金・支払請求・支払・費用／予算。
+      入金の遅れ方を会社ごとに変えてあるので、台帳のタイムラインの色が全部見られます。
+   ========================================================================== */
+const DEMO_TAG='【デモ】';
+let _dseed=20260913;
+const drnd = ()=>{ _dseed=(_dseed*1103515245+12345)&0x7fffffff; return _dseed/0x7fffffff; };
+const dint = (lo,hi)=>lo+Math.floor(drnd()*(hi-lo+1));
+/** 千円単位で少しばらす（本物らしく見せるため。計算には意味を持たせない） */
+const dvar = (base,pct)=>Math.round(base*(1+(drnd()*2-1)*pct)/100)*100;
+
+function demoCount(){
+  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','workers','assignments'];
+  return keys.reduce((n,k)=>n+((DB[k]||[]).filter(x=>x&&x.demo).length),0);
 }
-function guideAp(){
-  return _gTbl(
-    _gRow('①',['companies','取引先管理'],'支払先の会社（区分＝仕入先）と <b>締日・支払サイト・支払日</b>','支払期日が自動で決まります')
-   +_gRow('②',['expenses','費用管理'],'<b>費目</b>を作る。支払先を選び、<b>払い方</b>を決める<br><span class="muted">即払い＝毎月マスに打つ／買掛＝毎月の支払請求を作る</span>','買掛にすると期日と残高で管理できます')
-   +_gRow('③',['bills','支払管理'],'<b>定期の支払を作成（月まとめ）</b>、または個別に登録 → <b>確定</b>','確定して初めて買掛金になります')
-   +_gRow('④',['payouts','支払実行'],'支払を記録し、どの支払請求に充てるかを決める','買掛残高が減ります（損益は動きません）')
-   +_gRow('⑤',['apaging','債務年齢表'],'（入力なし）期日を過ぎている支払を見る','こちらは相手の信用に関わります')
-   +_gRow('⑥',['cashflow','資金繰り'],'通帳の <b>開始残高</b>（設定）だけ入れる','入金予定−支払予定で残高見込みが出ます'))
-  +`<div class="fhelp" style="margin-top:8px;">支払請求に<b>明細（勘定科目）</b>が無いと、金額が予実の費用に入りません。一覧に「明細なし」の札が出ます。</div>`;
+function demoPanel(){
+  const n=demoCount();
+  return `<div class="panel"><div class="panel-hd"><b>デモデータ</b>
+      <span class="sub">画面の動きを確かめるための作り物。本物のデータには触れません</span></div>
+    <div class="panel-bd">
+      ${n? `<div class="infobar">いま <b>${n}件</b> のデモデータが入っています（名前が ${esc(DEMO_TAG)} で始まる行）。</div>`
+         : `<div class="fhelp" style="margin-bottom:10px;">取引先・物件・14か月ぶんの請求と入金・支払・費用をまとめて作ります。
+              入金の遅れ方を会社ごとに変えてあるので、取引先台帳のタイムラインの色が全部見られます。</div>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ${n?'secondary':''}" onclick="demoSeed()">${n?'デモデータを作り直す':'デモデータを入れる'}</button>
+        ${n?`<button class="btn danger" onclick="demoRemove()">デモデータを全部消す</button>`:''}
+      </div>
+      <div class="fhelp" style="margin-top:10px;">入れたものには印が付いています。「全部消す」はその印の行だけを消すので、
+        本物の請求や入金が巻き込まれることはありません。</div>
+    </div></div>`;
 }
-function guideYj(){
-  return _gTbl(
-    _gRow('①',['settings','設定'],'<b>勘定科目</b>（収益／売上原価／販管費／営業外）','予実の行になります')
-   +_gRow('②',['yojitsu','予実管理'],'<b>年間の予算</b>（前年実績×◯%からも作れます）','予実の「予算」列')
-   +_gRow('③',['yojitsu','予実管理'],'必要なら <b>見込</b>、会計事務所の数字は <b>実績調整</b>','着地見込に使われます')
-   +_gRow('④',['expenses','費用管理'],'毎月の費用を月次費用表のマスに打つ','税抜に直して販管費・原価へ')
-   +_gRow('⑤',['okr','OKR / KPI'],'目標と主要成果（KR）。数字は予実から自動で取れます','手で写さないこと（ズレの元）')
-   +_gRow('⑥',['mikomi','見込実績表'],'（入力なし）会議に出す形','四半期・累積・前年比'))
-  +`<div class="fhelp" style="margin-top:8px;">実績はどこにも保存していません。請求書・支払請求・費用を直せば、予実は自動で直ります。</div>`;
+
+async function demoSeed(){
+  if(!isAdmin()){ toast('デモデータは管理者だけが入れられます。','err'); return; }
+  if(demoCount() && !confirm('すでにデモデータがあります。いったん全部消してから作り直しますか？')) return;
+  if(demoCount()){ await demoRemove(true); }
+  if(!confirm('デモデータを入れます。\n\n・名前が【デモ】で始まる行が約350件できます\n・本物のデータには触れません\n・あとから「全部消す」で消せます\n\nよろしいですか？')) return;
+
+  _dseed=20260913;
+  const D=r=>Object.assign({demo:true}, r);
+  const endYm=thisMonth();
+  const months=[]; for(let i=13;i>=0;i--) months.push(addMonths(endYm,-i));   // 14か月
+  const t=today();
+  const put=(k,r)=>commitRecord(k, D(r), {}).record;
+
+  /* ── 取引先 ── */
+  const cust=[
+    put('companies',{name:DEMO_TAG+'株式会社さくら製作所', kana:'サクラセイサクショ', kind:'得意先', closingDay:31, paySite:1, payDay:31,
+      taxCat:'課税10%', address:'栃木県小山市…', staffName:'佐藤', note:'いつも期日どおり'}),
+    put('companies',{name:DEMO_TAG+'東和フーズ株式会社', kana:'トウワフーズ', kind:'得意先', closingDay:20, paySite:2, payDay:25,
+      taxCat:'課税10%', address:'群馬県太田市…', staffName:'鈴木', note:'20日締・翌々月25日払い（期日は長いが守る）'}),
+    put('companies',{name:DEMO_TAG+'北関東物流サービス', kana:'キタカントウブツリュウ', kind:'得意先', closingDay:15, paySite:1, payDay:20,
+      taxCat:'課税10%', address:'茨城県古河市…', staffName:'高橋', note:'入金が遅れがち'}),
+  ];
+  const vend={
+    oya:  put('companies',{name:DEMO_TAG+'丸山不動産', kind:'仕入先', closingDay:31, paySite:1, payDay:27, taxCat:'課税10%', note:'社宅・事務所の大家'}),
+    den:  put('companies',{name:DEMO_TAG+'東京電力エナジーパートナー', kind:'仕入先', closingDay:31, paySite:1, payDay:28, taxCat:'課税10%'}),
+    sui:  put('companies',{name:DEMO_TAG+'市水道局', kind:'仕入先', closingDay:31, paySite:1, payDay:28, taxCat:'課税10%'}),
+    gas:  put('companies',{name:DEMO_TAG+'東京ガス', kind:'仕入先', closingDay:31, paySite:1, payDay:28, taxCat:'課税10%'}),
+    clean:put('companies',{name:DEMO_TAG+'クリーンサポート', kind:'仕入先', closingDay:31, paySite:1, payDay:25, taxCat:'課税10%', note:'寮の共用部清掃'}),
+    tsu:  put('companies',{name:DEMO_TAG+'グローバル通訳サービス', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'通訳・翻訳（売上原価）'}),
+  };
+
+  /* ── 特定技能者と在籍（人数×単価の根拠） ── */
+  const names=['グエン・ヴァン・アン','チャン・ティ・ハー','レー・ミン・トゥアン','ファム・ティ・マイ','ホアン・ヴァン・ナム','ド・ティ・ラン'];
+  const workers=names.map((n,i)=>put('workers',{code:'W9'+String(i+1).padStart(2,'0'), name:DEMO_TAG+n, nationality:'ベトナム',
+    visaStatus:'特定技能1号', visaExp:addMonths(endYm, dint(4,20))+'-15', source:'manual'}));
+  workers.forEach((w,i)=>{
+    const c = i<4? cust[0] : cust[2];
+    put('assignments',{workerId:w.id, companyId:c.id, joinDate: addMonths(endYm,-dint(8,26))+'-01', exitDate:''});
+  });
+
+  /* ── 請求ルール ── */
+  put('billingRules',{companyId:cust[0].id, kind:'per_worker', name:'支援委託料', unitPrice:30000, accountCode:'4100', countMode:'month_end', taxCat:'課税10%', active:true});
+  put('billingRules',{companyId:cust[1].id, kind:'fixed',      name:'月額支援料', unitPrice:165000, accountCode:'4100', taxCat:'課税10%', active:true});
+  put('billingRules',{companyId:cust[2].id, kind:'per_worker', name:'支援委託料', unitPrice:35000, accountCode:'4100', countMode:'month_end', taxCat:'課税10%', active:true});
+
+  /* ── 物件（建物） ── */
+  const props=[
+    put('properties',{name:DEMO_TAG+'さくら寮 A棟', kind:'社宅・寮', address:'栃木県小山市本郷町1-2-3', companyId:vend.oya.id,
+      rooms:6, capacity:12, contractStart:addMonths(endYm,-26)+'-01', contractEnd:addMonths(endYm,22)+'-28',
+      rent:165000, kyoeki:12000, parking:16500, deposit:330000, note:'解約予告は3か月前'}),
+    put('properties',{name:DEMO_TAG+'さくら寮 B棟', kind:'社宅・寮', address:'栃木県小山市本郷町1-2-8', companyId:vend.oya.id,
+      rooms:4, capacity:8, contractStart:addMonths(endYm,-14)+'-01', contractEnd:addMonths(endYm,2)+'-28',
+      rent:143000, kyoeki:8800, parking:0, deposit:286000, note:'★まもなく満了。更新するか要判断'}),
+    put('properties',{name:DEMO_TAG+'本社事務所', kind:'事務所', address:'栃木県小山市駅前通り2-5', companyId:vend.oya.id,
+      rooms:1, capacity:0, contractStart:addMonths(endYm,-38)+'-01', contractEnd:addMonths(endYm,10)+'-31',
+      rent:220000, kyoeki:22000, parking:0, deposit:660000}),
+    put('properties',{name:DEMO_TAG+'第2駐車場', kind:'駐車場', address:'栃木県小山市本郷町1-2-20', companyId:vend.oya.id,
+      rent:33000, kyoeki:0, parking:0, contractStart:addMonths(endYm,-20)+'-01', contractEnd:''}),
+  ];
+
+  /* ── 費目（月次費用表の行） ──
+     家賃と清掃は「買掛」＝毎月の支払請求になる。光熱費は「即払い」＝マスに打つ。 */
+  const ci=(o)=>put('costItems', Object.assign({kind:'fixed', taxCat:'課税10%', active:true}, o));
+  const rentItems = props.map(pr=>ci({name:DEMO_TAG+pr.name.replace(DEMO_TAG,'')+' 家賃', accountCode:'6200',
+    monthly:num(pr.rent)+num(pr.kyoeki)+num(pr.parking), payMode:'買掛', companyId:vend.oya.id, propertyId:pr.id}));
+  const util=[];
+  [[0,'電気代',18000,vend.den],[0,'水道代',9000,vend.sui],[0,'ガス代',14000,vend.gas],
+   [1,'電気代',12000,vend.den],[1,'水道代',6500,vend.sui],[1,'ガス代',9000,vend.gas],
+   [2,'電気代',22000,vend.den],[2,'水道代',5000,vend.sui]].forEach(([pi,nm,base,co])=>{
+    util.push({ it: ci({name:DEMO_TAG+props[pi].name.replace(DEMO_TAG,'')+' '+nm, accountCode:'6210',
+      monthly:base, payMode:'即払い', companyId:co.id, propertyId:props[pi].id}), base, kind:nm });
+  });
+  const cleanItem = ci({name:DEMO_TAG+'寮の共用部清掃', accountCode:'6900', monthly:33000, payMode:'買掛',
+    companyId:vend.clean.id, propertyId:props[0].id});
+  const other=[
+    { it: ci({name:DEMO_TAG+'クラウド・通信費', accountCode:'6220', monthly:38500, payMode:'即払い'}), base:38500 },
+    { it: ci({name:DEMO_TAG+'複合機リース', accountCode:'6900', monthly:16500, payMode:'即払い'}), base:16500 },
+    { it: ci({name:DEMO_TAG+'旅費交通費', accountCode:'6300', monthly:0, payMode:'即払い', kind:'variable'}), base:45000, vary:true },
+  ];
+
+  /* ── 14か月ぶんの 請求・入金 ──
+     会社ごとに「払い方のくせ」を変える。台帳のタイムラインで色の違いが見えるように。 */
+  const invOf=(c, ym, items)=>{
+    const rec={ companyId:c.id, bookMonth:ym, issueDate:monthEnd(ym), status:'確定', items,
+      dueDate: dueDateOf(ym, c.closingDay, c.paySite, c.payDay), note:DEMO_TAG+'自動作成' };
+    prepareDoc('invoices', rec, null);
+    return put('invoices', rec);
+  };
+  const payFor=(c, inv, dayOffset, ratio)=>{
+    const date=addDays(inv.dueDate, dayOffset);
+    if(date>t) return null;                                  // 未来の入金は作らない
+    const amt=Math.round(docTotal(inv)*(ratio==null?1:ratio));
+    return put('payments',{ companyId:c.id, date, amount:amt, fee:0, method:'銀行振込', status:'確定',
+      allocations:[{invoiceId:inv.id, amount:amt}], note:DEMO_TAG });
+  };
+  months.forEach((ym,mi)=>{
+    /* さくら製作所: 在籍4名 × 30,000。いつも期日どおり（緑） */
+    const n1=4+(mi>9?1:0);
+    const i1=invOf(cust[0], ym, [{accountCode:'4100', name:'支援委託料', qty:n1, price:30000, taxCat:'課税10%'}]
+      .concat(mi%6===3? [{accountCode:'4300', name:'在留期間更新 申請手数料', qty:1, price:44000, taxCat:'課税10%'}]:[]));
+    payFor(cust[0], i1, dint(-2,0));
+
+    /* 東和フーズ: 月額固定。期日は遠いが、3〜12日遅れる（黄） */
+    const i2=invOf(cust[1], ym, [{accountCode:'4100', name:'月額支援料', qty:1, price:165000, taxCat:'課税10%'}]
+      .concat(mi%5===1? [{accountCode:'4200', name:'人材紹介料', qty:1, price:dvar(300000,.15), taxCat:'課税10%'}]:[]));
+    payFor(cust[1], i2, dint(3,12));
+
+    /* 北関東物流: 遅れがち（赤）。直近3か月は未入金のまま＝いま超過中 */
+    const i3=invOf(cust[2], ym, [{accountCode:'4100', name:'支援委託料', qty:2, price:35000, taxCat:'課税10%'}]);
+    if(mi < months.length-3){
+      if(mi%7===2) payFor(cust[2], i3, dint(25,45), .6);      // 一部入金だけ
+      else payFor(cust[2], i3, dint(20,70));
+    }
+  });
+
+  /* ── 支払請求（買掛）と支払 ── */
+  const billOf=(co, ym, items, note)=>{
+    const rec={ companyId:co.id, bookMonth:ym, recvDate:monthEnd(ym), status:'確定', items,
+      dueDate: dueDateOf(ym, co.closingDay, co.paySite, co.payDay), note:DEMO_TAG+(note||'') };
+    prepareDoc('bills', rec, null);
+    return put('bills', rec);
+  };
+  const payoutFor=(co, bill, dayOffset)=>{
+    const date=addDays(bill.dueDate, dayOffset==null?0:dayOffset);
+    if(date>t) return null;
+    return put('payouts',{ companyId:co.id, date, amount:docTotal(bill), method:'銀行振込', status:'確定',
+      allocations:[{billId:bill.id, amount:docTotal(bill)}], note:DEMO_TAG });
+  };
+  months.forEach((ym,mi)=>{
+    /* 家賃: 大家さんへ1枚にまとめて（物件ごとの明細） */
+    const rentBill=billOf(vend.oya, ym, props.map((pr,i)=>({ accountCode:'6200', costItemId:rentItems[i].id,
+      name:pr.name.replace(DEMO_TAG,'')+' 家賃', amount: netOfGross(num(pr.rent)+num(pr.kyoeki)+num(pr.parking),'課税10%'), taxCat:'課税10%' })), '家賃');
+    payoutFor(vend.oya, rentBill, mi>=months.length-1? null : 0);
+    /* 清掃 */
+    const cb=billOf(vend.clean, ym, [{accountCode:'6900', costItemId:cleanItem.id, name:'寮 共用部清掃', amount:30000, taxCat:'課税10%'}], '清掃');
+    if(mi < months.length-2) payoutFor(vend.clean, cb, dint(0,4));
+    /* 通訳・翻訳（売上原価）: 毎月ではない */
+    if(mi%3!==2){
+      const tb=billOf(vend.tsu, ym, [{accountCode:'5200', name:'通訳・翻訳費', amount:dvar(90000,.4), taxCat:'課税10%'}], '通訳');
+      if(mi < months.length-2) payoutFor(vend.tsu, tb, dint(-1,2));
+    }
+  });
+
+  /* ── 光熱費など「即払い」の費用（月次費用表のマス） ──
+     夏と冬は電気・ガスが上がる。1年の形が出るように季節で変える。 */
+  const season=(ym,kind)=>{
+    const m=Number(ym.split('-')[1]);
+    if(kind==='電気代') return (m>=7&&m<=9)?1.35 : ((m===12||m<=2)?1.25:1);
+    if(kind==='ガス代') return (m===12||m<=3)?1.4 : ((m>=6&&m<=9)?.7:1);
+    return 1;
+  };
+  months.forEach(ym=>{
+    util.forEach(u=>{
+      put('expenses',{ costItemId:u.it.id, bookMonth:ym, date:monthEnd(ym), accountCode:u.it.accountCode,
+        companyId:u.it.companyId, vendor:'', amount: dvar(u.base*season(ym,u.kind), .12),
+        taxCat:'課税10%', method:'口座振替', note:u.it.name.replace(DEMO_TAG,'') });
+    });
+    other.forEach(o=>{
+      const amt = o.vary? (drnd()<.25? 0 : dvar(o.base,.5)) : o.base;
+      if(!amt) return;
+      put('expenses',{ costItemId:o.it.id, bookMonth:ym, date:monthEnd(ym), accountCode:o.it.accountCode,
+        amount:amt, taxCat:'課税10%', method:'クレジット', note:o.it.name.replace(DEMO_TAG,'') });
+    });
+  });
+
+  /* ── 予算（今年度と前年度） ── */
+  [CUR_FY, CUR_FY-1].forEach(fy=>{
+    fyMonths(fy).forEach((ym,i)=>{
+      put('budgets',{fy, mIndex:i, accountCode:'4100', amount: fy===CUR_FY? 700000 : 620000});
+      put('budgets',{fy, mIndex:i, accountCode:'4200', amount: 100000});
+      put('budgets',{fy, mIndex:i, accountCode:'5200', amount: 90000});
+      put('budgets',{fy, mIndex:i, accountCode:'6200', amount: 620000});
+      put('budgets',{fy, mIndex:i, accountCode:'6210', amount: 95000});
+    });
+  });
+  if(!DB.settings) DB.settings={};
+  if(!num(DB.settings.cashStart)){ DB.settings.cashStart=3500000; PENDING.changed.settings=DB.settings; }
+
+  toast('デモデータを作りました。保存しています…','ok');
+  await pushDelta();
+  LED_CO=String(cust[2].id); LED_SIDE='ar'; LED_TAB='timeline';
+  toast(`デモデータ ${demoCount()}件 を入れました。`,'ok');
+  goto('ledger');
 }
-function guideMs(){
-  return _gTbl(
-    _gRow('①',['crmlink','CRM連携'],'CRMから 所属機関・特定技能者・在籍期間を取り込む','人数×単価の請求の根拠になります')
-   +_gRow('②',['companies','取引先管理'],'CRMに無い会社（仕入先など）はここで追加','CRMから来た項目は同期で上書きされます。<b>締日・サイト・口座・請求ルールは触られません</b>')
-   +_gRow('③',['users','ユーザー管理'],'役割（管理者／経営／経理／閲覧）とページごとの権限','見える画面・できる操作が変わります')
-   +_gRow('④',['apilink','API・AI連携'],'外部システムやAIに<b>読ませる</b>ための鍵。1人1鍵','読むだけ。金額は書き換えられません')
-   +_gRow('⑤',['audit','操作履歴'],'（入力なし）誰が・いつ・どの項目を いくら→いくら に','消したデータもここから戻せます'))
-  +`<div class="fhelp" style="margin-top:8px;">確定した伝票は削除できません（取消のみ）。金額の変更は管理者・マネージャーだけです。</div>`;
+
+/** 印（demo:true）が付いた行だけを消す。本物には触れない。 */
+async function demoRemove(quiet){
+  if(!isAdmin()){ toast('管理者だけが消せます。','err'); return; }
+  const keys=['payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies'];
+  const total=demoCount();
+  if(!total){ toast('デモデータはありません。','ok'); return; }
+  if(!quiet && !confirm(`デモデータ ${total}件 を全部消します。\n【デモ】の印が付いた行だけを消すので、本物のデータは残ります。\n\nよろしいですか？`)) return;
+
+  /* まとめて消すと サーバーの安全装置（1回200件・3割減）に当たる。
+     少しずつ、消してよいと伝えながら送る。 */
+  for(const k of keys){
+    const ids=(DB[k]||[]).filter(x=>x&&x.demo).map(x=>String(x.id));
+    for(let i=0;i<ids.length;i+=120){
+      const chunk=ids.slice(i,i+120);
+      DB[k]=(DB[k]||[]).filter(x=>!chunk.includes(String(x.id)));
+      chunk.forEach(id=>markDeleted(k,id));
+      _confirmShrink=true;
+      await pushDelta();
+    }
+  }
+  _confirmShrink=false;
+  if(!quiet){ toast(`デモデータ ${total}件 を消しました。`,'ok'); renderPage(CURRENT_PAGE); renderNav(); }
 }
 
 /* ============================================================================
@@ -4771,6 +5252,8 @@ function viewSettings(){
     <div class="panel"><div class="panel-hd"><b>会計年度</b></div>
       <div class="panel-bd"><div style="font-size:13px;">8月1日 〜 翌年7月31日（${fyLabel(CUR_FY)}）<br>
         <span class="muted" style="font-size:12px;">四半期：Q1=8〜10月／Q2=11〜1月／Q3=2〜4月／Q4=5〜7月</span></div></div></div>
+
+    ${isAdmin()? demoPanel() : ''}
 
     <div class="panel"><div class="panel-hd"><b>この端末の状態</b></div>
       <div class="panel-bd" style="font-size:12.5px;line-height:1.9;">
