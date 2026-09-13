@@ -233,6 +233,29 @@ eq('支払側: 払い終わった日', ctx.ledSettleDate('ap', _db.bills[0]), '2
 eq('支払側: 期日内に払えた', ctx.ledColor(ctx.ledLate('ap', _db.bills[0])), 'lg-ok');
 eq('支払側の台帳も残高が合う', ctx.ledEvents('C3','ap').pop().bal, ctx.apBalanceOf('C3'));
 
+console.log('\n― 通知ベル と 入力ガイド ―');
+/* 自動作成した支払請求を確定する（作成中のままでは買掛にならない＝期日超過にも出ない） */
+_db.bills.find(b=>b.bookMonth==='2025-11').status='確定';
+const nt = ctx.notifItems();
+const nk = nt.map(x=>x.key);
+eq('期日を過ぎた請求を知らせる', nk.includes('ar-over'), true);
+eq('期日を過ぎた支払も知らせる', nk.includes('ap-over'), true);
+eq('赤（放っておくと損）は danger', nt.filter(x=>x.sev==='danger').length>0, true);
+eq('金額は計算で出す（保存しない）', nt.find(x=>x.key==='ar-over').amount, ctx.openInvoices().filter(i=>i.dueDate<ctx.today()).reduce((s,i)=>s+ctx.balanceOfInvoice(i),0));
+/* 何も無ければ何も出さない（0件を並べない・公式 §0.6） */
+const keep = { invoices:_db.invoices, bills:_db.bills, payments:_db.payments, payouts:_db.payouts,
+  companies:_db.companies, costItems:_db.costItems };
+_db.invoices=[]; _db.bills=[]; _db.payments=[]; _db.payouts=[]; _db.companies=[]; _db.costItems=[];
+eq('やることが無ければ空', ctx.notifItems().length, 0);
+Object.assign(_db, keep);
+eq('戻したら また出る', ctx.notifItems().length>0, true);
+
+['guideAr','guideAp','guideYj','guideMs','guidePromise'].forEach(fn=>{
+  try{ const h=ctx[fn](); const ok=typeof h==='string'&&h.length>200;
+    console.log((ok?'  ok  ':'  NG  ')+fn+'  →  '+(ok?h.length+' 文字':'空')); ok?pass++:fail++;
+  }catch(e){ console.log('  NG  '+fn+'  →  '+e.message); fail++; }
+});
+
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',

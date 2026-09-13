@@ -103,6 +103,34 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .acct-menu .who{padding:9px 12px;border-bottom:1px solid var(--border);margin-bottom:4px;}
   .acct-menu .who b{display:block;font-size:13px;} .acct-menu .who i{font-style:normal;font-size:11.5px;color:var(--muted);}
 
+  /* ===== 通知ベル ＋ 入力ガイド（CRMと同じ置き方・同じ操作感） ===== */
+  .icon-btn{position:relative; width:36px; height:36px; border-radius:50%; background:transparent;
+    border:1px solid var(--border-strong); color:var(--text); cursor:pointer; display:grid; place-items:center; flex:none;}
+  .icon-btn:hover{background:var(--bg-hover);}
+  .icon-btn svg{width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
+  .notif{position:relative;}
+  .notif-dot{position:absolute; top:-3px; right:-3px; min-width:17px; height:17px; padding:0 4px; border-radius:9px;
+    background:var(--danger); color:#fff; font-size:10.5px; font-weight:700; line-height:17px; text-align:center;
+    border:2px solid var(--card); display:none;}
+  .notif-menu{position:absolute; right:0; top:44px; width:380px; max-width:92vw; max-height:74vh; overflow-y:auto;
+    background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:14px;
+    box-shadow:0 12px 34px rgba(16,24,40,.16); padding:6px; display:none; z-index:60;}
+  .notif.open .notif-menu{display:block;}
+  .nm-head{font-weight:700; font-size:11.5px; color:var(--muted); letter-spacing:.03em;
+    padding:9px 11px 5px; border-bottom:1px solid var(--border); margin-bottom:3px;}
+  .nm-item{display:flex; gap:9px; align-items:flex-start; padding:9px 11px; border-radius:9px; cursor:pointer;}
+  .nm-item:hover{background:var(--bg-hover);}
+  .nm-item .nm-ic{flex:none; width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-size:11px; font-weight:700;}
+  .nm-item .nm-txt{flex:1; font-size:12.5px; line-height:1.55;}
+  .nm-item .nm-amt{font-weight:700; font-variant-numeric:tabular-nums;}
+  .nm-time{font-size:10.5px; color:var(--muted);}
+  .nm-empty{padding:16px 12px; text-align:center; font-size:12.5px; color:var(--muted);}
+  .nm-chips{display:flex; gap:6px; padding:6px 10px 9px; flex-wrap:wrap;}
+  .nm-chips button{border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:999px;
+    padding:5px 11px; font:inherit; font-size:11.5px; cursor:pointer; white-space:nowrap;}
+  .nm-chips button:hover{border-color:var(--primary); color:var(--primary);}
+  @media(max-width:720px){ .notif-menu{position:fixed; left:10px; right:10px; top:60px; width:auto; max-width:none;} }
+
   /* ===== SHELL + SIDEBAR ===== */
   .shell{display:flex; align-items:flex-start;}
   #sidebar{flex-shrink:0; width:236px; background:var(--card); border-right:1px solid var(--border);
@@ -370,6 +398,14 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   </div>
   <div class="top-right">
     <select id="fyPick" class="fy-pick" onchange="setFY(this.value)" title="会計年度（8月〜翌7月）"></select>
+    <button class="icon-btn" onclick="openGuide()" title="入力ガイド（どの画面に・何を入れるか）" aria-label="入力ガイド">
+      <svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><path d="M4 17.5A2 2 0 0 1 6 16h12"/><path d="M8 7.5h6"/></svg></button>
+    <div class="notif" id="notif">
+      <button class="icon-btn" onclick="toggleNotif(event)" title="やることの通知" aria-label="通知">
+        <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="notif-dot" id="notifDot"></span></button>
+      <div class="notif-menu" id="notifMenu"></div>
+    </div>
     <div class="avatar" id="avatarBox" onclick="toggleAcct(event)"></div>
   </div>
 </div>
@@ -1172,6 +1208,7 @@ function renderPage(page){
       <span style="font-weight:400;">この内容を管理者にお伝えください。データは失われていません。</span></div>`;
   }
   syncBadge();
+  try{ notifBadge(); }catch(e){ /* 通知が数えられなくても画面は出す */ }
 }
 
 /* ============================================================================
@@ -4056,6 +4093,223 @@ function viewDashboard(){
           <div style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(o.title)}</div>
           <div style="width:190px;">${rateBar(r,100)}</div>${statusBadge(okrSignal(r))}</div>`;}).join('')}</div></div>`:''}
   ` });
+}
+
+/* ============================================================================
+   ⑬' 通知ベル と 入力ガイド
+   ----------------------------------------------------------------------------
+   ベルに出すのは「いま、お金のことで手を打つべきこと」だけ。
+   何かが起きた履歴ではなく、放っておくと損をすることを並べます。
+   数字はすべてその場で計算します（保存しません。公式 §0.10）。
+   取れなかった数字は出しません（0 と書くと「無い」と読めてしまう。公式 §0.6）。
+   ========================================================================== */
+const NOTIF_SEEN_KEY='bl_yj_notif_seen';
+
+/** 通知の中身。sev: danger(赤) / warn(黄) / info(青) */
+function notifItems(){
+  const out=[], t=today();
+  if(!DB) return out;
+
+  /* ── 債権: 期日を過ぎた請求 ── */
+  const over=openInvoices().filter(i=>i.dueDate&&i.dueDate<t);
+  if(over.length) out.push({ sev:'danger', key:'ar-over', label:'入金期日を過ぎた請求',
+    n:over.length, amount:over.reduce((s,i)=>s+balanceOfInvoice(i),0), go:"goto('aging')",
+    sub:`最長 ${Math.max(...over.map(i=>daysBetween(i.dueDate,t)))}日 超過` });
+
+  /* ── 債権: 今週が期日の請求（先に声をかければ遅れない） ── */
+  const soonAr=openInvoices().filter(i=>i.dueDate&&i.dueDate>=t&&i.dueDate<=addDays(t,7));
+  if(soonAr.length) out.push({ sev:'info', key:'ar-soon', label:'7日以内が入金期日の請求',
+    n:soonAr.length, amount:soonAr.reduce((s,i)=>s+balanceOfInvoice(i),0), go:"goto('invoices')" });
+
+  /* ── 入金したが、どの請求にも結び付けていないお金 ── */
+  const un=unAllocated();
+  if(un>0) out.push({ sev:'warn', key:'unalloc', label:'未消込の入金',
+    amount:un, go:"goto('receipts')", sub:'どの請求に充てるか決めると、残高が正しくなります' });
+
+  /* ── 債務: 期日を過ぎた支払（相手の信用に関わる） ── */
+  const apOver=openBills().filter(b=>b.dueDate&&b.dueDate<t);
+  if(apOver.length) out.push({ sev:'danger', key:'ap-over', label:'支払期日を過ぎた支払',
+    n:apOver.length, amount:apOver.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('apaging')" });
+
+  const apSoon=openBills().filter(b=>b.dueDate&&b.dueDate>=t&&b.dueDate<=addDays(t,7));
+  if(apSoon.length) out.push({ sev:'warn', key:'ap-soon', label:'7日以内に支払う',
+    n:apSoon.length, amount:apSoon.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('bills')" });
+
+  /* ── 今月の請求を作り忘れていないか（締日を過ぎた取引先だけ言う） ── */
+  const ym=thisMonth();
+  const notBilled=(DB.companies||[]).filter(c=>{
+    if(c._gone||c.kind==='仕入先') return false;
+    if(!rulesOfCompany(c.id).filter(r=>r.kind!=='spot').length) return false;
+    const closing=Number(c.closingDay||31);
+    const dd=new Date().getDate();
+    if(dd < Math.min(closing, daysInMonth(ym))) return false;          // まだ締めていない
+    return !(DB.invoices||[]).some(i=>String(i.companyId)===String(c.id)&&i.bookMonth===ym&&i.status!=='取消');
+  });
+  if(notBilled.length) out.push({ sev:'warn', key:'nobill', label:`${ym} の請求が未作成`,
+    n:notBilled.length, go:"openGenerate()", sub:notBilled.slice(0,4).map(c=>c.name).join('、')+(notBilled.length>4?' ほか':'') });
+
+  /* ── 作成中のまま置き去りの請求 ── */
+  const draft=(DB.invoices||[]).filter(i=>i.status==='作成中'&&i.updatedAt&&daysBetween(String(i.updatedAt).slice(0,10),t)>7);
+  if(draft.length) out.push({ sev:'warn', key:'draft', label:'「作成中」のまま7日以上の請求',
+    n:draft.length, amount:draft.reduce((s,i)=>s+docTotal(i),0), go:"goto('invoices')",
+    sub:'確定するまで売上にも債権にも入りません' });
+
+  const draftB=(DB.bills||[]).filter(b=>b.status==='作成中'&&b.updatedAt&&daysBetween(String(b.updatedAt).slice(0,10),t)>7);
+  if(draftB.length) out.push({ sev:'info', key:'draftb', label:'「作成中」のままの支払請求',
+    n:draftB.length, amount:draftB.reduce((s,b)=>s+docTotal(b),0), go:"goto('bills')" });
+
+  /* ── 定期費用の入力もれ（今月・月次費用表） ── */
+  if(fyOf(ym)===CUR_FY){
+    const i=fyIndexOf(ym);
+    const miss=costRowsOf(CUR_FY).rows.filter(r=>!r.ap && r.kind==='fixed' && r.cells[i]!=null && !r.cells[i] && num(r.it.monthly));
+    if(miss.length) out.push({ sev:'info', key:'costmiss', label:`${FY_MONTH_LABELS[i]}の定期費用が未入力`,
+      n:miss.length, go:"goto('expenses')", sub:miss.slice(0,4).map(r=>r.it.name).join('、')+(miss.length>4?' ほか':'') });
+  }
+
+  /* ── 資金が足りなくなる週 ── */
+  const cash=cashPlanByWeek(8); let run=num(DB.settings&&DB.settings.cashStart);
+  let short=null;
+  for(const w of cash){ run+=w.net; if(run<0){ short=w; break; } }
+  if(short && num(DB.settings&&DB.settings.cashStart)) out.push({ sev:'danger', key:'cash', label:'資金がマイナスになる見込み',
+    go:"goto('cashflow')", sub:`${short.s.slice(5).replace('-','/')} の週。入金予定と支払予定の差です` });
+
+  return out;
+}
+function toggleNotif(e){
+  if(e) e.stopPropagation();
+  const n=document.getElementById('notif'); if(!n) return;
+  const open=n.classList.toggle('open');
+  if(open){ renderNotif(); loadNotifLog(); markNotifSeen(); }
+}
+document.addEventListener('click', function(e){
+  const n=document.getElementById('notif');
+  if(n && n.classList.contains('open') && !n.contains(e.target)) n.classList.remove('open');
+});
+const NM_ICON={ danger:['b-red','!'], warn:['b-amber','!'], info:['b-blue','i'] };
+function renderNotif(){
+  const m=document.getElementById('notifMenu'); if(!m) return;
+  const items=notifItems();
+  const row=x=>{
+    const [cls,ch]=NM_ICON[x.sev]||NM_ICON.info;
+    return `<div class="nm-item" onclick="document.getElementById('notif').classList.remove('open');${x.go}">
+      <div class="nm-ic ${cls}">${ch}</div>
+      <div class="nm-txt"><b>${esc(x.label)}</b>${x.n?` <span class="muted">${x.n}件</span>`:''}
+        ${x.amount!=null?`<div class="nm-amt ${x.sev==='danger'?'minus':''}">${moneyPlain(x.amount)} 円</div>`:''}
+        ${x.sub?`<div class="nm-time">${esc(x.sub)}</div>`:''}</div></div>`;
+  };
+  m.innerHTML =
+    `<div class="nm-head">入力ガイド</div>
+     <div class="nm-chips">${[['ar','請求・入金'],['ap','支払'],['yj','予実・目標'],['ms','マスタ・連携']]
+        .map(a=>`<button onclick="toggleNotif(event);openGuide('${a[0]}')">${esc(a[1])}</button>`).join('')}</div>
+     <div class="nm-head">やること${items.length?`（${items.length}件）`:''}</div>
+     ${items.length? items.map(row).join('') : '<div class="nm-empty">いま手を打つことはありません。</div>'}
+     <div class="nm-head">最近の更新</div><div id="nmLog"><div class="nm-empty">読み込み中…</div></div>`;
+}
+/** 誰が何を直したか（サーバーの操作履歴から。開いたときだけ取りに行く） */
+let _nmLogAt=0, _nmLog=null;
+async function loadNotifLog(){
+  const box=()=>document.getElementById('nmLog');
+  const draw=rows=>{ const b=box(); if(!b) return;
+    b.innerHTML = rows.length? rows.slice(0,12).map(r=>{
+      const act={create:'を追加',update:'を編集',delete:'を削除',restore:'を復元'}[r.action]||('：'+r.action);
+      return `<div class="nm-item" onclick="document.getElementById('notif').classList.remove('open');goto('audit')">
+        <div class="nm-ic b-gray">·</div><div class="nm-txt">
+          <b>${esc(String(r.actor_email||'').split('@')[0])}</b> が ${esc(AUDIT_ENT[r.entity]||r.entity)}${esc(act)}
+          <div class="nm-time">${esc(String(r.at).slice(0,16).replace('T',' '))}</div></div></div>`;
+    }).join('') : '<div class="nm-empty">まだ記録がありません。</div>'; };
+  if(_nmLog && Date.now()-_nmLogAt < 60000) return draw(_nmLog);
+  try{
+    const r=await fetch(API_BASE+'/audit',{headers:headers()});
+    const d=await r.json();
+    _nmLog=(d.items||[]).filter(x=>x.entity!=='api_v1'); _nmLogAt=Date.now();
+    draw(_nmLog);
+  }catch(e){ const b=box(); if(b) b.innerHTML='<div class="nm-empty">更新履歴を取得できませんでした。</div>'; }
+}
+/** 赤い数字。放っておくと損をするもの（danger）の数だけ出す。 */
+function notifBadge(){
+  const d=document.getElementById('notifDot'); if(!d||!DB) return;
+  const items=notifItems();
+  const n=items.filter(x=>x.sev==='danger').length;
+  d.textContent=String(n); d.style.display = n? 'block':'none';
+}
+function markNotifSeen(){ try{ localStorage.setItem(NOTIF_SEEN_KEY, today()); }catch(e){} }
+
+/* ============================================================================
+   入力ガイド — 「どの画面に・何を・いつ入れるか」を1枚に
+   ----------------------------------------------------------------------------
+   README には書いてあるが、README は誰も開かない。毎日触る場所の隣に置く。
+   ========================================================================== */
+const GUIDE_AREAS=[['ar','請求・入金（売掛）'],['ap','支払（買掛）'],['yj','予実・目標'],['ms','マスタ・連携']];
+function openGuide(area){
+  const A=GUIDE_AREAS.find(x=>x[0]===area);
+  openModal(`<h3>入力ガイド${A?`　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(A[1])}</span>`:''}</h3>
+    ${guidePromise()}
+    <div class="tabs" style="margin-top:12px;">
+      ${GUIDE_AREAS.map(a=>`<button class="${a[0]===area?'on':''}" onclick="openGuide('${a[0]}')">${esc(a[1])}</button>`).join('')}
+    </div>
+    <div style="max-height:58vh;overflow-y:auto;padding-right:4px;">${
+      area==='ap'? guideAp() : area==='yj'? guideYj() : area==='ms'? guideMs() : guideAr()}</div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+/** どの区を見ても最初に目に入るところ。ここを間違えると全部ずれる。 */
+function guidePromise(){
+  return `<div class="infobar" style="display:block;line-height:1.9;">
+    <b>数字の約束（ここだけは覚えてください）</b><br>
+    ・予実に効くのは <b>計上月</b>。入金日・支払日ではありません（発生主義）<br>
+    ・<b>入金・支払は損益を動かしません</b>。売掛金・買掛金の残高が減るだけです<br>
+    ・予実の金額は <b>税抜</b>。消費税は預り金であって儲けではないため<br>
+    ・<b>実績は保存していません</b>。請求書・支払請求・費用から毎回計算しています<br>
+    ・会計年度は <b>8月1日〜翌7月31日</b>（Q1=8〜10月）</div>`;
+}
+function _gRow(step, where, what, res){
+  return `<tr><td style="white-space:nowrap;"><b>${esc(step)}</b></td>
+    <td style="white-space:nowrap;"><a onclick="closeModal();goto('${where[0]}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(where[1])}</a></td>
+    <td>${what}</td><td class="muted" style="font-size:11.5px;">${res}</td></tr>`;
+}
+function _gTbl(rows){
+  return `<div class="table-wrap" style="margin-top:10px;"><table>
+    <thead><tr><th style="min-width:54px;">順番</th><th style="min-width:120px;">画面</th><th>入れるもの</th><th style="min-width:190px;">どこに効くか</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function guideAr(){
+  return _gTbl(
+    _gRow('①',['companies','取引先管理'],'会社名と <b>締日・支払サイト・支払日</b>。ここが入金期日のもとになります','期日・年齢表・資金繰り・台帳の色')
+   +_gRow('②',['companies','取引先管理'],'<b>請求ルール</b>（人数×単価／月額固定／都度）','「請求を作成（月まとめ）」に出てきます')
+   +_gRow('③',['invoices','請求管理'],'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>','確定して初めて売上と売掛金になります')
+   +_gRow('④',['receipts','入金・消込'],'入金を記録し、<b>どの請求に充てるか</b>を決める','売掛残高が減ります（損益は動きません）')
+   +_gRow('⑤',['aging','債権年齢表'],'（入力なし）超過している会社を見る','61日以上は要対応')
+   +_gRow('⑥',['ledger','取引先台帳'],'（入力なし）1社の履歴と12か月の帯を見る','期日を守る会社かどうかが色で分かります'))
+  +`<div class="fhelp" style="margin-top:8px;">単発の請求は 請求管理 の「＋ 個別に請求を作成」。
+     入金が請求より多いとき（過入金）はそのまま記録できます。残りは「未消込」として残り、ベルにも出ます。</div>`;
+}
+function guideAp(){
+  return _gTbl(
+    _gRow('①',['companies','取引先管理'],'支払先の会社（区分＝仕入先）と <b>締日・支払サイト・支払日</b>','支払期日が自動で決まります')
+   +_gRow('②',['expenses','費用管理'],'<b>費目</b>を作る。支払先を選び、<b>払い方</b>を決める<br><span class="muted">即払い＝毎月マスに打つ／買掛＝毎月の支払請求を作る</span>','買掛にすると期日と残高で管理できます')
+   +_gRow('③',['bills','支払管理'],'<b>定期の支払を作成（月まとめ）</b>、または個別に登録 → <b>確定</b>','確定して初めて買掛金になります')
+   +_gRow('④',['payouts','支払実行'],'支払を記録し、どの支払請求に充てるかを決める','買掛残高が減ります（損益は動きません）')
+   +_gRow('⑤',['apaging','債務年齢表'],'（入力なし）期日を過ぎている支払を見る','こちらは相手の信用に関わります')
+   +_gRow('⑥',['cashflow','資金繰り'],'通帳の <b>開始残高</b>（設定）だけ入れる','入金予定−支払予定で残高見込みが出ます'))
+  +`<div class="fhelp" style="margin-top:8px;">支払請求に<b>明細（勘定科目）</b>が無いと、金額が予実の費用に入りません。一覧に「明細なし」の札が出ます。</div>`;
+}
+function guideYj(){
+  return _gTbl(
+    _gRow('①',['settings','設定'],'<b>勘定科目</b>（収益／売上原価／販管費／営業外）','予実の行になります')
+   +_gRow('②',['yojitsu','予実管理'],'<b>年間の予算</b>（前年実績×◯%からも作れます）','予実の「予算」列')
+   +_gRow('③',['yojitsu','予実管理'],'必要なら <b>見込</b>、会計事務所の数字は <b>実績調整</b>','着地見込に使われます')
+   +_gRow('④',['expenses','費用管理'],'毎月の費用を月次費用表のマスに打つ','税抜に直して販管費・原価へ')
+   +_gRow('⑤',['okr','OKR / KPI'],'目標と主要成果（KR）。数字は予実から自動で取れます','手で写さないこと（ズレの元）')
+   +_gRow('⑥',['mikomi','見込実績表'],'（入力なし）会議に出す形','四半期・累積・前年比'))
+  +`<div class="fhelp" style="margin-top:8px;">実績はどこにも保存していません。請求書・支払請求・費用を直せば、予実は自動で直ります。</div>`;
+}
+function guideMs(){
+  return _gTbl(
+    _gRow('①',['crmlink','CRM連携'],'CRMから 所属機関・特定技能者・在籍期間を取り込む','人数×単価の請求の根拠になります')
+   +_gRow('②',['companies','取引先管理'],'CRMに無い会社（仕入先など）はここで追加','CRMから来た項目は同期で上書きされます。<b>締日・サイト・口座・請求ルールは触られません</b>')
+   +_gRow('③',['users','ユーザー管理'],'役割（管理者／経営／経理／閲覧）とページごとの権限','見える画面・できる操作が変わります')
+   +_gRow('④',['apilink','API・AI連携'],'外部システムやAIに<b>読ませる</b>ための鍵。1人1鍵','読むだけ。金額は書き換えられません')
+   +_gRow('⑤',['audit','操作履歴'],'（入力なし）誰が・いつ・どの項目を いくら→いくら に','消したデータもここから戻せます'))
+  +`<div class="fhelp" style="margin-top:8px;">確定した伝票は削除できません（取消のみ）。金額の変更は管理者・マネージャーだけです。</div>`;
 }
 
 /* ============================================================================
