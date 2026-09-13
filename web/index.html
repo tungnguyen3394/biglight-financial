@@ -5679,17 +5679,16 @@ async function doRestore(id, at){
 /* ---------- 設定 ---------- */
 function viewSettings(){
   const accs=accounts();
-  return pageShell({ title:'設定', sub:'勘定科目・部門・資金繰りの開始残高',
+  const leaf=accs.filter(a=>accountIsLeaf(a)&&a.active!==false).length;
+  return pageShell({ title:'基本設定', sub:'資金繰りの開始残高・会計年度・デモデータ',
     body:`
-    <div class="panel"><div class="panel-hd"><b>勘定科目</b><span class="sub">予実の行になります</span>
-      ${isAdmin()?`<button class="btn sm" style="margin-left:auto;" onclick="accForm()">＋ 科目を追加</button>`:''}</div>
-      <div class="panel-bd tight"><div class="table-wrap" style="border:0;"><table>
-        <thead><tr><th>コード</th><th>名称</th><th>区分</th><th class="r">${CUR_FY}年度 実績</th><th></th></tr></thead>
-        <tbody>${accs.map(a=>`<tr><td>${esc(a.code)}</td><td>${esc(a.label)}</td>
-          <td>${esc(KIND_LABEL[a.kind]||a.kind)}</td>
-          <td class="r num">${moneyPlain(sum12(seriesByAccount(CUR_FY,a.code,'actual')))}</td>
-          <td>${isAdmin()?`<a onclick="accForm('${a.id||a.code}')" style="cursor:pointer;color:var(--primary);font-size:12px;">編集</a>`:''}</td></tr>`).join('')}
-        </tbody></table></div></div></div>
+    <div class="panel"><div class="panel-hd"><b>勘定科目</b><span class="sub">大分類 › 中分類 › 小分類 で登録します</span>
+      <button class="btn sm" style="margin-left:auto;" onclick="goto('accounts')">勘定科目の登録をひらく</button></div>
+      <div class="panel-bd" style="font-size:13px;line-height:1.9;">
+        いま <b>${accs.length}件</b>（うち伝票で選べる末端 <b>${leaf}件</b>）。
+        ${accTreeReady()? '' : '<span style="color:var(--warning);">まだ階層を作っていません。登録画面の「初期セット」を押すと、今の科目が4つの大分類に振り分けられます。</span>'}
+        <div class="fhelp">科目の追加・編集・並べ替えは、すべて「勘定科目の登録」で行います（入口を1つにするため）。</div>
+      </div></div>
 
     <div class="panel"><div class="panel-hd"><b>資金繰りの開始残高</b></div>
       <div class="panel-bd"><div style="display:flex;gap:12px;align-items:center;">
