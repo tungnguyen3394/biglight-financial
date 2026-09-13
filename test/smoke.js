@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -426,6 +426,38 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   ctx.setLedCo(kita.id); ctx.setLedTab('timeline');
   try{ const h=ctx.viewLedger(); const ok=h.length>2000;
     console.log((ok?'  ok  ':'  NG  ')+'viewLedger（デモ・タイムライン）  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
+
+  /* ── 取引先別（回収）／支払先別 ── */
+  console.log('\n― 取引先別・支払先別（デモの量で） ―');
+  {
+    const kita2=_db.companies.find(c=>c.name.includes('北関東物流'));
+    const saku2=_db.companies.find(c=>c.name.includes('さくら製作所'));
+    ctx.setCoPeriod('fy');
+    const rowsAr = ctx.coRows('ar');
+    eq('回収の一覧に得意先が出る', rowsAr.some(r=>r.c.id===kita2.id), true);
+    eq('回収の一覧に支払先（大家）は出ない', rowsAr.some(r=>r.c.name.includes('丸山不動産')), false);
+    const rk = rowsAr.find(r=>r.c.id===kita2.id);
+    eq('一覧の未回収＝売掛残高（同じ数字）', rk.bal, ctx.arBalanceOf(kita2.id));
+    eq('遅れがちな会社は評価 D（いま30日超の超過あり）', ctx.payGrade(kita2.id,'ar').g, 'D');
+    eq('期日どおりの会社は評価 A', ctx.payGrade(saku2.id,'ar').g, 'A');
+    const nb = ctx.coNextBilling(kita2.id);
+    eq('繰越額 ＝ 未回収 − 過入金', nb.carry, nb.unpaid - nb.over);
+    eq('今回ご請求額 ＝ 繰越額 ＋ 今回お買上額', nb.total, nb.carry + nb.current);
+    eq('今回お買上額は請求ルールから（月額固定 70,000＋税）', nb.current, 77000);
+    const rowsAp = ctx.coRows('ap');
+    eq('支払先別に大家が出る', rowsAp.some(r=>r.c.name.includes('丸山不動産')), true);
+    eq('支払先別に得意先は出ない', rowsAp.some(r=>r.c.id===saku2.id), false);
+    ['arco','apco'].forEach(pg=>{
+      try{ ctx.coOpen(pg==='apco'?'ap':'ar', null); const h=ctx.viewCoList(pg==='apco'?'ap':'ar'); const ok=h.length>1500;
+        console.log((ok?'  ok  ':'  NG  ')+`一覧 ${pg}  →  `+h.length+' 文字'); ok?pass++:fail++; }catch(e){ console.log('  NG  '+pg+' → '+e.message); fail++; }
+    });
+    try{ const h=ctx.viewCoDetail('ar', kita2.id); const ok=h.includes('今回ご請求額') && h.includes('評価');
+      console.log((ok?'  ok  ':'  NG  ')+'詳細（回収）に 評価 と 繰越式の次回請求額  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ console.log('  NG  詳細 → '+e.message); fail++; }
+    /* 会社名を押す（どの画面からでも）→ 取引先別の詳細で開く */
+    ctx.openLedger(kita2.id,'ar');
+    eq('会社名から 取引先別 の詳細へ', ctx.__x.CURRENT_PAGE, 'arco');
+    ctx.coOpen('ar', null);
+  }
 
   /* ── 分類別集計: いちばん大事なのは「予実と1円も違わない」こと ── */
   console.log('\n― 分類別集計（デモの量で） ―');

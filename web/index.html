@@ -495,7 +495,7 @@ const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
 /* 同じ台帳を別の入口から見る画面は、権限も同じにする（二重に設定させない） */
-const PAGE_PERM_ALIAS = { vendors:'companies', ledger:'companies', kbunrui:'expenses', properties:'properties', accounts:'settings' };
+const PAGE_PERM_ALIAS = { vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', kbunrui:'expenses', properties:'properties', accounts:'settings' };
 function permOf(page){
   page = PAGE_PERM_ALIAS[page] || page;
   const role = myRole();
@@ -824,16 +824,19 @@ const SECTIONS = [
   { id:'sec-ar', label:'回収（売掛金）', icon:'invoice', tabs:[
     {id:'invoices', label:'請求管理'},
     {id:'receipts', label:'入金・消込'},
-    {id:'aging',    label:'未回収（年齢表）'} ]},
+    {id:'aging',    label:'未回収（年齢表）'},
+    {id:'arco',     label:'取引先別'} ]},
   { id:'sec-ap', label:'支払（買掛金）', icon:'bill', tabs:[
     {id:'bills',    label:'支払管理'},
     {id:'payouts',  label:'支払実行'},
     {id:'apaging',  label:'未払（年齢表）'},
-    {id:'cashflow', label:'資金繰り'} ]},
+    {id:'cashflow', label:'資金繰り'},
+    {id:'apco',     label:'支払先別'} ]},
   { id:'sec-co', label:'取引先', icon:'company', tabs:[
     {id:'companies', label:'一覧（すべて）'},
-    {id:'vendors',   label:'支払先'},
-    {id:'ledger',    label:'台帳（履歴・タイムライン）'} ]},
+    {id:'vendors',   label:'支払先'} ]},
+    /* ★ 2026-09-14: 台帳（1社の履歴・タイムライン）は 回収 › 取引先別 と 支払 › 支払先別 に
+       まとめました（同じものを2か所に置かない）。openLedger() はそちらへ案内します。 */
     /* ★ 2026-09-13 利用者の指示でメニューから外しました:
          {id:'workers', label:'特定技能者'}
        この1行を上の tabs に戻せば、画面も機能もそのまま復活します。
@@ -1277,6 +1280,8 @@ function renderPage(page){
       case 'companies': html=viewCompanies('');       break;
       case 'vendors':   html=viewCompanies('vendor'); break;
       case 'ledger':    html=viewLedger();    break;
+      case 'arco':      html=viewCoList('ar'); break;
+      case 'apco':      html=viewCoList('ap'); break;
       case 'workers':   html=viewWorkers();   break;
       case 'expenses':  html=viewExpenses();  break;
       case 'properties':html=viewProperties();break;
@@ -3702,6 +3707,225 @@ function apAgingDetail(companyId){
 }
 
 /* ============================================================================
+   取引先別（回収）／ 支払先別（支払）— 「この期間、どの会社と、いくら動いたか」
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-14）:
+     「回収に 1ページ。今期お金が動いた会社の一覧。押すと、その会社の
+       お金の出入り・未回収・過入金・払い方の評価・次に請求する額が全部見える。
+       メールも CRM と同じように送れる。支払も同じ形で」
+
+   決めごと:
+   ・一覧に出す会社 ＝ 期間中に伝票か入金があった会社 ＋ いま未回収（未払）か 過入金がある会社。
+     「今期は動いていないが去年の未回収が残っている会社」を落とすと、回収の画面として役に立たない。
+   ・残高はどこで見ても同じ数字（台帳・年齢表・ダッシュボードと同じ関数）。
+   ・評価は 期日内率・平均の遅れ・いま超過しているか から決める。期日は会社ごとに違う
+     （その会社の 締日・サイト・支払日 で決まった日と比べる）。
+   ========================================================================== */
+let CO_PERIOD='fy';                       // fy=年度 / q=四半期 / m=今月
+let CO_SEL={ ar:null, ap:null };          // 開いている会社（null なら一覧）
+let CO_TAB={ ar:'history', ap:'history' };
+let CO_SORT={ ar:'bal', ap:'bal' };
+
+/** いまの期間の [開始日, 終了日]。年度はセレクタの年度、四半期と今月は今日から決める。 */
+function coRange(){
+  const t=thisMonth();
+  if(CO_PERIOD==='m') return { from:monthStart(t), to:monthEnd(t), label:t.replace('-','年')+'月' };
+  if(CO_PERIOD==='q'){
+    const fy=fyOf(t), i=fyIndexOf(t), qs=Math.floor(i/3)*3, ms=fyMonths(fy);
+    return { from:monthStart(ms[qs]), to:monthEnd(ms[qs+2]), label:`${fy}年度 Q${quarterOfIdx(i)}` };
+  }
+  const ms=fyMonths(CUR_FY);
+  return { from:monthStart(ms[0]), to:monthEnd(ms[11]), label:fyLabel(CUR_FY) };
+}
+function setCoPeriod(p){ CO_PERIOD=p; renderPage(CURRENT_PAGE); }
+function setCoSort(side,k){ CO_SORT[side]=k; renderPage(CURRENT_PAGE); }
+function coOpen(side,id){ CO_SEL[side]=id?String(id):null; renderPage(side==='ap'?'apco':'arco'); window.scrollTo(0,0); }
+function coTab(side,t){ CO_TAB[side]=t; renderPage(side==='ap'?'apco':'arco'); }
+
+/** 過入金（過払い）＝ 結び付けていない入金 ＋ 請求額を超えて入った分 */
+function coOverpaid(side, companyId){
+  const S=ledS(side);
+  const over=S.docs(companyId).filter(d=>d.status!=='取消'&&d.status!=='作成中')
+    .reduce((s,d)=>s+Math.max(0,-S.bal(d)),0);
+  return S.unapplied(companyId) + over;
+}
+/** 払い方の評価 A〜D と、その理由（人に説明できる言葉で） */
+function payGrade(companyId, side){
+  const p=ledPerf(companyId, side, null);
+  const who = side==='ap' ? '自社の支払' : '入金';
+  if(!p.n && !p.openOver) return { g:'—', cls:'b-gray', why:'まだ判断できる実績がありません' };
+  if(p.openOver && p.worst>30) return { g:'D', cls:'b-red', why:`期日を ${p.worst}日 過ぎた未${side==='ap'?'払':'回収'}があります（${p.openOver}件）` };
+  if((p.rate!=null && p.rate<80) || p.avgLate>15) return { g:'C', cls:'b-red',
+    why:`${who}の期日内率 ${p.rate==null?'—':p.rate+'%'}・遅れた分は平均 ${p.avgLate}日` };
+  if((p.rate!=null && p.rate<95) || p.avgLate>0 || p.openOver) return { g:'B', cls:'b-amber',
+    why:`おおむね期日どおり（期日内 ${p.rate==null?'—':p.rate+'%'}${p.avgLate?`・遅れは平均${p.avgLate}日`:''}${p.openOver?`・超過中 ${p.openOver}件`:''}）` };
+  return { g:'A', cls:'b-green', why:`期日どおり（${p.n}件すべて期日内）` };
+}
+/** 次に請求する月（その会社の今月の請求がまだなら今月、あれば翌月） */
+function coNextYm(companyId){
+  const t=thisMonth();
+  const has=(DB.invoices||[]).some(i=>String(i.companyId)===String(companyId)&&i.bookMonth===t&&i.status!=='取消');
+  return has? addMonths(t,1) : t;
+}
+/** 次回の請求額（繰越式）。今回お買上額 は請求ルールから、繰越 は 未回収 − 過入金。 */
+function coNextBilling(companyId){
+  const ym=coNextYm(companyId);
+  const { items } = autoItemsFor(companyId, ym);
+  const current = itemsSubtotal(items)+itemsTax(items);
+  const unpaid = arBalanceOf(companyId);
+  const over = coOverpaid('ar', companyId);
+  const carry = unpaid - over;
+  return { ym, items, current, unpaid, over, carry, total: carry + current };
+}
+
+/** 一覧の行。期間の数字は期間で、残高と評価は「いま」で出す。 */
+function coRows(side){
+  const S=ledS(side), R=coRange();
+  const inR=d=>d && d>=R.from && d<=R.to;
+  const rows=[];
+  (DB.companies||[]).forEach(c=>{
+    const docs=S.docs(c.id).filter(d=>d.status!=='取消'&&d.status!=='作成中');
+    const pays=S.pays(c.id).filter(p=>p.status!=='取消');
+    const periodDocs=docs.filter(d=>inR((d.bookMonth||'').slice(0,7)+'-01') || inR(monthEnd((d.bookMonth||'').slice(0,7)||'0000-01')));
+    const periodPays=pays.filter(p=>inR(p.date));
+    const bal=S.balOf(c.id), over=coOverpaid(side,c.id);
+    if(!periodDocs.length && !periodPays.length && bal<=0 && over<=0) return;
+    const lastPay=pays.map(p=>p.date||'').sort().pop()||'';
+    const perf=ledPerf(c.id, side, null);
+    rows.push({ c, billed:periodDocs.reduce((s,d)=>s+S.total(d),0), paid:periodPays.reduce((s,p)=>s+num(p.amount),0),
+      bal, over, perf, grade:payGrade(c.id, side), lastPay,
+      next: side==='ar' ? coNextBilling(c.id) : null });
+  });
+  const key=CO_SORT[side];
+  const by={ bal:(a,b)=>b.bal-a.bal, billed:(a,b)=>b.billed-a.billed, paid:(a,b)=>b.paid-a.paid,
+    over:(a,b)=>b.over-a.over, grade:(a,b)=>String(b.grade.g).localeCompare(String(a.grade.g)),
+    name:(a,b)=>String(a.c.name||'').localeCompare(String(b.c.name||''),'ja'),
+    last:(a,b)=>String(b.lastPay).localeCompare(String(a.lastPay)),
+    next:(a,b)=>((b.next&&b.next.total)||0)-((a.next&&a.next.total)||0) };
+  return rows.sort(by[key]||by.bal);
+}
+
+function viewCoList(side){
+  const S=ledS(side), R=coRange(), rows=coRows(side);
+  if(CO_SEL[side]) return viewCoDetail(side, CO_SEL[side]);
+  const q=(SEARCH[side==='ap'?'apco':'arco']||'').toLowerCase();
+  const shown=rows.filter(r=>!q || String(r.c.name||'').toLowerCase().includes(q));
+  const tot=k=>shown.reduce((s,r)=>s+r[k],0);
+  const nameCol = side==='ap' ? '支払先' : '取引先';
+  const th=(k,label,cls)=>`<th class="${cls||''}" style="cursor:pointer;white-space:nowrap;" onclick="setCoSort('${side}','${k}')">${esc(label)}${CO_SORT[side]===k?' ▼':''}</th>`;
+
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">${esc(R.label)}の${side==='ap'?'支払請求':'請求'}</div><div class="num">${moneyPlain(tot('billed'))}</div>
+      <div class="sub">${shown.length}社</div></div>
+    <div class="kpi"><div class="lbl">${esc(R.label)}の${esc(S.payLabel)}</div><div class="num plus">${moneyPlain(tot('paid'))}</div></div>
+    <div class="kpi"><div class="lbl">いまの${esc(S.balLabel)}</div><div class="num ${tot('bal')?'minus':''}">${moneyPlain(tot('bal'))}</div>
+      <div class="sub">${shown.filter(r=>r.bal>0).length}社</div></div>
+    <div class="kpi"><div class="lbl">過${side==='ap'?'払':'入金'}（相殺待ち）</div><div class="num">${moneyPlain(tot('over'))}</div>
+      <div class="sub">次の${side==='ap'?'支払':'請求'}で差し引く額</div></div>
+  </div>`;
+
+  const body = shown.map(r=>`<tr onclick="coOpen('${side}','${attr(r.c.id)}')" style="cursor:pointer;">
+      <td><b>${esc(r.c.name||'')}</b><div class="muted" style="font-size:10.5px;">${esc((r.c.closingDay||31)+'日締 / '+(r.c.paySite==null||r.c.paySite===''?'サイト未設定':r.c.paySite+'か月後 '+(r.c.payDay||31)+'日'))}</div></td>
+      <td class="r num">${r.billed?moneyPlain(r.billed):'<span class="zero">—</span>'}</td>
+      <td class="r num plus">${r.paid?moneyPlain(r.paid):'<span class="zero">—</span>'}</td>
+      <td class="r num">${r.bal>0?`<b class="minus">${moneyPlain(r.bal)}</b>`:'<span class="zero">0</span>'}</td>
+      <td class="r num">${r.over>0?`<b style="color:var(--purple);">${moneyPlain(r.over)}</b>`:'<span class="zero">—</span>'}</td>
+      <td><span class="badge ${r.grade.cls}" title="${attr(r.grade.why)}" style="min-width:26px;text-align:center;">${esc(r.grade.g)}</span></td>
+      <td class="r">${r.perf.rate==null?'<span class="zero">—</span>':r.perf.rate+'%'}</td>
+      <td class="r">${r.perf.avgLate?r.perf.avgLate+'日':'<span class="zero">—</span>'}</td>
+      ${side==='ar'?`<td class="r num"><b>${moneyPlain(r.next.total)}</b><div class="muted" style="font-size:10px;">${esc(r.next.ym)}分</div></td>`:''}
+      <td class="muted" style="font-size:11.5px;">${esc(r.lastPay||'—')}</td>
+      <td>${side==='ar'&&typeof mailCompose==='function'?`<a class="pillbtn pill-save" onclick="event.stopPropagation();mailCompose('ar','${attr(r.c.id)}')" title="メールを書く">✉</a>`:''}</td></tr>`).join('');
+
+  return pageShell({ title: side==='ap'?'支払先別':'取引先別', count:rows.length, shown:shown.length,
+    sub:`${esc(R.label)}にお金が動いた会社と、いま残高がある会社。押すと その会社のすべてが見られます。`,
+    tools:`<div class="seg">
+        <button class="${CO_PERIOD==='m'?'on':''}" onclick="setCoPeriod('m')">今月</button>
+        <button class="${CO_PERIOD==='q'?'on':''}" onclick="setCoPeriod('q')">今四半期</button>
+        <button class="${CO_PERIOD==='fy'?'on':''}" onclick="setCoPeriod('fy')">年度</button></div>
+      ${searchBox(side==='ap'?'apco':'arco', nameCol+'名で検索')}
+      ${toolsMenu(`<button class="btn secondary" onclick="exportCsvCo('${side}')">${IC.doc} CSV出力</button>
+        <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`,
+    body: kpis + `<div class="table-wrap"><table class="stick1">
+      <thead><tr>${th('name',nameCol)}${th('billed','期間の'+(side==='ap'?'支払請求':'請求'),'r')}${th('paid','期間の'+S.payLabel,'r')}
+        ${th('bal',side==='ap'?'未払':'未回収','r')}${th('over','過'+(side==='ap'?'払':'入金'),'r')}${th('grade','評価')}
+        <th class="r">期日内率</th><th class="r">平均遅れ</th>${side==='ar'?th('next','次回請求額','r'):''}${th('last','最終'+S.payLabel)}<th></th></tr></thead>
+      <tbody>${body || `<tr><td colspan="${side==='ar'?11:10}" class="empty" style="padding:20px;">${esc(R.label)}に動きのある会社はありません。</td></tr>`}
+        ${shown.length?`<tr class="totrow"><td>合計</td><td class="r num">${moneyPlain(tot('billed'))}</td><td class="r num">${moneyPlain(tot('paid'))}</td>
+          <td class="r num">${moneyPlain(tot('bal'))}</td><td class="r num">${moneyPlain(tot('over'))}</td><td></td><td></td><td></td>
+          ${side==='ar'?`<td class="r num">${moneyPlain(shown.reduce((s,r)=>s+r.next.total,0))}</td>`:''}<td></td><td></td></tr>`:''}
+      </tbody></table></div>
+      <div class="fhelp" style="margin-top:8px;">評価：<b>A</b> 期日どおり ／ <b>B</b> おおむね期日どおり ／ <b>C</b> 遅れがち（期日内80%未満 か 平均15日超）／ <b>D</b> いま30日以上の超過あり。
+        期日は会社ごとの 締日・サイト・支払日 から決まった日と比べています。${side==='ar'?'<br>次回請求額 ＝ 次の月の請求（請求ルール）＋ 未回収 − 過入金（繰越式）。':''}</div>` });
+}
+
+/** 1社のすべて: 評価・次回請求額・履歴（通帳）・タイムライン・添付・メール */
+function viewCoDetail(side, companyId){
+  const c=findById('companies',companyId);
+  if(!c){ CO_SEL[side]=null; return viewCoList(side); }
+  const S=ledS(side), perf=ledPerf(c.id,side,null), g=payGrade(c.id,side);
+  const bal=S.balOf(c.id), over=coOverpaid(side,c.id);
+  const nb = side==='ar' ? coNextBilling(c.id) : null;
+  const terms = (c.paySite!=null&&c.paySite!=='')
+    ? `${c.closingDay||31}日締 → ${c.paySite}か月後の${c.payDay||31}日払い`
+    : '<span style="color:var(--warning);">支払条件が未設定</span>';
+
+  const head=`<div style="margin-bottom:10px;"><a class="pillbtn" onclick="coOpen('${side}',null)">← ${side==='ap'?'支払先':'取引先'}の一覧へ</a></div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="lbl">評価</div>
+        <div class="num"><span class="badge ${g.cls}" style="font-size:20px;padding:4px 14px;">${esc(g.g)}</span></div>
+        <div class="sub">${esc(g.why)}</div></div>
+      <div class="kpi"><div class="lbl">${esc(S.balLabel)}</div><div class="num ${bal?'minus':''}">${moneyPlain(bal)}</div>
+        <div class="sub">期日内 ${perf.rate==null?'—':perf.rate+'%'}${perf.avgLate?` ・ 平均${perf.avgLate}日遅れ`:''}</div></div>
+      <div class="kpi"><div class="lbl">過${side==='ap'?'払':'入金'}</div><div class="num" style="${over?'color:var(--purple);':''}">${moneyPlain(over)}</div>
+        <div class="sub">${over?'次で相殺する額':'ありません'}</div></div>
+      <div class="kpi"><div class="lbl">支払条件</div><div class="num" style="font-size:14px;line-height:1.5;">${terms}</div>
+        <div class="sub">色と評価はこの期日で判断</div></div>
+    </div>`;
+
+  const next = nb? `<div class="panel"><div class="panel-hd"><b>次回の請求額（${esc(nb.ym)}分・繰越式）</b>
+      <span class="sub">請求書にもこの形で載ります</span>
+      ${canCreate('invoices')?`<button class="btn sm" style="margin-left:auto;" onclick="openGenerate()">請求を作成</button>`:''}</div>
+    <div class="panel-bd"><table style="max-width:460px;font-size:13.5px;"><tbody>
+      <tr><td>前回までの未回収</td><td class="r num">${moneyPlain(nb.unpaid)}</td></tr>
+      <tr><td>過入金（差し引き）</td><td class="r num" style="color:var(--purple);">${nb.over?'− '+moneyPlain(nb.over):'0'}</td></tr>
+      <tr style="border-top:1px solid var(--border);"><td><b>繰越額</b></td><td class="r num"><b>${moneyPlain(nb.carry)}</b></td></tr>
+      <tr><td>今回お買上額（請求ルール）
+        ${nb.items.length?`<div class="muted" style="font-size:11px;">${nb.items.map(x=>esc(x.name)).join('、')}</div>`
+          :`<div style="font-size:11px;color:var(--warning);">請求ルールがありません</div>`}</td>
+        <td class="r num">${moneyPlain(nb.current)}</td></tr>
+      <tr style="border-top:2px solid var(--text);"><td><b>今回ご請求額</b></td><td class="r num" style="font-size:17px;"><b>${moneyPlain(nb.total)}</b></td></tr>
+    </tbody></table></div></div>` : '';
+
+  const tabs=`<div class="tabs">
+    <button class="${CO_TAB[side]==='history'?'on':''}" onclick="coTab('${side}','history')">履歴（通帳）</button>
+    <button class="${CO_TAB[side]==='timeline'?'on':''}" onclick="coTab('${side}','timeline')">タイムライン（12か月）</button></div>`;
+  const body = CO_TAB[side]==='timeline' ? ledTimelineHtml(c, side, CUR_FY) : ledHistoryHtml(c, side, CUR_FY);
+
+  const unap=S.unapplied(c.id);
+  const warn = unap? `<div class="warnbar">${IC.warn} ${esc(S.payLabel)}のうち <b class="num">${moneyPlain(unap)}</b> 円が、まだどの${esc(S.docLabel)}にも結び付いていません（未消込）。</div>`:'';
+
+  LED_CO=String(c.id); LED_SIDE=side;          // 印刷・CSV は台帳の関数をそのまま使う
+  return pageShell({ title:c.name||'', sub:`${side==='ap'?'支払先':'取引先'}の すべてのお金の出入り`,
+    tools:`${side==='ar'&&typeof mailCompose==='function'?`<button class="btn" onclick="mailCompose('ar','${attr(c.id)}')">✉ メール</button>`:''}
+      ${canEdit(S.payPage)?`<button class="btn secondary" onclick="${side==='ap'?`openPayout(null,{companyId:'${attr(c.id)}'})`:`openPayment(null,{companyId:'${attr(c.id)}'})`}">＋ ${esc(S.payLabel)}を記録</button>`:''}
+      ${toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（残高確認書）</button>
+        <button class="btn secondary" onclick="exportCsvLedger()">${IC.doc} 履歴をCSV</button>
+        <hr><button class="btn secondary" onclick="openDetail('companies','${attr(c.id)}')">会社の情報</button>`)}`,
+    body:`<div class="printonly" style="margin-bottom:10px;">
+        <div style="font-size:17px;font-weight:700;">取引明細書・残高確認書</div>
+        <div style="font-size:12px;">${esc(c.name||'')} 御中　／　${fyLabel(CUR_FY)}　／　発行日 ${today()}　／　BIGLIGHT株式会社</div></div>
+      ${head}${warn}${next}${tabs}${body}` });
+}
+function exportCsvCo(side){
+  const R=coRange();
+  const rows=[['会社','期間の請求','期間の入金','残高','過入金','評価','期日内率','平均遅れ(日)','次回請求額','最終入金日']];
+  coRows(side).forEach(r=>rows.push([r.c.name||'', r.billed, r.paid, r.bal, r.over, r.grade.g,
+    r.perf.rate==null?'':r.perf.rate, r.perf.avgLate||'', r.next?r.next.total:'', r.lastPay]));
+  downloadCsv(`${side==='ap'?'支払先別':'取引先別'}_${R.label}`, rows);
+}
+
+/* ============================================================================
    ⑪' 取引先台帳 — 1社のお金の出入りを「通帳」と「12か月の帯」で見る
    ----------------------------------------------------------------------------
    なぜ要るのか（2026-09-13 利用者の指示）:
@@ -3813,9 +4037,11 @@ function ledPerfBadge(companyId, side){
 
 /* ---------- 画面 ---------- */
 function openLedger(companyId, side){
-  if(companyId) LED_CO=String(companyId);
-  if(side) LED_SIDE=side;
-  goto('ledger');
+  /* 台帳は 取引先別／支払先別 の中に移りました。どこの会社名を押しても、そこで開きます。 */
+  const sd = side==='ap' ? 'ap' : 'ar';
+  if(companyId){ LED_CO=String(companyId); CO_SEL[sd]=String(companyId); }
+  LED_SIDE=sd;
+  goto(sd==='ap' ? 'apco' : 'arco');
 }
 function setLedCo(v){ LED_CO=v||null; renderPage('ledger'); }
 function setLedTab(t){ LED_TAB=t; renderPage('ledger'); }
@@ -4971,6 +5197,10 @@ const PAGE_GUIDE = {
                 effect:'入金期日・年齢表・資金繰り・台帳の色、すべてのもとになります' },
   vendors:    { step:'①', what:'BIGLIGHTが<b>サービスを受けている会社</b>（大家・電力・水道・通信・清掃・外注）と、その締日・支払サイト・支払日',
                 effect:'費目や物件の「支払先」で選べるようになり、支払期日が自動で決まります' },
+  arco:       { step:'⑥', what:'（入力なし）期間に動いた会社の一覧 → 押すと その会社の 評価・未回収・過入金・<b>次回請求額（繰越式）</b>・履歴・タイムライン。メールもここから',
+                effect:'「どこから、いくら回収すべきか」がこの1枚で分かります' },
+  apco:       { step:'⑦', what:'（入力なし）期間に動いた支払先の一覧 → 押すと その会社の 未払・過払・評価・履歴・タイムライン',
+                effect:'自社が期日を守れているかが分かります' },
   ledger:     { step:'', what:'（入力なし）1社の履歴（通帳）と12か月のタイムライン',
                 effect:'期日を守る会社かどうかが色で分かります。印刷すると残高確認書' },
   workers:    { step:'', what:'（入力なし・CRMから取り込み）',
