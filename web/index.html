@@ -1648,6 +1648,8 @@ function openForm(entKey, id, preset){
   if(isEdit && !canEdit(page)){ return openDetail(entKey,id); }
   if(!isEdit && !canCreate(page)){ toast('作成の権限がありません。','err'); return; }
   const row = isEdit ? Object.assign({}, findById(E.key,id)) : Object.assign({}, preset||{});
+  /* 払い方を入れていない古い費目は「即払い」。空欄のまま '-' と出ると、どちらか分からない。 */
+  if(entKey==='costItems' && !row.payMode) row.payMode='即払い';
   FORM_CTX = { entity:entKey, id: isEdit?id:null, items: (row.items||[]).map(x=>Object.assign({},x)) };
 
   let sec=null;
@@ -4241,6 +4243,7 @@ function markNotifSeen(){ try{ localStorage.setItem(NOTIF_SEEN_KEY, today()); }c
    ========================================================================== */
 const GUIDE_AREAS=[['ar','請求・入金（売掛）'],['ap','支払（買掛）'],['yj','予実・目標'],['ms','マスタ・連携']];
 function openGuide(area){
+  area = area || 'ar';                      // 何も指定せず開いたら、いちばん使う「請求・入金」から
   const A=GUIDE_AREAS.find(x=>x[0]===area);
   openModal(`<h3>入力ガイド${A?`　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(A[1])}</span>`:''}</h3>
     ${guidePromise()}
