@@ -286,6 +286,61 @@ console.log('\n― 画面が落ちずに描けるか ―');
   }catch(e){ console.log(`  NG  viewLedger(${side}/${tab})  →  `+e.message); fail++; }
 });
 
+console.log('\n― 請求書（繰越式） ―');
+{
+  /* 小さな1社で、式が崩れないかを確かめる */
+  const keepInv=_db.invoices.slice(), keepPay=_db.payments.slice();
+  _db.companies.push({ id:'CX', name:'繰越テスト商事', kind:'得意先', closingDay:31, paySite:1, payDay:31 });
+  const it = amt => [{ accountCode:'4100', name:'月額', amount:amt, taxCat:'課税10%' }];   // 税込 = amt×1.1
+  const A={ id:'IA', no:'A', companyId:'CX', bookMonth:'2026-06', issueDate:'2026-06-30', dueDate:'2026-07-31', status:'確定', items:it(100000) };
+  const B={ id:'IB', no:'B', companyId:'CX', bookMonth:'2026-07', issueDate:'2026-07-31', dueDate:'2026-08-31', status:'確定', items:it(100000) };
+  const Cc={ id:'IC', no:'C', companyId:'CX', bookMonth:'2026-08', issueDate:'2026-08-31', dueDate:'2026-09-30', status:'作成中', items:it(100000) };
+  _db.invoices.push(A,B,Cc);
+  /* 7/15 に A の一部 50,000 だけ入金 */
+  _db.payments.push({ id:'PX1', companyId:'CX', date:'2026-07-15', amount:50000, fee:0, status:'確定', allocations:[{invoiceId:'IA',amount:50000}] });
+
+  const kA=ctx.invoiceCarry(A), kB=ctx.invoiceCarry(B), kC=ctx.invoiceCarry(Cc);
+  eq('最初の請求書は繰越0', [kA.prev,kA.received,kA.carry,kA.total], [0,0,0,110000]);
+  eq('前回ご請求額 − ご入金額 ＝ 繰越額（B）', kB.prev - kB.received, kB.carry);
+  eq('B の前回ご請求額 ＝ A の今回ご請求額（つながっている）', kB.prev, kA.total);
+  eq('B のご入金額は A〜B の間に入った分', kB.received, 50000);
+  eq('B の繰越額 ＝ 110,000 − 50,000', kB.carry, 60000);
+  eq('B の今回ご請求額 ＝ 繰越 ＋ お買上', kB.total, 60000+110000);
+  eq('C の前回ご請求額 ＝ B の今回ご請求額', kC.prev, kB.total);
+
+  /* 過入金: 払いすぎると繰越がマイナスになり、次の請求が減る */
+  _db.payments.push({ id:'PX2', companyId:'CX', date:'2026-08-20', amount:300000, fee:0, status:'確定', allocations:[{invoiceId:'IA',amount:60000},{invoiceId:'IB',amount:110000}] });
+  const kC2=ctx.invoiceCarry(Cc);
+  eq('過入金なら繰越はマイナス', kC2.carry, 220000-350000);
+  eq('過入金ぶん 今回ご請求額が減る', kC2.total, 220000-350000+110000);
+
+  /* ★ 確定したら数字を写す。あとで入金を足しても、送った請求書の数字は変わらない */
+  ctx.confirmInvoice('IC');
+  const frozen=JSON.stringify(ctx.invoiceCarryShown(Cc));
+  _db.payments.push({ id:'PX3', companyId:'CX', date:'2026-08-25', amount:10000, fee:0, status:'確定', allocations:[] });
+  eq('確定後は写した数字のまま', JSON.stringify(ctx.invoiceCarryShown(Cc)), frozen);
+  eq('写した数字だと分かる印', ctx.invoiceCarryShown(Cc).frozen, true);
+
+  /* ★ 繰越は売上に入れない（予実が二重にならない） */
+  const revAug=ctx.actualSeries(2026,'revenue')[0];
+  eq('繰越は売上に入らない（8月の売上＝お買上額の税抜だけ）', revAug >= 100000 && revAug < 100000+60000, true);
+
+  /* 印刷: 繰越の5つの枠と、差出人の登録番号が載る */
+  _db.settings.self={ name:'BIGLIGHT株式会社', invoiceNo:'T1234567890123', bank:'テスト銀行 本店 普通 1234567' };
+  let printed='';
+  ctx.window.open=()=>({ document:{ open:noop, write:h=>{ printed+=h; }, close:noop } });
+  ctx.open=ctx.window.open;
+  try{ ctx.printInvoice('IB'); }catch(e){ console.log('  NG  printInvoice → '+e.message); fail++; }
+  eq('印刷に 今回ご請求額 の枠', printed.includes('今回ご請求額'), true);
+  eq('印刷に 登録番号', printed.includes('T1234567890123'), true);
+  eq('印刷に 振込先', printed.includes('テスト銀行'), true);
+
+  /* 片付け */
+  _db.invoices=keepInv; _db.payments=keepPay;
+  _db.companies=_db.companies.filter(c=>c.id!=='CX'); delete _db.settings.self;
+  ctx.__x.setDB(_db); ctx.DB=_db;
+}
+
 console.log('\n― 画面の入れ替えは1回だけ ―');
 /* ★ 2026-09-13 の不具合の再発防止:
    画面を入れたあとに もう一度 innerHTML を組み直すと、先に作った要素が DOM から

@@ -1907,6 +1907,12 @@ function prepareDoc(entKey, rec, existingId){
   rec.net   = itemsSubtotal(rec.items);
   if(!rec.status) rec.status='作成中';
   if(['確定','一部入金','入金済','一部支払','支払済','延滞','期日超過'].includes(rec.status)) rec.locked = true;
+  /* 請求書を確定で保存したら、そのときの繰越を写す（すでに写してあれば そのまま） */
+  if(isInv && rec.locked){
+    const prevRec = existingId? findById('invoices',existingId) : null;
+    if(prevRec && prevRec.carry) rec.carry = prevRec.carry;
+    else rec.carry = invoiceCarry(Object.assign({id:existingId||'__new__'}, rec));
+  }
   const old = existingId? findById(key,existingId) : null;
   if(old && old.workerSnapshot) rec.workerSnapshot = old.workerSnapshot;
 }
@@ -1981,6 +1987,7 @@ function openDetail(entKey, id){
   openModal(`<h3>${esc(row.name||row.no||E.label)} ${sourceTag(row)}</h3>
     <div class="mdsub">${esc(E.label)}</div>${html}
     <div class="modal-actions">
+      ${entKey==='invoices'?`<button class="btn secondary" onclick="printInvoice('${row.id}')">${IC.print} 請求書を印刷</button>`:''}
       ${canEdit(page)?`<button class="btn secondary" onclick="closeModal();openForm('${entKey}','${row.id}')">編集</button>`:''}
       <button class="btn" onclick="closeModal()">閉じる</button></div>`,
     (entKey==='invoices'||entKey==='bills')?'lg':'');
@@ -2001,6 +2008,12 @@ function docDetailHtml(entKey,row){
       <div class="kpi"><div class="lbl">残高</div><div class="num ${bal>0?'minus':''}">${moneyPlain(bal)}</div></div>
       <div class="kpi"><div class="lbl">状態</div><div style="margin-top:6px;">${statusBadge(st)}</div></div>
     </div>
+    ${isInv? (()=>{ const k=invoiceCarryShown(row); return `<div class="table-wrap" style="margin-bottom:10px;"><table>
+      <thead><tr><th class="r">前回ご請求額</th><th class="r">ご入金額</th><th class="r">繰越額</th><th class="r">今回お買上額</th><th class="r">今回ご請求額</th></tr></thead>
+      <tbody><tr><td class="r num">${moneyPlain(k.prev)}</td><td class="r num">${moneyPlain(k.received)}</td>
+        <td class="r num ${k.carry<0?'':'minus'}">${moneyPlain(k.carry)}</td><td class="r num">${moneyPlain(k.current)}</td>
+        <td class="r num"><b>${moneyPlain(k.total)}</b></td></tr></tbody></table>
+      <div class="fhelp" style="padding:4px 8px;">${k.frozen?`繰越式・確定時点（${esc(k.asOf)}）の数字です。`:'繰越式・まだ確定していないので今日時点の計算です。'}</div></div>`; })() : ''}
     ${kv(isInv?'請求先':'支払先', esc(companyName(row.companyId)))}
     ${kv('計上月', esc(row.bookMonth||''))}
     ${kv(isInv?'発行日':'受領日', esc(row.issueDate||row.recvDate||''))}
@@ -2465,6 +2478,7 @@ function confirmInvoice(id){
   if(!confirm(`請求書 ${inv.no} を確定します。\n確定後は削除できません（取消のみ）。よろしいですか？`)) return;
   inv.status='確定'; inv.locked=true;
   if(!inv.issueDate) inv.issueDate=today();
+  inv.carry = invoiceCarry(inv);            // ★ 送った請求書の数字を写して残す（あとで入金を直しても変わらない）
   markDirty('invoices',inv); renderPage(CURRENT_PAGE); toast('確定しました。','ok');
 }
 
@@ -3707,6 +3721,166 @@ function apAgingDetail(companyId){
 }
 
 /* ============================================================================
+   請求書（繰越式）— 前回ご請求額・ご入金額・繰越額・今回お買上額・今回ご請求額
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-14）: 未回収や過入金は、次の請求書に 繰越式 で載せる。
+
+   ★ 繰越は「売上の明細」には絶対に入れません。入れると、前の月の売上を
+     もう一度 売上として数えてしまう（予実が二重になる）。請求書の上の枠に出すだけ。
+   ★ 数え方（ずっと同じ式・誰に聞かれても同じ説明ができるように）:
+       繰越額       ＝ この請求書より前に出した請求の累計 − この日までに入ったお金の累計（手数料込み）
+       ご入金額     ＝ 前回の請求書の日の翌日 〜 この請求書の日 に入ったお金
+       前回ご請求額 ＝ 繰越額 ＋ ご入金額
+       今回ご請求額 ＝ 繰越額 ＋ 今回お買上額
+     過入金があると 繰越額 はマイナスになり、そのぶん 今回ご請求額 が減ります。
+   ★ 確定した瞬間に数字を写して保存します（公式 §0.8 証拠はスナップショット）。
+     あとから入金を直しても、送った請求書と刷り直した請求書が違う、ということを起こさない。
+   ========================================================================== */
+const invDocDate = inv => inv.issueDate || (inv.bookMonth? monthEnd(inv.bookMonth) : '');
+/** 並び順（日付 → 番号）。同じ日に2枚出したときも前後が決まるように。 */
+const invOrderKey = inv => invDocDate(inv)+'|'+String(inv.no||'')+'|'+String(inv.id||'');
+const received = p => num(p.amount)+num(p.fee);           // 先方負担の振込手数料も「受け取った」うちに入れる
+
+function invoiceCarry(inv){
+  const cid=inv.companyId, key=invOrderKey(inv), asOf=invDocDate(inv);
+  const others=(DB.invoices||[]).filter(i=>String(i.companyId)===String(cid) && String(i.id)!==String(inv.id)
+    && i.status!=='取消' && i.status!=='作成中' && invOrderKey(i) < key)
+    .sort((a,b)=>invOrderKey(a).localeCompare(invOrderKey(b)));
+  const prev=others[others.length-1]||null, prevDate=prev? invDocDate(prev) : '';
+  const pays=(DB.payments||[]).filter(p=>String(p.companyId)===String(cid) && p.status!=='取消' && p.date);
+  const billedBefore=others.reduce((s,i)=>s+docTotal(i),0);
+  const recvUpTo=pays.filter(p=>p.date<=asOf).reduce((s,p)=>s+received(p),0);
+  const recvWindow=pays.filter(p=>p.date<=asOf && (!prevDate || p.date>prevDate)).reduce((s,p)=>s+received(p),0);
+  const carry=billedBefore-recvUpTo, current=docTotal(inv);
+  return { prev: carry+recvWindow, received: recvWindow, carry, current, total: carry+current,
+    asOf, prevNo: prev? (prev.no||'') : '', computedAt: new Date().toISOString() };
+}
+/** 確定済みなら保存した数字、まだなら今の計算。どちらかを画面に明示する。 */
+function invoiceCarryShown(inv){
+  if(inv.carry && inv.carry.asOf) return Object.assign({ frozen:true }, inv.carry);
+  return Object.assign({ frozen:false }, invoiceCarry(inv));
+}
+
+/* ---------- 自社情報（請求書の差出人） ---------- */
+function selfInfo(){ return (DB.settings && DB.settings.self) || {}; }
+function selfInfoPanel(){
+  const s=selfInfo(), ad=isAdmin();
+  const need=!s.name || !s.bank;
+  return `<div class="panel"><div class="panel-hd"><b>自社情報（請求書の差出人）</b>
+      <span class="sub">請求書の右上と お振込先 に印刷されます</span>
+      ${ad?`<button class="btn sm" style="margin-left:auto;" onclick="selfInfoForm()">編集</button>`:''}</div>
+    <div class="panel-bd" style="font-size:13px;line-height:1.9;">
+      ${need?`<div class="warnbar" style="margin-bottom:8px;">${IC.warn} 会社名と振込先が未設定です。請求書を印刷する前に入れてください。</div>`:''}
+      <b>${esc(s.name||'（会社名 未設定）')}</b>　${s.invoiceNo?`登録番号 <b>${esc(s.invoiceNo)}</b>`:'<span style="color:var(--warning);">登録番号 未設定</span>'}<br>
+      ${esc([s.zip?'〒'+s.zip:'', s.address||''].filter(Boolean).join(' '))}${s.tel?'　TEL '+esc(s.tel):''}<br>
+      お振込先：${esc(s.bank||'未設定')}
+    </div></div>`;
+}
+function selfInfoForm(){
+  if(!isAdmin()){ toast('管理者だけが変更できます。','err'); return; }
+  const s=selfInfo();
+  const f=(id,label,v,ph,full)=>`<div class="${full?'full':''}"><label>${esc(label)}</label><input id="${id}" value="${attr(v||'')}" placeholder="${attr(ph||'')}"></div>`;
+  openModal(`<h3>自社情報（請求書の差出人）</h3>
+    <div class="mdsub">請求書に印刷される内容です。適格請求書（インボイス）には登録番号が必要です。</div>
+    <div class="form-grid">
+      ${f('siName','会社名',s.name,'BIGLIGHT株式会社',true)}
+      ${f('siZip','郵便番号',s.zip,'323-0000')}
+      ${f('siTel','電話番号',s.tel,'0285-00-0000')}
+      ${f('siAddr','住所',s.address,'栃木県小山市…',true)}
+      ${f('siNo','適格請求書 登録番号',s.invoiceNo,'T1234567890123')}
+      ${f('siStaff','担当者（任意）',s.staff,'経理部')}
+      ${f('siBank','お振込先',s.bank,'○○銀行 ○○支店 普通 1234567 ビッグライト（カ',true)}
+      <div class="full"><label>請求書の備考（毎回印刷）</label>
+        <textarea id="siNote" placeholder="振込手数料は貴社にてご負担ください。">${esc(s.note||'')}</textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="selfInfoSave()">保存</button></div>`,'lg');
+}
+function selfInfoSave(){
+  const g=id=>(document.getElementById(id).value||'').trim();
+  const no=g('siNo');
+  if(no && !/^T\d{13}$/.test(no)){ toast('登録番号は T＋13桁 の数字です（例: T1234567890123）。','err'); return; }
+  DB.settings=DB.settings||{};
+  DB.settings.self={ name:g('siName'), zip:g('siZip'), tel:g('siTel'), address:g('siAddr'), invoiceNo:no,
+    staff:g('siStaff'), bank:g('siBank'), note:(document.getElementById('siNote').value||'').trim() };
+  PENDING.changed.settings=DB.settings; schedulePush();
+  closeModal(); renderPage(CURRENT_PAGE); toast('保存しました。','ok');
+}
+
+/* ---------- 印刷（A4・1枚） ---------- */
+function printInvoice(id){
+  const inv=findById('invoices',id); if(!inv) return;
+  const c=findById('companies',inv.companyId)||{};
+  const s=selfInfo(), k=invoiceCarryShown(inv);
+  /* 税率ごとの合計（適格請求書は 税率ごとに 対象額と消費税額 を書く） */
+  const byRate={};
+  (inv.items||[]).forEach(it=>{
+    const cat=it.taxCat||'課税10%', amt=itemAmount(it);
+    byRate[cat]=byRate[cat]||{base:0,tax:0};
+    byRate[cat].base+=amt; byRate[cat].tax+=Math.floor(amt*(TAX_RATE[cat]||0));
+  });
+  const yen=v=>moneyPlain(v);
+  const rows=(inv.items||[]).map(it=>`<tr><td>${esc(it.name||accountLabel(it.accountCode))}</td>
+    <td class="r">${it.qty!=null&&it.qty!==''?esc(it.qty):''}</td><td class="r">${it.price?yen(it.price):''}</td>
+    <td class="r">${yen(itemAmount(it))}</td><td class="c">${esc((it.taxCat||'課税10%').replace('課税',''))}</td></tr>`).join('');
+  const rateRows=Object.keys(byRate).map(cat=>`<tr><td>${esc(cat)} 対象</td><td class="r">${yen(byRate[cat].base)}</td>
+    <td class="r">${TAX_RATE[cat]?yen(byRate[cat].tax):'—'}</td></tr>`).join('');
+  const sub=itemsSubtotal(inv.items), tax=itemsTax(inv.items);
+
+  const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>請求書 ${esc(inv.no||'')}</title>
+<style>
+  @page{size:A4;margin:14mm 14mm 12mm;}
+  *{box-sizing:border-box;} body{font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;color:#111;font-size:11pt;margin:0;}
+  h1{font-size:22pt;letter-spacing:.6em;text-align:center;margin:0 0 8mm;font-weight:600;}
+  .top{display:flex;justify-content:space-between;gap:10mm;}
+  .to{font-size:14pt;border-bottom:1px solid #111;padding-bottom:2mm;min-width:90mm;}
+  .me{text-align:right;font-size:9.5pt;line-height:1.6;}
+  .meta{font-size:9.5pt;text-align:right;margin-bottom:4mm;}
+  .lead{margin:6mm 0 3mm;}
+  table{width:100%;border-collapse:collapse;} th,td{border:1px solid #444;padding:2mm 2.5mm;font-size:9.5pt;}
+  th{background:#eef2f7;font-weight:600;} .r{text-align:right;font-variant-numeric:tabular-nums;} .c{text-align:center;}
+  .carry th{font-size:9pt;} .carry td{font-size:12pt;text-align:right;height:12mm;}
+  .carry .big{font-size:15pt;font-weight:700;background:#fff8e1;}
+  .due{margin:3mm 0 6mm;font-size:10.5pt;}
+  .sumtbl{width:62mm;margin-left:auto;margin-top:3mm;} .sumtbl td{border:1px solid #444;}
+  .bank{margin-top:6mm;border:1px solid #444;padding:3mm;font-size:10pt;}
+  .note{margin-top:4mm;font-size:9pt;white-space:pre-wrap;color:#333;}
+  .flag{font-size:8pt;color:#777;margin-top:2mm;}
+</style></head><body>
+<div class="meta">請求番号：${esc(inv.no||'')}<br>発行日：${esc(inv.issueDate||today())}</div>
+<h1>請求書</h1>
+<div class="top">
+  <div><div class="to">${esc(c.name||'')} 御中</div>
+    <div style="font-size:9pt;margin-top:2mm;">${esc([c.zip?'〒'+c.zip:'', c.address||''].filter(Boolean).join(' '))}</div></div>
+  <div class="me"><b style="font-size:11.5pt;">${esc(s.name||'')}</b><br>
+    ${esc([s.zip?'〒'+s.zip:'', s.address||''].filter(Boolean).join(' '))}<br>
+    ${s.tel?'TEL '+esc(s.tel)+'<br>':''}${s.invoiceNo?'登録番号 '+esc(s.invoiceNo)+'<br>':''}${s.staff?'担当 '+esc(s.staff):''}</div>
+</div>
+<div class="lead">下記のとおりご請求申し上げます。（${esc(inv.bookMonth||'')} 分）</div>
+<table class="carry"><thead><tr><th>前回ご請求額</th><th>ご入金額</th><th>繰越額</th><th>今回お買上額</th><th>今回ご請求額</th></tr></thead>
+  <tbody><tr><td>${yen(k.prev)}</td><td>${yen(k.received)}</td><td>${yen(k.carry)}</td><td>${yen(k.current)}</td>
+    <td class="big">${yen(Math.max(0,k.total))}</td></tr></tbody></table>
+${k.total<0?`<div class="due">ご入金超過額 <b>${yen(-k.total)}</b> は、次回のご請求に充当いたします。</div>`
+  :`<div class="due">お支払期限：<b>${esc(inv.dueDate||'')}</b></div>`}
+<table><thead><tr><th>内容</th><th style="width:16mm;">数量</th><th style="width:26mm;">単価</th><th style="width:30mm;">金額（税抜）</th><th style="width:16mm;">税率</th></tr></thead>
+  <tbody>${rows||'<tr><td colspan="5" class="c">明細なし</td></tr>'}</tbody></table>
+<table class="sumtbl"><tbody>
+  ${rateRows}
+  <tr><td>小計（税抜）</td><td class="r" colspan="2">${yen(sub)}</td></tr>
+  <tr><td>消費税</td><td class="r" colspan="2">${yen(tax)}</td></tr>
+  <tr><td><b>今回お買上額</b></td><td class="r" colspan="2"><b>${yen(sub+tax)}</b></td></tr>
+</tbody></table>
+<div class="bank"><b>お振込先</b>　${esc(s.bank||'')}</div>
+${(s.note||inv.note)?`<div class="note">${esc([s.note||'', inv.note&&!/^【デモ】|自動作成/.test(inv.note)?inv.note:''].filter(Boolean).join('\\n'))}</div>`:''}
+<div class="flag">${k.frozen?`繰越額は確定時点（${esc(k.asOf)}）の数字です。`:'※ まだ確定していないため、繰越額は今日時点の計算です。'}</div>
+${'<scr'+'ipt>'}window.onload=function(){ setTimeout(function(){ window.print(); }, 250); };${'</scr'+'ipt>'}
+</body></html>`;
+  const w=window.open('', '_blank');
+  if(!w){ toast('ポップアップが止められました。ブラウザの設定で このサイトのポップアップを許可してください。','err'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+/* ============================================================================
    取引先別（回収）／ 支払先別（支払）— 「この期間、どの会社と、いくら動いたか」
    ----------------------------------------------------------------------------
    利用者の指示（2026-09-14）:
@@ -3774,8 +3948,15 @@ function coNextBilling(companyId){
   const current = itemsSubtotal(items)+itemsTax(items);
   const unpaid = arBalanceOf(companyId);
   const over = coOverpaid('ar', companyId);
-  const carry = unpaid - over;
-  return { ym, items, current, unpaid, over, carry, total: carry + current };
+  /* 繰越は 印刷する請求書と同じ式で出す（ここと請求書で数字が違うのが一番まずい）。
+     次に出す請求書を「その月の末日付け」で仮に置いて invoiceCarry に数えさせる。
+     ★ 今日付けにしてはいけない: 今月分がすでに月末日付けで確定していると、
+       今日より後の日付なので「前の請求」に数えられず、繰越が1か月分少なく出る（テストで発覚）。 */
+  const k = invoiceCarry({ id:'__next__', companyId, bookMonth:ym, issueDate:monthEnd(ym), status:'作成中', items });
+  const carry = k.carry;
+  /* 未回収−過入金 と ずれるのは、取消した請求に入金を結び付けたまま など、データの食い違いがあるとき */
+  const diff = carry - (unpaid - over);
+  return { ym, items, current, unpaid, over, carry, diff, total: carry + current };
 }
 
 /** 一覧の行。期間の数字は期間で、残高と評価は「いま」で出す。 */
@@ -3889,6 +4070,7 @@ function viewCoDetail(side, companyId){
     <div class="panel-bd"><table style="max-width:460px;font-size:13.5px;"><tbody>
       <tr><td>前回までの未回収</td><td class="r num">${moneyPlain(nb.unpaid)}</td></tr>
       <tr><td>過入金（差し引き）</td><td class="r num" style="color:var(--purple);">${nb.over?'− '+moneyPlain(nb.over):'0'}</td></tr>
+      ${nb.diff?`<tr><td style="color:var(--warning);">差額（取消した請求への入金・手数料の扱いなど）</td><td class="r num" style="color:var(--warning);">${moneyPlain(nb.diff)}</td></tr>`:''}
       <tr style="border-top:1px solid var(--border);"><td><b>繰越額</b></td><td class="r num"><b>${moneyPlain(nb.carry)}</b></td></tr>
       <tr><td>今回お買上額（請求ルール）
         ${nb.items.length?`<div class="muted" style="font-size:11px;">${nb.items.map(x=>esc(x.name)).join('、')}</div>`
@@ -6144,6 +6326,8 @@ function viewSettings(){
     <div class="panel"><div class="panel-hd"><b>会計年度</b></div>
       <div class="panel-bd"><div style="font-size:13px;">8月1日 〜 翌年7月31日（${fyLabel(CUR_FY)}）<br>
         <span class="muted" style="font-size:12px;">四半期：Q1=8〜10月／Q2=11〜1月／Q3=2〜4月／Q4=5〜7月</span></div></div></div>
+
+    ${selfInfoPanel()}
 
     ${isAdmin()? demoPanel() : ''}
 
