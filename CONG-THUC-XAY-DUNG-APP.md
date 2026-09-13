@@ -7,6 +7,9 @@
 >
 > Cách dùng: đọc §0 → copy §2 (design tokens) → khai báo lại §4 (ENTITIES) → phần còn lại giữ nguyên.
 > **Đổi ứng dụng = đổi bảng khai báo, KHÔNG đổi engine.**
+>
+> **Bản gốc của tài liệu này nằm ở `~/Projects/biglight-crm/CONG-THUC-XAY-DUNG-APP.md`** (2026-09-13).
+> Các repo khác giữ bản sao; sửa thì sửa ở CRM rồi chép sang, đừng sửa hai nơi.
 
 ---
 
@@ -31,6 +34,7 @@
 | 14 | In ấn · PDF · Excel · CSV | Không |
 | 15 | Checklist dựng app mới | — |
 | 16 | Anti-pattern — bài học từ sự cố thật | Không |
+| 17 | Mở dữ liệu cho AI & tự động hoá (khoá API + MCP) | Thêm khi cần |
 
 ---
 
@@ -1348,6 +1352,13 @@ hầu như luôn do trộn đơn vị px với mm.
 11. Mẫu email cho từng trang (biến `{{}}` đã tự có).
 12. Dashboard: chọn 4–6 khối màu, mỗi khối = một câu hỏi quản lý.
 
+### Ngày 4 — Mở cho AI (tuỳ chọn, làm sau khi nghiệp vụ đã chạy)
+
+13. Chỉ làm khi có người thật sự cần hỏi dữ liệu bằng AI. Không mở "cho có".
+14. Khai `COLLECTIONS` (§17.2) — mỗi màn 1 dòng, scope tự sinh.
+15. Bật khoá API + màn cấp quyền (§17.1, §17.3).
+16. Dựng MCP đọc trước (§17.4–17.6). Ghi chỉ thêm khi chủ dự án quyết định (§17.7).
+
 ### Trước khi bàn giao — 12 câu kiểm
 
 - [ ] Cache rỗng → app hiện "đang tải", **không** sinh dữ liệu mẫu?
@@ -1407,6 +1418,266 @@ ghi comment "khôi phục = bỏ comment 1 dòng này".**
 ### ❌ Sửa file HTML lớn bằng công cụ đổi kiểu xuống dòng
 LF → CRLF hoặc chèn NUL giữa file → trang trắng, diff khổng lồ, không tìm ra chỗ hỏng.
 **→ Sửa bằng công cụ giữ nguyên byte; kiểm tra `file`/`hexdump` trước khi commit.**
+
+### ❌ Bước kiểm tra cuối workflow dùng `set +e` (2026-09-12)
+Workflow bật MCP in ra mã HTTP rồi **kết thúc xanh**, trong khi `.env` nhận `MCP_ENABLED=` (rỗng)
+và route không mọc. Xanh mà hỏng là tệ hơn đỏ.
+**→ Bước xác minh phải đỏ được: khẳng định mã trả về mong đợi rồi `exit 1` kèm gợi ý nguyên nhân.**
+
+### ❌ `envs:` của ssh-action tưởng tự lấy `inputs` (2026-09-12)
+`envs: ENABLE,PUBLIC_URL` chỉ *chuyển tiếp* biến môi trường của job. Thiếu khối `env:` ánh xạ
+`inputs` thì biến tới VPS là rỗng — và `.env` nhận giá trị rỗng một cách im lặng.
+**→ Mỗi tên trong `envs:` phải có một dòng trong `env:`. Ghi cả hai cạnh nhau.**
+
+### ❌ Lọc dữ liệu ở một lớp rồi mở thêm lớp thứ hai (2026-09-12)
+`fields.ts` ghi rõ "個人番号 không bao giờ trả qua API", nhưng lớp đọc-theo-màn thêm sau
+(`publicRow`) không đi qua luật đó → khoá chỉ có `candidate.read` đọc được マイナンバー.
+**→ Mỗi lớp trả dữ liệu ra ngoài phải có denylist của riêng nó. Hai tầng, không phải một.**
+
+### ❌ Đếm "thất bại xác thực" gộp chung với thành công (2026-09-12)
+Bộ đếm chống dò khoá dùng chung cho cả lần ủy quyền thành công và token hỏng của cửa khác
+→ dùng đúng 10 lần là bị khoá 10 phút.
+**→ Chỉ đếm đúng sự kiện sai. Mỗi loại sai một bộ đếm riêng.**
+
+### ❌ Gấp phần tuỳ chọn vào `<details>` rồi gọi là "tối giản" (2026-09-12)
+Người dùng nói "mất hết các trang để tick". Nút chọn nhanh là *lối tắt*, không thay được
+quyền chọn tay.
+**→ Mức dựng sẵn thì thêm vào, nhưng lưới tuỳ chọn phải luôn nhìn thấy.**
+
+---
+
+# §17. MỞ DỮ LIỆU CHO AI & TỰ ĐỘNG HOÁ (khoá API + MCP)
+
+> Bản chạy thật: `biglight-crm` — `backend/src/apiv1/*` (REST) và `backend/src/mcp/*` (MCP),
+> production 2026-09-12. Tài liệu bàn giao: `docs/mcp-server.md`, `docs/api-v1-power-automate.md`.
+> Chương này **thêm vào** app đã chạy; không đụng gì tới §1–§14.
+
+## 17.0 Hai cửa, một loại khoá
+
+| Cửa | Ai đi | Đường | Làm được gì |
+|---|---|---|---|
+| **API v1** (REST) | Power Automate, AI Builder, hệ thống ngoài | `/api/v1/*`, header `X-API-Key` | đọc · **đề xuất** sửa (vào 確認待ち) · tải file |
+| **MCP** | ChatGPT và mọi AI client nói MCP | `/mcp`, JSON-RPC + Bearer token | đọc · (nếu cấp) tạo/sửa/xoá thẳng |
+
+Cả hai dùng **một loại khoá** `bl_live_…`. Đừng làm hai hệ thống khoá: thu hồi một chỗ,
+nhật ký một chỗ, màn quản lý một chỗ.
+
+**Bảy nguyên tắc, viết ngay đầu `mcp/server.ts`:**
+
+1. AI không nói chuyện với database. AI → MCP → hàm của app → `app_state`.
+2. Không có tool "chạy SQL", "gọi URL bất kỳ", "xoá hàng loạt". Tool là **hàm có tên, có schema**.
+3. Khoá thật không bao giờ sang AI. AI cầm **token có hạn**, khoá chỉ đi qua màn ủy quyền một lần.
+4. Scope đọc lại từ DB **mỗi request** → thu hồi khoá là chết ngay, không chờ token hết hạn.
+5. Một người một khoá, tên khoá là tên người. Dùng chung thì nhật ký không biết ai làm.
+6. Đọc mặc định, ghi phải cấp riêng từng màn, xoá phải cấp riêng nữa.
+7. Mọi lần gọi tool đều vào `audit_log` — cả lần bị từ chối.
+
+## 17.1 Khoá API
+
+```
+api_integrations(id, name, key_hash, key_prefix, key_last4, scopes jsonb,
+                 status, created_by/at, last_used_at, expires_at, revoked_at, rotated_from)
+```
+
+| Luật | Vì sao |
+|---|---|
+| Khoá = `bl_live_` + 40 ký tự ngẫu nhiên; DB chỉ giữ **SHA-256** | lộ DB không lộ khoá |
+| Hiện **một lần** lúc tạo, sau đó chỉ mask `bl_live_xxxx••••••93Ks` | không có chỗ nào "xem lại khoá" |
+| Không có khoá tổng | mất một khoá không mất cả hệ thống |
+| Xoay khoá = tạo khoá mới + khoá cũ chuyển `rotating` có `expires_at` | đổi khoá không làm đứt việc |
+| `last_used_at` cập nhật tối đa 1 lần/phút | tránh UPDATE mỗi request |
+| Rate limit trong RAM theo IP và theo khoá | 1 container, không cần Redis |
+
+## 17.2 Scope sinh từ台帳 màn hình — viết tên một lần
+
+```ts
+// apiv1/collections.ts — thêm 1 màn = thêm 1 dòng, scope tự sinh
+export interface CollectionDef {
+  id: string          // tên ra ngoài (snake_case)
+  crmKey: string      // tên mảng trong app_state
+  label: string       // tên tiếng Nhật của màn
+  page: string        // trang trong hệ phân quyền (§9)
+  readScope: string   // '<id>.read'
+  hidden?: string[]   // trường không trả ra
+  danger?: boolean    // dính thông tin cá nhân → không nằm trong mức dựng sẵn
+}
+export const COLLECTION_SCOPES       = COLLECTIONS.map(c => ({ id: c.readScope, ... }))
+export const COLLECTION_WRITE_SCOPES = COLLECTIONS.flatMap(c => [
+  { id: c.id + '.write',  ... },   // sửa + tạo mới
+  { id: c.id + '.delete', ... },   // xoá
+])
+```
+
+**Hai tầng lọc dữ liệu ra ngoài, không phải một** (xem anti-pattern §16):
+
+1. `publicRow(def, row)` — bỏ `hidden` của màn + tự nhận diện file (chuỗi base64 dài, object có `data`)
+   và thay bằng `{attached:true}`.
+2. Denylist riêng của MCP — `individualNumber`, `password`, `pin`, `token`, `secret`… so khớp
+   sau khi bỏ `_`/`-` và hạ chữ thường, để `my_number` hay `apiKey` cũng dính.
+
+## 17.3 Màn cấp quyền — hỏi 2 câu, không bắt đọc 50 ô
+
+```
+用途:  ( ) AI (MCP) — đọc, mỗi người một khoá     ( ) API連携 — Power Automate, có ghi
+権限:  ( ) 基本  ( ) 全画面  ( ) 全画面＋個人情報  ( ) 編集  ( ) 編集＋削除
+       [lưới tick từng màn + từng quyền — LUÔN hiện, để thêm bớt sau khi chọn mức]
+```
+
+| Mức | Gồm |
+|---|---|
+| 基本 | các màn lõi (người · việc làm · tổ chức · vào/ra) |
+| 全画面 | mọi màn `read`, trừ màn `danger` |
+| 全画面＋個人情報 | thêm màn `danger` (chỉ quản trị) |
+| 編集 | 全画面 + `.write` (không gồm màn `danger`) |
+| 編集＋削除 | thêm `.delete` |
+
+Mỗi ô có nhãn nói **cửa nào dùng được**: `AI + API` (mọi `*.read`), `AI が直接 書き換え`,
+`AI が直接 削除`, `API のみ` (các quyền đề xuất/ghi của REST). Danh sách khoá cũng đeo nhãn
+`読むだけ（AI可）` / `AI が書き換えできる` / `AI が削除できる` để nhìn một cái biết khoá nào nguy hiểm.
+
+> Người dùng sẽ hỏi "nhìn vào đây sao biết ô nào cấp cho AI?". Trả lời bằng **nhãn tại chỗ**,
+> đừng bắt họ nhớ.
+
+## 17.4 MCP server — hình dạng tối thiểu
+
+| Đường | Việc |
+|---|---|
+| `POST /mcp` | JSON-RPC 2.0: `initialize` · `ping` · `tools/list` · `tools/call` |
+| `GET /mcp` · `DELETE /mcp` | 405 — không mở SSE, không giữ phiên |
+| `GET /.well-known/oauth-protected-resource[/mcp]` | RFC 9728 |
+| `GET /.well-known/oauth-authorization-server[/mcp]` | RFC 8414 |
+| `/mcp/oauth/{authorize,token,register}` | §17.5 |
+| `GET /mcp/health` | kiểm tra nhanh, không cần token |
+
+**Streamable HTTP trả JSON, không SSE.** Tool nào cũng dưới 1 giây, không có gì để phát dần;
+JSON không dính buffer/timeout của nginx và Caddy. Khai cả ba phiên bản giao thức
+(`2025-11-25`, `2025-06-18`, `2025-03-26`) và trả đúng bản client xin.
+
+**Cửa nào cần token:**
+
+| Method | Token | Vì sao |
+|---|---|---|
+| `initialize`, `ping`, `tools/list`, `resources/list`, `prompts/list` | **không** | AI client liệt kê "hành động" lúc đăng ký app, khi đó chưa có token. Trả 401 ở đây thì app bị đóng băng với **0 hành động**. Chỉ lộ tên và mô tả tool, không lộ dữ liệu. |
+| `tools/call` | **có** | đây mới là chỗ dữ liệu đi ra |
+
+Một request gộp nhiều lệnh mà có **một** lệnh cần token thì cả request phải có token.
+
+## 17.5 OAuth 2.1 cho AI client
+
+AI client chỉ cho chọn "OAuth" hoặc "không xác thực" — không có ô nhập khoá API. Nên dựng
+một máy chủ ủy quyền nhỏ **ngay trong app**:
+
+```
+AI  ──authorize──▶  màn 「AI連携の許可」 của app  ──nhân viên dán khoá bl_live_──▶  code
+AI  ──token(code + code_verifier)──▶  access_token (HMAC, 1 giờ) + refresh_token (30 ngày)
+AI  ──Bearer token──▶  /mcp  ──▶  nạp lại khoá từ DB  ──▶  scope hiệu lực = scope token ∩ scope khoá
+```
+
+| Điểm | Chốt |
+|---|---|
+| PKCE `S256` | bắt buộc, khai trong metadata |
+| Client | **public**, không secret (không có đường an toàn để phát secret cho AI) |
+| Đăng ký động (DCR) | `client_id` là **chuỗi ký HMAC** chứa `redirect_uris` → không cần bảng |
+| `redirect_uri` | allowlist tuyệt đối theo host của nhà cung cấp AI; sai thì 400, **không** redirect |
+| Token | tự chứa (id khoá · `aud` · scope · hạn), ký HMAC bằng `MCP_TOKEN_SECRET` → không cần bảng token |
+| Thu hồi | không cần xoá token: mỗi request nạp lại khoá, khoá chết là token chết |
+| Scope client xin | cấp **phần giao** với khoá; chỉ từ chối khi giao rỗng. AI thường xin *tất cả* scope nó thấy trong metadata, chặn cứng là không ai kết nối được |
+| Mã ủy quyền | RAM, 5 phút, dùng một lần |
+| 401 | kèm `WWW-Authenticate: Bearer resource_metadata="…"` để client tự tìm đường đăng nhập |
+
+Màn ủy quyền chỉ có một ô: dán khoá. Nó hiện tên client và danh sách quyền sắp cấp, và nói rõ
+"khoá không sang AI".
+
+## 17.6 Viết tool
+
+```ts
+interface ToolDef {
+  name: string; title: string; description: string
+  scope: string                                  // '' nếu quyền phụ thuộc tham số
+  inputSchema: any                               // JSON Schema, additionalProperties: false
+  run: (ctx, args) => Promise<any>
+  scopeFor?: (args) => string | null             // màn chọn bằng tham số → quyền tính lúc gọi
+  visible?: (scopes) => boolean                  // ẩn khỏi tools/list nếu khoá không có quyền
+  annotations?: { readOnlyHint; destructiveHint; idempotentHint }
+}
+```
+
+**Hai nhóm tool, cả hai đều cần:**
+
+- *Nghiệp vụ* — `search_workers`, `get_current_employment`, `list_expiring_residence`…
+  Đặt tên theo câu hỏi người ta hay hỏi. Gộp sẵn dữ liệu liên quan (người + công ty + trạng thái)
+  để AI không phải gọi ba lần.
+- *Tổng quát* — `list_screens` → `search_records` → `get_record`. Ba tool này phủ **mọi** màn,
+  nên tick thêm một màn trong màn cấp quyền là AI đọc được ngay, không phải viết thêm code.
+  Nếu chỉ có tool nghiệp vụ, người dùng tick ô mà chẳng thấy gì thay đổi.
+
+**Chốt khi viết:**
+
+- Xác thực tham số **trước**, tính scope **sau** (tool chọn màn bằng tham số thì chưa biết quyền nào cần).
+- Sai đầu vào, không tìm thấy, thiếu quyền → trả `isError: true` kèm `error`/`message` **trong kết quả**,
+  không phải lỗi JSON-RPC. AI đọc được thì tự sửa lời gọi.
+- Trả kèm `structuredContent` để client không phải parse chuỗi.
+- `readOnlyHint: true` cho tool đọc; tool xoá phải `destructiveHint: true` để client hỏi lại người dùng.
+- `tools/list` chỉ hiện tool mà khoá có quyền (trừ lúc chưa có token, §17.4).
+
+## 17.7 Cho AI ghi — chỉ khi chủ dự án quyết định
+
+Mặc định **không** mở. Có hai đường, chọn theo mức độ chấp nhận rủi ro:
+
+| Đường | Cách | Khi nào |
+|---|---|---|
+| **Đề xuất** (khuyến nghị) | AI ghi vào 確認待ち; nhân viên có quyền sửa mới bấm 反映 | dữ liệu đọc từ giấy tờ, dữ liệu nhạy cảm |
+| **Ghi thẳng** | `create_record` / `update_record` / `delete_record` | chủ dự án chấp nhận, đã có audit + khôi phục |
+
+Nếu mở ghi thẳng, **rào chắn nằm ở đường ghi, không nằm ở lời dặn AI**:
+
+- Đi đúng một hàm ghi của server (§6 `commitRecord` phía backend): `BEGIN → SELECT FOR UPDATE →
+  lưu ảnh cũ vào `app_state_history` → ghi → COMMIT → bump rev → SSE → mirror`. Không viết đường ghi thứ hai.
+- `updatedBy = 'mcp:<tên khoá>'` để nhật ký chỉ đúng người.
+- **Không bao giờ ghi được**: `id`, mã hiển thị, ngày tạo/sửa, **trường trạng thái** (máy trạng thái §6),
+  số định danh cá nhân, mật khẩu, file.
+- Trường tham chiếu (`workerId`…) **chỉ nhận lúc tạo mới** và phải trỏ tới dòng có thật.
+  Cho sửa tham chiếu là mở đường gán nhầm hồ sơ sang người khác.
+- Giá trị đi qua đúng bộ kiểm tra của form (ngày, danh sách chọn, định dạng mã) — cùng module với §6.
+- Bản ghi mới nhận trạng thái đầu của quy trình, không cho AI chọn.
+- Xoá: bắt buộc `confirm: true`, **từ chối nếu có dòng khác tham chiếu**, và ghi **nguyên dòng đã xoá**
+  vào audit (RCA 2026-07-31: xoá với `detail={}` là không dựng lại được).
+- Audit của mỗi lần ghi có `changes` (cũ→mới) hoặc `created`/`removed`; không trả phần này ra cho AI.
+
+## 17.8 Hạ tầng, bật và tắt
+
+```nginx
+# cùng tên miền với app → không CORS, không preflight
+location ^~ /mcp                 { proxy_pass http://backend:4000; ... }
+location ^~ /.well-known/oauth-  { proxy_pass http://backend:4000; ... }
+```
+
+| Biến | Việc |
+|---|---|
+| `API_V1_ENABLED` | bật REST + màn quản lý khoá |
+| `MCP_ENABLED` | bật `/mcp`; tắt là route trả 404, dữ liệu nằm yên |
+| `MCP_PUBLIC_URL` | vừa là `issuer` vừa là `resource` — phải khớp URL người dùng gõ |
+| `MCP_TOKEN_SECRET` | ≥32 ký tự, sinh **trên máy chủ**, không in ra log; đổi = mọi token chết |
+| `MCP_OAUTH_REDIRECT_URIS` / `_PREFIXES` | allowlist redirect của nhà cung cấp AI |
+| `MCP_OAUTH_ALLOW_DCR` | cho phép đăng ký động |
+
+Bật/tắt bằng workflow tay, không bằng push. Workflow phải: sao lưu `.env` → sửa → dựng lại →
+**kiểm tra từ ngoài và đỏ được** (health 200, metadata 200, `POST /mcp` không token trả 401).
+Rollback: chạy lại với `enable=false`; cắt một người: 失効 khoá của người đó; cắt tất cả: xoay
+`MCP_TOKEN_SECRET`.
+
+## 17.9 Checklist mở API + MCP
+
+- [ ] Mỗi màn trong `COLLECTIONS` có `hidden` đúng, màn dính thông tin cá nhân có `danger`?
+- [ ] Thử khoá chỉ có một scope: `tools/list` có đúng số tool, gọi tool khác có bị từ chối?
+- [ ] 失効 khoá rồi gọi lại: 401 ngay, không chờ token hết hạn?
+- [ ] Không token: `tools/list` chạy, `tools/call` 401 kèm `WWW-Authenticate`?
+- [ ] `redirect_uri` lạ → 400 và **không** redirect?
+- [ ] Tìm chuỗi khoá, token, `*_SECRET` trong response, log, audit, trang HTML — không còn dấu vết?
+- [ ] Số định danh cá nhân và mật khẩu không ra qua **bất kỳ** tool nào, kể cả tool tổng quát?
+- [ ] Sửa qua AI: `操作履歴` hiện cũ→mới, đúng tên khoá; máy khác nhận thay đổi qua SSE?
+- [ ] Xoá qua AI: thiếu `confirm` thì từ chối; dòng có tham chiếu thì từ chối; dòng đã xoá còn nguyên trong audit?
+- [ ] Tắt `MCP_ENABLED`: mọi đường trả 404 và app cũ chạy y như trước?
 
 ---
 
