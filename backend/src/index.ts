@@ -14,7 +14,9 @@ import { pool, ensureTables, cfgGet, cfgSet } from './db'
 import { verifyBearer, loginWithToken, profileOf, canWriteAtAll } from './auth'
 import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from './merge'
 import { checkCollections, checkMoneyRules } from './authz'
-import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY, CSV_MAP_WORKER, CSV_MAP_ASSIGN } from './crmsync'
+/* CSV_MAP_WORKER / CSV_MAP_ASSIGN は crmsync.ts に残してあります（人を扱う必要が戻ったら
+   この import と下の map の分岐を足すだけ。公式 §16「使わなくなってもコードは消さない」）。 */
+import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY } from './crmsync'
 /* ───── 外部連携（読み取り専用）— 公式 §17 ─────
    API_V1_ENABLED=true のときだけ /api/v1 と鍵の管理画面が生えます。
    外す = この import と下の if(API_V1_ENABLED) の塊、src/apiv1・src/mcp を消すだけ。
@@ -533,8 +535,12 @@ app.post('/crm/import-csv', async (req, res) => {
   const text = typeof req.body === 'string' ? req.body : String(req.body?.csv || '')
   if (!text.trim()) return res.status(400).json({ error: 'empty-csv' })
   const rows = parseCsv(text)
-  const map = kind === 'companies' ? CSV_MAP_COMPANY : kind === 'workers' ? CSV_MAP_WORKER : kind === 'assignments' ? CSV_MAP_ASSIGN : null
-  if (!map) return res.status(400).json({ error: 'bad-kind', message: 'kind = companies | workers | assignments' })
+  /* ★ 2026-09-13: 取り込むのは所属機関（取引先）だけ。人はCRMが正で、ここでは扱いません。
+     workers / assignments を受け付けたままにすると、runCrmSync が黙って捨てるので
+     「取り込んだつもりで何も入っていない」になります。その道を塞ぎます。 */
+  const map = kind === 'companies' ? CSV_MAP_COMPANY : null
+  if (!map) return res.status(400).json({ error: 'bad-kind',
+    message: '取り込めるのは 所属機関（companies）だけです。特定技能者・雇用はこのシステムでは扱いません。' })
   const recs = csvToRecords(rows, map)
   if (!recs.length) return res.status(400).json({ error: 'no-rows', message: 'CSVから有効な行が読み取れませんでした（列見出しをご確認ください）。' })
   const out = await runCrmSync('csv', email, { [kind]: recs })

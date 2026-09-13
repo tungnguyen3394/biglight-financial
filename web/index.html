@@ -406,7 +406,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   </div>
   <div class="topsearch">
     <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input id="quickSearch" placeholder="取引先・請求書・特定技能者を検索…" oninput="globalSearch(this.value)" autocomplete="off">
+    <input id="quickSearch" placeholder="取引先・請求書・支払請求を検索…" oninput="globalSearch(this.value)" autocomplete="off">
     <div id="searchResults" class="ac-list"></div>
   </div>
   <div class="top-right">
@@ -4685,7 +4685,7 @@ function viewDashboard(){
   const empty = !(DB.invoices||[]).length && !(DB.budgets||[]).length;
   const guide = empty? `<div class="panel"><div class="panel-hd"><b>はじめかた</b><span class="sub">この順番で進めると迷いません</span></div>
     <div class="panel-bd"><ol style="margin:0;padding-left:20px;line-height:2;font-size:13px;">
-      <li><b>CRM連携</b>で 所属機関・特定技能者 を取り込む → <a onclick="goto('crmlink')" style="color:var(--primary);cursor:pointer;">CRM連携へ</a></li>
+      <li><b>CRM連携</b>で 所属機関（取引先）を取り込む → <a onclick="goto('crmlink')" style="color:var(--primary);cursor:pointer;">CRM連携へ</a></li>
       <li><b>取引先管理</b>で会社ごとの<b>請求ルール</b>（単価×人数など）と支払サイトを設定 → <a onclick="goto('companies')" style="color:var(--primary);cursor:pointer;">取引先へ</a></li>
       <li><b>請求管理</b>で「請求を作成（月まとめ）」→ 内容を確認して確定 → <a onclick="goto('invoices')" style="color:var(--primary);cursor:pointer;">請求へ</a></li>
       <li><b>予実管理</b>で年間予算を入力（前年実績からの作成も可） → <a onclick="goto('yojitsu')" style="color:var(--primary);cursor:pointer;">予実へ</a></li>
@@ -5251,7 +5251,7 @@ async function demoRemove(quiet){
    ⑭ CRM連携 / ユーザー / 操作履歴 / 設定
    ========================================================================== */
 function viewCrmLink(){
-  return pageShell({ title:'CRM連携', sub:'crm.biglight.jp から 所属機関・特定技能者・雇用（在籍期間）を取り込みます。取り込みは一方向で、CRMには何も書き戻しません。',
+  return pageShell({ title:'CRM連携', sub:'crm.biglight.jp から 所属機関（取引先）を取り込みます。取り込みは一方向で、CRMには何も書き戻しません。',
     tools:`${(isAdmin()||myRole()==='Manager')?`<button class="btn" onclick="crmSyncNow()">今すぐ同期</button>`:''}
       ${toolsMenu(`<button class="btn secondary" onclick="crmCsvModal()">${IC.import} CSVから取り込む（予備）</button>`)}`,
     body:`<div id="crmStatus"><div class="empty">読み込み中…</div></div>
@@ -5309,8 +5309,8 @@ function crmCsvModal(){
     <div class="mdsub">CRMの一覧画面から出力したCSVを貼り付けます。API連携が使えないときの予備です。</div>
     <div class="form-grid">
       <div class="full"><label>種類</label><select id="csvKind">
-        <option value="companies">所属機関情報</option><option value="workers">特定技能者情報</option>
-        <option value="assignments">雇用（在籍期間）</option></select></div>
+        <option value="companies">所属機関情報（取引先）</option></select>
+        <div class="fhelp">特定技能者・雇用は取り込まなくなりました（人はCRMが正）。</div></div>
       <div class="full"><label>CSVの中身（1行目に列見出し）</label>
         <textarea id="csvText" style="min-height:170px;font-family:ui-monospace,monospace;font-size:12px;" placeholder="ID,所属機関名,フリガナ,..."></textarea>
         <div class="fhelp">列見出しで判断します。並び順は自由です。CRMの「Excel／CSV」出力をそのまま貼れます。</div></div>
@@ -5364,7 +5364,7 @@ async function userSet(email, field, value){
   loadUsers();
 }
 const PERM_PAGES=[['yojitsu','予実管理'],['invoices','請求管理'],['receipts','入金・消込'],['bills','支払管理'],
-  ['payouts','支払実行'],['expenses','費用管理'],['companies','取引先管理'],['okr','OKR'],['workers','特定技能者']];
+  ['payouts','支払実行'],['expenses','費用管理'],['properties','物件'],['companies','取引先管理'],['okr','OKR']];
 function permModal(email, role){
   const cur=(DB.userPerms||{})[email]||{};
   openModal(`<h3>個別の権限 — ${esc(email)}</h3>
