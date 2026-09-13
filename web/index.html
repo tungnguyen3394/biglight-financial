@@ -431,6 +431,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
 </div>
 <div class="acct-menu" id="acctMenu">
   <div class="who"><b id="acctName">-</b><i id="acctMail">-</i><i id="acctRole" style="color:var(--primary);font-weight:700;"></i></div>
+  <button class="btn secondary" style="width:100%;margin-bottom:5px;" onclick="toggleAcct();mailSettings()">メール設定</button>
   <button class="btn secondary" style="width:100%;margin-bottom:5px;" onclick="goto('crmlink');toggleAcct()">CRM連携の状態</button>
   <button class="btn secondary" style="width:100%;" onclick="logout()">ログアウト</button>
 </div>
@@ -1012,7 +1013,7 @@ function showPending(msg){
 function ensureShape(){
   ['companies','workers','assignments','billingRules','invoices','payments','bills','payouts',
    'expenses','costItems','budgets','forecasts','actualAdjust','objectives','keyResults','checkins',
-   'accounts','departments'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
+   'accounts','departments','mailLog','mailTemplates'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
   if(!DB.userPerms) DB.userPerms={};
   if(!DB.settings)  DB.settings={};
   if(!DB.accounts.length) DB.accounts = DEFAULT_ACCOUNTS.map(a=>({id:uid('AC'),...a}));
@@ -4029,6 +4030,318 @@ ${'<scr'+'ipt>'}window.onload=function(){ setTimeout(function(){ window.print();
 }
 
 /* ============================================================================
+   メール（CRM と同じ作り: 各自の Gmail ＋ Google Apps Script）
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-14）: 取引先別の画面から、CRM と同じようにメールを送れるように。
+
+   決めごと（CONG-THUC §10 と同じ）:
+   ・送るのは本人の Gmail（本人が作った Apps Script 経由）。お客様の返信は本人に届く。
+     CRM で作った Apps Script の URL を、そのまま貼って使えます（受け取る形が同じ）。
+   ・URL は本人の アカウント（サーバー）に保存。PC を替えても送れる。
+   ・送ってよい人は 管理者が決める（ユーザー › メール送信）。許可が無い人にもボタンは見せ、
+     理由を書く（隠すと「壊れている」と思われる）。
+   ・送る前に必ず確認画面（宛先・添付・本文）。お客様に実際に届くため。
+   ・送った記録（誰が・いつ・どこへ・件名・添付の数）は mailLog に残し、画面に出す。
+   ・mode:'no-cors' なので Apps Script の返事は読めない。「送信を依頼した」までしか分からない。
+   ========================================================================== */
+const MAIL_MAX_TOTAL = 10*1024*1024;          // 1通の添付の合計（Gmail・Apps Script の上限より手前）
+
+const MAIL_TPL_DEFAULT = [
+  { id:'d-ar-send', side:'ar', name:'請求書送付のご案内',
+    subject:'【{{自社名}}】{{次回請求月}}分 ご請求書送付のご案内',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{次回請求月}}分のご請求書をお送りいたします。\n\n　今回ご請求額：{{次回請求額}}円（繰越額 {{繰越額}}円を含みます）\n　お支払期限：各ご請求書に記載のとおり\n\nお振込先：{{振込先}}\n\nご確認のほど、よろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ar-remind', side:'ar', name:'ご入金のお願い（期日超過）',
+    subject:'【{{自社名}}】ご入金のご確認のお願い',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n下記のご請求につきまして、本日（{{本日}}）時点でご入金の確認ができておりません。\n\n{{未回収明細}}\n　合計：{{未回収額}}円\n\nお手数ですがご確認のうえ、お手続きをお願いいたします。\n行き違いでお支払い済みの場合は、ご容赦ください。\n\nお振込先：{{振込先}}\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ar-thanks', side:'ar', name:'ご入金確認のお礼',
+    subject:'【{{自社名}}】ご入金確認のご連絡',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{最終入金日}}に {{最終入金額}}円 のご入金を確認いたしました。\n誠にありがとうございます。\n\n引き続きよろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ar-balance', side:'ar', name:'残高確認のお願い',
+    subject:'【{{自社名}}】売掛金残高のご確認のお願い',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{本日}}時点の弊社帳簿上の残高は、次のとおりです。\n\n　未回収：{{未回収額}}円\n　ご入金超過：{{過入金額}}円\n\n{{未回収明細}}\n\n貴社のご記録と相違がございましたら、お知らせください。\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ap-paid', side:'ap', name:'お支払いのご連絡',
+    subject:'【{{自社名}}】お支払いのご連絡',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{最終入金日}}に {{最終入金額}}円 をお振込みいたしました。\nご確認のほど、よろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ap-resend', side:'ap', name:'請求書の再送のお願い',
+    subject:'【{{自社名}}】ご請求書のご送付のお願い',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n恐れ入りますが、ご請求書をお送りいただけますでしょうか。\n（弊社にて受領が確認できておりません）\n\nよろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
+];
+const MAIL_VAR_LIST = ['会社名','宛名','未回収額','過入金額','繰越額','次回請求額','次回請求月','未回収明細',
+  '最終入金日','最終入金額','自社名','振込先','差出人','本日'];
+
+/** 差し込みの値。数字はどこで見ても同じ関数から取る（取引先別の画面と一致させる）。 */
+function mailVars(side, companyId){
+  const c=findById('companies',companyId)||{}, S=ledS(side), s=selfInfo();
+  const open=S.docs(companyId).filter(d=>d.status!=='取消'&&d.status!=='作成中'&&S.bal(d)>0)
+    .sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||'')));
+  const pays=S.pays(companyId).filter(p=>p.status!=='取消').sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+  const last=pays[pays.length-1];
+  const nb = side==='ar' ? coNextBilling(companyId) : null;
+  return {
+    '会社名': (c.name||'')+' 御中',
+    '宛名': c.staffName? c.staffName+' 様' : 'ご担当者様',
+    '未回収額': moneyPlain(S.balOf(companyId)),
+    '過入金額': moneyPlain(coOverpaid(side, companyId)),
+    '繰越額': nb? moneyPlain(nb.carry) : '',
+    '次回請求額': nb? moneyPlain(nb.total) : '',
+    '次回請求月': nb? nb.ym.replace('-','年')+'月' : '',
+    '未回収明細': open.length? open.map(d=>`　・${d.no||''}　期日 ${d.dueDate||'—'}　残高 ${moneyPlain(S.bal(d))}円`).join('\n') : '　（未回収はありません）',
+    '最終入金日': last? last.date : '—',
+    '最終入金額': last? moneyPlain(last.amount) : '0',
+    '自社名': s.name||'BIGLIGHT株式会社',
+    '振込先': s.bank||'（設定 › 基本設定 › 自社情報 で登録してください）',
+    '差出人': (SESSION&&SESSION.name)||(SESSION&&SESSION.email)||'',
+    '本日': today(),
+  };
+}
+const mailFill = (text, vars) => String(text||'').replace(/\{\{([^}]+)\}\}/g, (m,k)=> k in vars ? vars[k] : m);
+function mailTemplates(side){
+  const saved=(DB.mailTemplates||[]).filter(t=>t && t.side===side);
+  return MAIL_TPL_DEFAULT.filter(t=>t.side===side).concat(saved);
+}
+const mailPinKey = side => 'bl_yj_mailpin_'+side;
+function mailPinned(side){ try{ return localStorage.getItem(mailPinKey(side))||''; }catch(e){ return ''; } }
+function mailHistory(side, companyId){
+  return (DB.mailLog||[]).filter(x=>x && x.side===side && String(x.companyId)===String(companyId))
+    .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+}
+
+let MAIL_CTX=null, _mailFocus='mailBody';
+function mailCompose(side, companyId){
+  const c=findById('companies',companyId); if(!c) return;
+  const tpls=mailTemplates(side);
+  const pin=mailPinned(side);
+  const tpl=tpls.find(t=>t.id===pin) || tpls[0];
+  const vars=mailVars(side, companyId);
+  MAIL_CTX={ side, companyId, tplId: tpl? tpl.id:'', to: c.billEmail||c.email||'', cc:(SESSION&&SESSION.email)||'',
+    subject: tpl? mailFill(tpl.subject,vars):'', body: tpl? mailFill(tpl.body,vars):'', files:null };
+  drawMailCompose();
+  mailLoadFiles();
+}
+function drawMailCompose(){
+  const m=MAIL_CTX, c=findById('companies',m.companyId)||{}, tpls=mailTemplates(m.side);
+  const allowed=!!(SESSION&&SESSION.mailAllowed) || isAdmin();
+  const gas=(SESSION&&SESSION.gasUrl)||'';
+  const hist=mailHistory(m.side, m.companyId).slice(0,5);
+  const files=m.files;
+  const chosen=(files||[]).filter(f=>f.on), total=chosen.reduce((s,f)=>s+f.size,0);
+  openModal(`<h3>${IC.mail} メールを書く　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(c.name||'')}</span></h3>
+    ${!allowed?`<div class="alertbar">${IC.warn} メールを送る許可がまだありません。管理者に「ユーザー › メール送信」を付けてもらってください。</div>`:''}
+    ${!gas?`<div class="warnbar">${IC.warn} あなたの メール設定（Apps Script の URL）が未設定です。
+      <a class="pillbtn pill-save" style="margin-left:6px;" onclick="mailSettings()">メール設定をひらく</a></div>`:''}
+    <div class="tplbar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+      <b style="font-size:12px;">テンプレ</b>
+      <select id="mailTpl" onchange="mailApplyTpl(this.value)" style="min-width:220px;">
+        ${tpls.map(t=>`<option value="${attr(t.id)}" ${t.id===m.tplId?'selected':''}>${esc(t.name)}${String(t.id).startsWith('d-')?'':'（保存）'}</option>`).join('')}</select>
+      <a class="pillbtn" onclick="mailPin()" title="次からこのテンプレで開く">${mailPinned(m.side)===m.tplId?'固定中':'固定'}</a>
+      <a class="pillbtn pill-save" onclick="mailSaveTpl()">保存</a>
+      <a class="pillbtn" onclick="mailManageTpl()">管理</a>
+    </div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">
+      ${MAIL_VAR_LIST.map(v=>`<a class="pillbtn" style="font-size:11px;" onmousedown="event.preventDefault();mailInsert('{{${v}}}')">{{${esc(v)}}}</a>`).join('')}
+    </div>
+    <div class="form-grid">
+      <div class="full"><label>宛先（To）<span style="color:var(--danger)">*</span></label>
+        <input id="mailTo" value="${attr(m.to)}" oninput="MAIL_CTX.to=this.value" placeholder="keiri@example.co.jp（複数はカンマ区切り）"></div>
+      <div class="full"><label>CC</label><input id="mailCc" value="${attr(m.cc)}" oninput="MAIL_CTX.cc=this.value"></div>
+      <div class="full"><label>件名</label><input id="mailSubj" value="${attr(m.subject)}" oninput="MAIL_CTX.subject=this.value" onfocus="_mailFocus='mailSubj'"></div>
+      <div class="full"><label>本文</label><textarea id="mailBody" rows="13" oninput="MAIL_CTX.body=this.value" onfocus="_mailFocus='mailBody'"
+        style="font-family:inherit;line-height:1.6;">${esc(m.body)}</textarea></div>
+    </div>
+    <div class="form-section" style="margin-top:12px;">${IC.clip} 添付するファイル
+      <span class="muted" style="font-size:11.5px;margin-left:8px;">合計 ${attSize(total)} ／ 上限 10MB</span></div>
+    <div id="mailFiles">${files==null? '<div class="empty">この会社の添付を探しています…</div>'
+      : files.length? files.map((f,i)=>`<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12.5px;">
+          <input type="checkbox" ${f.on?'checked':''} onchange="MAIL_CTX.files[${i}].on=this.checked;drawMailCompose()">
+          <span>${esc(f.fileName)}</span><span class="muted">（${esc(f.where)}・${attSize(f.size)}）</span></label>`).join('')
+        : '<div class="muted" style="font-size:12px;">この会社の伝票に添付はありません（請求書のPDFを付けたいときは、請求書に添付してから開き直してください）。</div>'}</div>
+    ${total>MAIL_MAX_TOTAL?`<div class="alertbar" style="margin-top:6px;">添付の合計が10MBを超えています。減らしてください。</div>`:''}
+    <div class="form-section" style="margin-top:12px;">送信履歴（この会社）</div>
+    ${hist.length? `<div style="font-size:12px;line-height:1.8;">${hist.map(h=>`${esc(String(h.at).slice(0,16).replace('T',' '))}　
+      <b>${esc(h.subject||'')}</b>　→ ${esc(h.to||'')}　<span class="muted">${esc(String(h.by||'').split('@')[0])}${h.files?` ・添付${h.files}`:''}</span>`).join('<br>')}</div>`
+      : '<div class="muted" style="font-size:12px;">まだ送っていません。</div>'}
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="mailConfirm()" ${allowed&&gas?'':'disabled'}>送信内容を確認</button></div>`,'lg');
+}
+function mailApplyTpl(id){
+  const t=mailTemplates(MAIL_CTX.side).find(x=>x.id===id); if(!t) return;
+  const v=mailVars(MAIL_CTX.side, MAIL_CTX.companyId);
+  MAIL_CTX.tplId=id; MAIL_CTX.subject=mailFill(t.subject,v); MAIL_CTX.body=mailFill(t.body,v);
+  drawMailCompose();
+}
+function mailInsert(token){
+  const el=document.getElementById(_mailFocus)||document.getElementById('mailBody'); if(!el) return;
+  const v=mailVars(MAIL_CTX.side, MAIL_CTX.companyId);
+  const val=mailFill(token, v);
+  const s0=el.selectionStart??el.value.length, s1=el.selectionEnd??el.value.length;
+  el.value=el.value.slice(0,s0)+val+el.value.slice(s1);
+  el.selectionStart=el.selectionEnd=s0+val.length; el.focus();
+  if(el.id==='mailBody') MAIL_CTX.body=el.value; else MAIL_CTX.subject=el.value;
+}
+function mailPin(){
+  try{ localStorage.setItem(mailPinKey(MAIL_CTX.side), MAIL_CTX.tplId); }catch(e){}
+  toast('次からこのテンプレで開きます。','ok'); drawMailCompose();
+}
+/** 今の件名・本文をテンプレとして保存。数字は {{変数}} に戻せないので、固有の数字は消してから保存するよう促す。 */
+function mailSaveTpl(){
+  const name=prompt('テンプレの名前（例: 督促 2回目）'); if(!name) return;
+  const rec={ side:MAIL_CTX.side, name:name.trim().slice(0,60), subject:MAIL_CTX.subject, body:MAIL_CTX.body };
+  const { record } = commitRecord('mailTemplates', rec, {});
+  MAIL_CTX.tplId=record.id;
+  toast('保存しました。※ 金額や会社名はそのまま保存されています。次回も使う部分は {{変数}} に置き換えておくと便利です。','ok');
+  drawMailCompose();
+}
+function mailManageTpl(){
+  const saved=(DB.mailTemplates||[]).filter(t=>t.side===MAIL_CTX.side);
+  openModal2(`<h3>保存したテンプレ</h3>
+    ${saved.length? `<div class="table-wrap"><table><tbody>${saved.map(t=>`<tr><td><b>${esc(t.name)}</b><div class="muted" style="font-size:11px;">${esc(t.subject||'')}</div></td>
+      <td class="r">${canDelete('invoices')?`<a class="pillbtn pill-del" onclick="mailDelTpl('${attr(t.id)}')">削除</a>`:''}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">保存したテンプレはありません（最初から入っている4つは消せません）。</div>'}
+    <div class="modal-actions"><button class="btn" onclick="closeModal2()">閉じる</button></div>`);
+}
+function mailDelTpl(id){
+  if(!confirm('このテンプレを消します。よろしいですか？')) return;
+  DB.mailTemplates=(DB.mailTemplates||[]).filter(t=>String(t.id)!==String(id)); markDeleted('mailTemplates', id);
+  closeModal2(); if(MAIL_CTX && MAIL_CTX.tplId===id) MAIL_CTX.tplId=''; drawMailCompose();
+}
+/** この会社の添付（会社 ＋ 直近の伝票）を集める */
+async function mailLoadFiles(){
+  const m=MAIL_CTX; if(!m) return;
+  const S=ledS(m.side), docEnt=m.side==='ap'?'bills':'invoices';
+  const docs=S.docs(m.companyId).filter(d=>d.status!=='取消').sort((a,b)=>String(b.bookMonth||'').localeCompare(String(a.bookMonth||''))).slice(0,6);
+  const asks=[{entity:'companies', id:m.companyId, where:'取引先'}].concat(docs.map(d=>({entity:docEnt, id:d.id, where:(d.no||'')})));
+  const out=[];
+  await Promise.all(asks.map(async a=>{
+    try{
+      const r=await fetch(API_BASE+'/files?entity='+a.entity+'&id='+encodeURIComponent(a.id),{headers:headers()});
+      if(!r.ok) return;
+      const d=await r.json();
+      (d.items||[]).forEach(f=>out.push(Object.assign({ where:a.where, on:false }, f)));
+    }catch(e){}
+  }));
+  if(MAIL_CTX!==m) return;                   // 待っている間に別の会社を開いた
+  m.files=out;
+  if(document.getElementById('mailFiles')) drawMailCompose();
+}
+function mailConfirm(){
+  const m=MAIL_CTX;
+  const to=String(m.to||'').split(/[,、\s]+/).filter(Boolean);
+  const bad=to.filter(x=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+  if(!to.length){ toast('宛先を入れてください。','err'); return; }
+  if(bad.length){ toast('宛先の形が正しくありません：'+bad.join(', '),'err'); return; }
+  if(!String(m.subject||'').trim()){ toast('件名を入れてください。','err'); return; }
+  const left=(m.subject+m.body).match(/\{\{[^}]+\}\}/g);
+  const chosen=(m.files||[]).filter(f=>f.on), total=chosen.reduce((s,f)=>s+f.size,0);
+  if(total>MAIL_MAX_TOTAL){ toast('添付の合計が10MBを超えています。','err'); return; }
+  const c=findById('companies',m.companyId)||{};
+  openModal(`<h3>送信内容の確認</h3>
+    <div class="warnbar">${IC.warn} <b>お客様に実際に届きます。</b>宛先・添付・本文を必ず確かめてください。</div>
+    ${left?`<div class="alertbar">置き換わっていない差し込みが残っています：${esc(left.join(' '))}</div>`:''}
+    <table style="width:100%;font-size:13px;margin:8px 0;"><tbody>
+      <tr><td style="width:90px;color:var(--muted);">相手</td><td><b>${esc(c.name||'')}</b></td></tr>
+      <tr><td style="color:var(--muted);">宛先</td><td>${esc(to.join(', '))}</td></tr>
+      ${m.cc?`<tr><td style="color:var(--muted);">CC</td><td>${esc(m.cc)}</td></tr>`:''}
+      <tr><td style="color:var(--muted);">差出人</td><td>${esc((SESSION&&SESSION.email)||'')}（あなたの Gmail から）</td></tr>
+      <tr><td style="color:var(--muted);">件名</td><td><b>${esc(m.subject)}</b></td></tr>
+      <tr><td style="color:var(--muted);">添付</td><td>${chosen.length? chosen.map(f=>esc(f.fileName)+' <span class="muted">('+attSize(f.size)+')</span>').join('<br>') : 'なし'}</td></tr>
+    </tbody></table>
+    <div style="white-space:pre-wrap;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12.5px;max-height:34vh;overflow:auto;">${esc(m.body)}</div>
+    <div class="modal-actions split"><button class="btn secondary" onclick="drawMailCompose()">← 戻って直す</button>
+      <button class="btn" id="mailSendBtn" onclick="mailSend()">この内容で送信</button></div>`,'lg');
+}
+async function mailSend(){
+  const m=MAIL_CTX, gas=(SESSION&&SESSION.gasUrl)||'';
+  if(!gas){ toast('メール設定（Apps Script の URL）が未設定です。','err'); return; }
+  const btn=document.getElementById('mailSendBtn'); if(btn){ btn.disabled=true; btn.textContent='送信しています…'; }
+  const chosen=(m.files||[]).filter(f=>f.on);
+  try{
+    const attachments=[];
+    for(const f of chosen){
+      const b=await attBlob(f.id);
+      const dataBase64=await attReadB64(b);
+      attachments.push({ name:f.fileName, mimeType:f.mime, dataBase64 });
+    }
+    const payload={ to:m.to, cc:m.cc, subject:m.subject, body:m.body,
+      senderName:(SESSION&&SESSION.name)||'', attachments };
+    await fetch(gas,{ method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    commitRecord('mailLog', { side:m.side, companyId:m.companyId, to:m.to, cc:m.cc, subject:m.subject,
+      files:chosen.length, template:m.tplId||'', by:(SESSION&&SESSION.email)||'', at:new Date().toISOString() }, {});
+    closeModal();
+    toast('送信を依頼しました。届いたかどうかは、あなたの Gmail の「送信済み」で確かめられます。','ok');
+    renderPage(CURRENT_PAGE);
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='この内容で送信'; }
+    toast('送信できませんでした：'+(e.message||''),'err');
+  }
+}
+
+/* ---------- メール設定（本人） ---------- */
+function gasCodeText(){
+  return `// Google Apps Script — BIGLIGHT Gmail送信 Web App（CRM と同じもの。CRM で作ってあれば その URL をそのまま使えます）
+// 1. script.google.com に自分のGmailでログイン → 新しいプロジェクト → このコードを全部貼り付け → 保存
+// 2. 関数メニューで「sendTest」を選び ▶実行 → 承認 → 許可（初回だけ）→ 自分宛にテストメールが届けばOK
+// 3. デプロイ → 新しいデプロイ → ウェブアプリ → 実行者:自分 → アクセスできるユーザー:全員 → デプロイ
+// 4. ウェブアプリの URL（…/exec で終わる）をコピーして、予実管理システムの「メール設定」に貼る
+
+function doPost(e) {
+  try {
+    var params = JSON.parse(e.postData.contents);
+    var opts = { name: params.senderName ? ('BIGLIGHT ' + params.senderName) : 'BIGLIGHT' };
+    if (params.cc)  opts.cc  = params.cc;
+    if (params.bcc) opts.bcc = params.bcc;
+    if (params.attachments && params.attachments.length) {
+      opts.attachments = params.attachments.map(function(a){
+        return Utilities.newBlob(Utilities.base64Decode(a.dataBase64), a.mimeType || 'application/octet-stream', a.name || 'file');
+      });
+    }
+    GmailApp.sendEmail(params.to, params.subject, params.body, opts);
+    return ContentService.createTextOutput(JSON.stringify({success: true})).setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({success: false, error: String(err)})).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+function doGet(e) { return ContentService.createTextOutput('BIGLIGHT mail GAS v2 - 添付ファイル対応 OK'); }
+function sendTest() {
+  GmailApp.sendEmail(Session.getActiveUser().getEmail(), 'BIGLIGHT テスト送信', 'このメールが届けばGAS設定は成功です。');
+}`;
+}
+function mailSettings(){
+  const cur=(SESSION&&SESSION.gasUrl)||'';
+  openModal2(`<h3>メール設定（あなたの Gmail から送る）</h3>
+    <div class="mdsub">CRM でメール設定をしてあれば、同じ URL を貼るだけで使えます。</div>
+    <div class="form-grid"><div class="full"><label>Apps Script ウェブアプリの URL</label>
+      <input id="gasUrlIn" value="${attr(cur)}" placeholder="https://script.google.com/macros/s/……/exec"></div></div>
+    <details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">まだ作っていない場合（初回だけ・5分）</summary>
+      <textarea readonly style="width:100%;height:220px;font-family:ui-monospace,monospace;font-size:11px;margin-top:8px;">${esc(gasCodeText())}</textarea>
+      <a class="pillbtn pill-save" onclick="navigator.clipboard.writeText(gasCodeText()).then(()=>toast('コピーしました。','ok'))">コードをコピー</a></details>
+    <div class="modal-actions split">
+      ${cur?`<button class="btn secondary" onclick="window.open('${attr(cur)}','_blank')">動作確認（v2 と出ればOK）</button>`:'<span></span>'}
+      <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal2()">閉じる</button>
+        <button class="btn" onclick="mailSettingsSave()">保存</button></div></div>`,'lg');
+}
+async function mailSettingsSave(){
+  const url=(document.getElementById('gasUrlIn').value||'').trim();
+  try{
+    const r=await fetch(API_BASE+'/me/gas',{method:'PUT',headers:headers(),body:JSON.stringify({gasUrl:url})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ toast(d.message||'保存できませんでした。','err'); return; }
+    SESSION.gasUrl=url;
+    try{ localStorage.setItem(AUTH_KEY, JSON.stringify(SESSION)); }catch(e){}
+    closeModal2(); toast('保存しました。','ok');
+    if(MAIL_CTX && document.getElementById('mailBody')) drawMailCompose();
+  }catch(e){ toast('通信に失敗しました。','err'); }
+}
+/** 取引先別の詳細に出す「送信履歴」 */
+function mailHistoryPanel(side, companyId){
+  const h=mailHistory(side, companyId).slice(0,8);
+  return `<div class="panel"><div class="panel-hd"><b>メールの送信履歴</b>
+      <button class="btn sm" style="margin-left:auto;" onclick="mailCompose('${side}','${attr(companyId)}')">${IC.mail} メールを書く</button></div>
+    <div class="panel-bd" style="font-size:12.5px;line-height:1.9;">${h.length? h.map(x=>`${esc(String(x.at).slice(0,16).replace('T',' '))}　
+      <b>${esc(x.subject||'')}</b>　→ ${esc(x.to||'')}　<span class="muted">${esc(String(x.by||'').split('@')[0])}${x.files?` ・添付${x.files}`:''}</span>`).join('<br>')
+      : '<span class="muted">まだ送っていません。</span>'}</div></div>`;
+}
+
+/* ============================================================================
    取引先別（回収）／ 支払先別（支払）— 「この期間、どの会社と、いくら動いたか」
    ----------------------------------------------------------------------------
    利用者の指示（2026-09-14）:
@@ -4164,7 +4477,7 @@ function viewCoList(side){
       <td class="r">${r.perf.avgLate?r.perf.avgLate+'日':'<span class="zero">—</span>'}</td>
       ${side==='ar'?`<td class="r num"><b>${moneyPlain(r.next.total)}</b><div class="muted" style="font-size:10px;">${esc(r.next.ym)}分</div></td>`:''}
       <td class="muted" style="font-size:11.5px;">${esc(r.lastPay||'—')}</td>
-      <td>${side==='ar'&&typeof mailCompose==='function'?`<a class="pillbtn pill-save" onclick="event.stopPropagation();mailCompose('ar','${attr(r.c.id)}')" title="メールを書く">${IC.mail}</a>`:''}</td></tr>`).join('');
+      <td><a class="pillbtn pill-save" onclick="event.stopPropagation();mailCompose('${side}','${attr(r.c.id)}')" title="メールを書く">${IC.mail}</a></td></tr>`).join('');
 
   return pageShell({ title: side==='ap'?'支払先別':'取引先別', count:rows.length, shown:shown.length,
     sub:`${esc(R.label)}にお金が動いた会社と、いま残高がある会社。押すと その会社のすべてが見られます。`,
@@ -4237,7 +4550,7 @@ function viewCoDetail(side, companyId){
 
   LED_CO=String(c.id); LED_SIDE=side;          // 印刷・CSV は台帳の関数をそのまま使う
   return pageShell({ title:c.name||'', sub:`${side==='ap'?'支払先':'取引先'}の すべてのお金の出入り`,
-    tools:`${side==='ar'&&typeof mailCompose==='function'?`<button class="btn" onclick="mailCompose('ar','${attr(c.id)}')">${IC.mail} メール</button>`:''}
+    tools:`<button class="btn" onclick="mailCompose('${side}','${attr(c.id)}')">${IC.mail} メール</button>
       ${canEdit(S.payPage)?`<button class="btn secondary" onclick="${side==='ap'?`openPayout(null,{companyId:'${attr(c.id)}'})`:`openPayment(null,{companyId:'${attr(c.id)}'})`}">＋ ${esc(S.payLabel)}を記録</button>`:''}
       ${toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（残高確認書）</button>
         <button class="btn secondary" onclick="exportCsvLedger()">${IC.doc} 履歴をCSV</button>
@@ -4245,7 +4558,7 @@ function viewCoDetail(side, companyId){
     body:`<div class="printonly" style="margin-bottom:10px;">
         <div style="font-size:17px;font-weight:700;">取引明細書・残高確認書</div>
         <div style="font-size:12px;">${esc(c.name||'')} 御中　／　${fyLabel(CUR_FY)}　／　発行日 ${today()}　／　BIGLIGHT株式会社</div></div>
-      ${head}${warn}${next}${tabs}${body}` });
+      ${head}${warn}${next}${mailHistoryPanel(side, c.id)}${tabs}${body}` });
 }
 function exportCsvCo(side){
   const R=coRange();
@@ -6038,19 +6351,29 @@ function drawUsers(){
             ${Object.keys(USER_STATUS).map(k=>`<option value="${k}" ${u.status===k?'selected':''}>${esc(USER_STATUS[k][0])}</option>`).join('')}</select>`
         : `<span class="badge ${st[1]}">${esc(st[0])}</span>`}</td>
       <td>${permSeenText(u.email, u.role)}</td>
+      <td class="c">${ad? `<input type="checkbox" ${u.mail_allowed||u.role==='Admin'?'checked':''} ${u.role==='Admin'?'disabled title="管理者は常に送れます"':''}
+          onchange="userMailAllow('${attr(u.email)}',this.checked)">` : (u.mail_allowed?'可':'—')}
+        <div class="muted" style="font-size:10px;">${u.gas_set?'設定済み':'URL未設定'}</div></td>
       <td class="muted" style="font-size:11.5px;">${u.last_login? esc(String(u.last_login).slice(0,16).replace('T',' ')):'<span class="zero">未ログイン</span>'}</td>
       <td>${ad?`<a class="pillbtn pill-save" onclick="permModal('${attr(u.email)}','${attr(u.role)}')">見せる画面</a>`:''}</td></tr>`;
   }).join('');
 
   box.innerHTML = kpis + waitBox + `<div class="table-wrap"><table>
       <thead><tr><th style="min-width:210px;">氏名・メール</th><th style="min-width:180px;">役割</th>
-        <th style="min-width:110px;">状態</th><th style="min-width:130px;">見られる画面</th>
+        <th style="min-width:110px;">状態</th><th style="min-width:130px;">見られる画面</th><th class="c" style="min-width:86px;">メール送信</th>
         <th style="min-width:130px;">最終ログイン</th><th style="min-width:110px;"></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6" class="empty" style="padding:18px;">${q?'一致する人がいません。':'まだ誰もログインしていません。'}</td></tr>`}</tbody></table></div>
+      <tbody>${rows || `<tr><td colspan="7" class="empty" style="padding:18px;">${q?'一致する人がいません。':'まだ誰もログインしていません。'}</td></tr>`}</tbody></table></div>
     <div class="fhelp" style="margin-top:8px;">
       <b>状態</b>：有効＝使える／承認待ち・停止＝ログインしてもデータは1行も見られません（画面には「承認待ちです」と出ます）。<br>
       <b>役割</b>は大まかな既定、<b>見せる画面</b>は1画面ずつの上書きです。表示を外した画面は、その人の左メニューから消えます。<br>
       自分自身の役割と状態は変えられません（管理者が誰も居なくなるのを防ぐため）。</div>`;
+}
+async function userMailAllow(email, on){
+  try{
+    const r=await fetch(API_BASE+'/users',{method:'PUT',headers:headers(),body:JSON.stringify({target:email, mailAllowed:!!on})});
+    if(r.ok) toast(on?'メールを送れるようにしました。':'メール送信を止めました。','ok'); else toast('変更できませんでした。','err');
+  }catch(e){ toast('通信に失敗しました。','err'); }
+  loadUsers();
 }
 /** 誰がいつ入ったか。乗っ取りを疑うときに最初に見る場所。 */
 async function userLoginLog(){

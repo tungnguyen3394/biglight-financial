@@ -248,7 +248,7 @@ console.log('\n■ 台帳と、外に出してはいけないもの');
   {
     const body = (authz.match(/COLL_PAGE[^{]*{([\s\S]*?)}/) || ['', ''])[1];
     const keys = Array.from(body.matchAll(/([A-Za-z][A-Za-z0-9]*)\s*:/g)).map(m => m[1]);
-    const missing = keys.filter(k => !C.COLLECTIONS.some(c => c.crmKey === k));
+    const missing = keys.filter(k => !C.COLLECTIONS.some(c => c.crmKey === k) && !(C.NOT_EXPOSED||[]).includes(k));
     ok('authz.ts にある表は全部 台帳にある（足し忘れ検出）', missing.length === 0, '足りない: ' + missing.join(', '));
   }
   ok('スコープは台帳から生える', K.SCOPES.length === C.COLLECTIONS.length + K.AGGREGATE_SCOPES.length);

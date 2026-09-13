@@ -12,6 +12,7 @@ export const COLL_PAGE: Record<string, string> = {
   invoices: 'invoices', payments: 'receipts',
   bills: 'bills', payouts: 'payouts',
   expenses: 'expenses', costItems: 'expenses', properties: 'properties',
+  mailLog: 'invoices', mailTemplates: 'invoices',
   budgets: 'yojitsu', forecasts: 'yojitsu', actualAdjust: 'yojitsu',
   accounts: 'settings', departments: 'settings',
   objectives: 'okr', keyResults: 'okr', checkins: 'okr',

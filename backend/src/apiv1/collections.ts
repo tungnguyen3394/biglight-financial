@@ -98,6 +98,11 @@ export const COLLECTIONS: CollectionDef[] = [
     note: '★ 誰が・どの会社に・いつからいつまで。支援委託料（人数×単価）の根拠' },
 ]
 
+/* 外に出さない表（意図して台帳に載せていない）。test/apiv1.js の足し忘れ検出はこれを除く。
+   mailLog … 送った相手のメールアドレスと件名。AI や外部システムに渡す理由が無い
+   mailTemplates … 社内の文面のひな形 */
+export const NOT_EXPOSED = ['mailLog', 'mailTemplates']
+
 export const COLLECTION_IDS = COLLECTIONS.map(c => c.id)
 export const collectionById = (id: any) => COLLECTIONS.find(c => c.id === String(id || '')) || null
 export const collectionByKey = (k: any) => COLLECTIONS.find(c => c.crmKey === String(k || '')) || null

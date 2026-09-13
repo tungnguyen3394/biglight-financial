@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -538,6 +538,40 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     ctx.openLedger(kita2.id,'ar');
     eq('会社名から 取引先別 の詳細へ', ctx.__x.CURRENT_PAGE, 'arco');
     ctx.coOpen('ar', null);
+  }
+
+  /* ── メール（CRMと同じ GAS） ── */
+  console.log('\n― メール ―');
+  {
+    const kita3=_db.companies.find(c=>c.name.includes('北関東物流'));
+    eq('回収のテンプレは4つ', ctx.mailTemplates('ar').length, 4);
+    eq('支払のテンプレは2つ', ctx.mailTemplates('ap').length, 2);
+    const v=ctx.mailVars('ar', kita3.id);
+    eq('差し込みの次回請求額は 取引先別 と同じ数字', v['次回請求額'], ctx.__x.moneyPlain(ctx.coNextBilling(kita3.id).total));
+    eq('差し込みの未回収額は 売掛残高 と同じ', v['未回収額'], ctx.__x.moneyPlain(ctx.arBalanceOf(kita3.id)));
+    eq('宛名は 会社名 御中', v['会社名'].endsWith('御中'), true);
+    eq('知らない差し込みは そのまま残す（確認画面で気づける）', ctx.__x.mailFill('{{会社名}} {{なぞ}}', v).includes('{{なぞ}}'), true);
+    eq('未回収明細に 期日と残高', v['未回収明細'].includes('期日'), true);
+
+    /* 実際に送る: GAS に CRM と同じ形で渡り、送信履歴が残る */
+    let sent=null;
+    const origFetch=ctx.fetch;
+    ctx.fetch=async(url,opt)=>{ if(String(url).startsWith('https://script.google.com')) { sent={url,opt}; return {ok:true}; } return {ok:false,status:404,json:async()=>({})}; };
+    ctx.__x.setSession({ email:'test@biglight.jp', name:'テスト', role:'Admin', status:'active', gasUrl:'https://script.google.com/macros/s/ABC/exec', mailAllowed:true });
+    ctx.mailCompose('ar', kita3.id);
+    ctx.__x.mailCtx().to='keiri@example.co.jp'; ctx.__x.mailCtx().files=[];
+    const logBefore=(_db.mailLog||[]).length;
+    await ctx.mailSend();
+    eq('GAS の URL に送る', sent && sent.url, 'https://script.google.com/macros/s/ABC/exec');
+    eq('no-cors で送る（CRM と同じ）', sent && sent.opt.mode, 'no-cors');
+    const body=sent? JSON.parse(sent.opt.body) : {};
+    eq('CRM の GAS と同じ形（to/subject/body/attachments）', ['to','cc','subject','body','senderName','attachments'].every(k=>k in body), true);
+    eq('件名に差し込みが入っている', body.subject.includes('【'), true);
+    eq('送信履歴が1件増える', (_db.mailLog||[]).length, logBefore+1);
+    eq('履歴に宛先と会社', _db.mailLog[_db.mailLog.length-1].to==='keiri@example.co.jp' && _db.mailLog[_db.mailLog.length-1].companyId===kita3.id, true);
+    try{ const h=ctx.viewCoDetail('ar', kita3.id); eq('取引先別の詳細に送信履歴が出る', h.includes('keiri@example.co.jp'), true); }catch(e){ console.log('  NG  '+e.message); fail++; }
+    ctx.fetch=origFetch;
+    ctx.__x.setSession({ email:'test@biglight.jp', role:'Admin', status:'active' });
   }
 
   /* ── 分類別集計: いちばん大事なのは「予実と1円も違わない」こと ── */

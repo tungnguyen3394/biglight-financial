@@ -191,10 +191,22 @@ app.get('/me', async (req, res) => {
   res.json({ email, ...p })
 })
 
+/** 自分の GAS の URL を保存する（本人だけ）。形を確かめる: Apps Script の Web アプリの URL だけ。 */
+app.put('/me/gas', async (req, res) => {
+  const me = await requireActive(req, res); if (!me) return
+  const url = String((req.body && req.body.gasUrl) || '').trim()
+  if (url && !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) {
+    return res.status(400).json({ error: 'bad-url', message: 'Apps Script の「ウェブアプリ」の URL（https://script.google.com/macros/s/…/exec）を貼ってください' })
+  }
+  await pool.query('UPDATE profiles SET gas_url=$2 WHERE email=$1', [me.email, url || null])
+  res.json({ ok: true, gasUrl: url })
+})
+
 app.get('/users', async (req, res) => {
   const me = await requireActive(req, res); if (!me) return
   const r = await pool.query(
-    `SELECT email,name,picture,role,status,created_at,last_login,last_seen FROM profiles ORDER BY created_at`)
+    `SELECT email,name,picture,role,status,created_at,last_login,last_seen,mail_allowed,
+            (gas_url IS NOT NULL AND gas_url<>'') AS gas_set FROM profiles ORDER BY created_at`)
   res.json({ items: r.rows })
 })
 
@@ -203,8 +215,14 @@ app.put('/users', async (req, res) => {
   if (!email) return res.status(401).json({ error: 'unauthorized' })
   const me = await profileOf(email)
   if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only' })
-  const { target, role, status } = req.body || {}
+  const { target, role, status, mailAllowed } = req.body || {}
   if (!target) return res.status(400).json({ error: 'no target' })
+  if (typeof mailAllowed === 'boolean') {
+    await pool.query('UPDATE profiles SET mail_allowed=$2 WHERE email=$1', [String(target).toLowerCase(), mailAllowed])
+    await pool.query('INSERT INTO audit_log(actor_email,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5::jsonb)',
+      [email, 'update', 'profiles', String(target).toLowerCase(), JSON.stringify({ mailAllowed })])
+    if (role === undefined && status === undefined) return res.json({ ok: true })
+  }
   // Không cho tự hạ quyền chính mình → tránh khoá luôn cửa vào hệ thống
   if (String(target).toLowerCase() === email && role && role !== 'Admin') {
     return res.status(400).json({ error: 'cannot-demote-self' })

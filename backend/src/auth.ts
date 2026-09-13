@@ -84,10 +84,11 @@ export async function loginWithToken(token: string, ip: string, ua: string) {
   return { email: info.email, name: info.name || '', picture: info.picture || '', ...p }
 }
 
-export async function profileOf(email: string): Promise<{ role: string; status: string }> {
-  const r = await pool.query('SELECT role, status FROM profiles WHERE email=$1', [email])
-  if (!r.rows[0]) return { role: 'Viewer', status: 'pending' }
-  return { role: r.rows[0].role || 'Viewer', status: r.rows[0].status || 'pending' }
+export async function profileOf(email: string): Promise<{ role: string; status: string; gasUrl: string; mailAllowed: boolean }> {
+  const r = await pool.query('SELECT role, status, gas_url, mail_allowed FROM profiles WHERE email=$1', [email])
+  if (!r.rows[0]) return { role: 'Viewer', status: 'pending', gasUrl: '', mailAllowed: false }
+  const x = r.rows[0]
+  return { role: x.role || 'Viewer', status: x.status || 'pending', gasUrl: x.gas_url || '', mailAllowed: !!x.mail_allowed }
 }
 
 /** Lớp 1 — tài khoản có được ghi gì không. LUÔN chặn thật, không phụ thuộc PERM_MODE. */

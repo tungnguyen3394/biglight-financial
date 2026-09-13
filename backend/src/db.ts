@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS profiles (
   last_login  TIMESTAMPTZ,
   last_seen   TIMESTAMPTZ
 );
+-- ★ 2026-09-14 メール送信（CRMと同じ: 各自のGmail ＋ Google Apps Script）
+--   gas_url は本人が貼る。mail_allowed は管理者が付ける（付けていない人は送れない）。
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gas_url TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mail_allowed BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS login_log (
   id     BIGSERIAL PRIMARY KEY,
