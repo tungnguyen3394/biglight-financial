@@ -605,7 +605,11 @@ const INVOICE_OPEN    = ['確定','一部入金','延滞'];
 const BILL_STATUS     = ['作成中','確定','一部支払','支払済','期日超過','取消'];
 const BILL_OPEN       = ['確定','一部支払','期日超過'];
 const PAY_METHODS     = ['銀行振込','現金','口座振替','クレジット','相殺','その他'];
-const BILLING_KINDS   = [{k:'per_worker',label:'人数×単価（支援委託料）'},{k:'fixed',label:'月額固定'},{k:'spot',label:'都度（自動生成しない）'}];
+/* ★ 2026-09-13 利用者の指示: 人数×単価（在籍者数から自動計算）は使わないことにしました。
+   新しいルールでは選べません。すでに作ってある per_worker のルールは そのまま計算されます
+   （黙って0円になる方が危ないため）。画面には「月額固定に変えてください」と出します。 */
+const BILLING_KINDS   = [{k:'fixed',label:'月額固定'},{k:'spot',label:'都度（自動生成しない）'}];
+const BILLING_KINDS_ALL = [{k:'per_worker',label:'人数×単価（旧・使用しません）'}].concat(BILLING_KINDS);
 const COUNT_MODES     = [{k:'month_end',label:'月末在籍'},{k:'month_start',label:'月初在籍'},{k:'prorate',label:'日割り'}];
 const COST_KINDS      = [{k:'fixed',label:'定期（毎月かかる）'},{k:'variable',label:'変動（月によって変わる）'}];
 /* 物件（建物）。★ ENTITIES より前に置くこと。 */
@@ -808,28 +812,30 @@ const ICONS = {
 const SECTIONS = [
   { id:'dashboard', label:'ダッシュボード', icon:'dashboard', tabs:[
     {id:'dashboard', label:'ダッシュボード'} ]},
-  { id:'sec-ar', label:'請求・入金', icon:'invoice', tabs:[
+  { id:'sec-ar', label:'回収（売掛金）', icon:'invoice', tabs:[
     {id:'invoices', label:'請求管理'},
     {id:'receipts', label:'入金・消込'},
     {id:'aging',    label:'未回収（年齢表）'} ]},
-  { id:'sec-ap', label:'支払', icon:'bill', tabs:[
+  { id:'sec-ap', label:'支払（買掛金）', icon:'bill', tabs:[
     {id:'bills',    label:'支払管理'},
     {id:'payouts',  label:'支払実行'},
     {id:'apaging',  label:'未払（年齢表）'},
     {id:'cashflow', label:'資金繰り'} ]},
   { id:'sec-co', label:'取引先', icon:'company', tabs:[
     {id:'companies', label:'一覧'},
-    {id:'ledger',    label:'台帳（履歴・タイムライン）'},
-    {id:'workers',   label:'特定技能者'} ]},
+    {id:'ledger',    label:'台帳（履歴・タイムライン）'} ]},
+    /* ★ 2026-09-13 利用者の指示でメニューから外しました:
+         {id:'workers', label:'特定技能者'}
+       この1行を上の tabs に戻せば、画面も機能もそのまま復活します。
+       コードとデータは残してあります（公式 §16「menuから外すときコードは消さない」）。 */
   { id:'sec-cost', label:'費用・物件', icon:'expense', tabs:[
     {id:'expenses',   label:'月次費用表'},
     {id:'properties', label:'物件（建物）'} ]},
   { id:'sec-yj', label:'予実管理', icon:'target', tabs:[
     {id:'yojitsu', label:'予実'},
     {id:'compare', label:'期間比較'},
-    {id:'mikomi',  label:'見込実績表'} ]},
-  { id:'sec-okr', label:'目標 OKR', icon:'flag', tabs:[
-    {id:'okr', label:'OKR / KPI'} ]},
+    {id:'mikomi',  label:'見込実績表'},
+    {id:'okr',     label:'目標 OKR'} ]},
   { id:'sec-sys', label:'設定', icon:'gear', tabs:[
     {id:'settings', label:'勘定科目・基本'},
     {id:'crmlink',  label:'CRM連携'},
@@ -3898,9 +3904,6 @@ function viewCompanies(){
       if(!rl.length) return `<a onclick="event.stopPropagation();openRules('${r.id}')" style="cursor:pointer;color:var(--amber);font-weight:600;font-size:12px;">未設定</a>`;
       return `<a onclick="event.stopPropagation();openRules('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">${rl.length}件</a>
         <div class="muted" style="font-size:10.5px;">${esc(rl.map(x=>x.kind==='per_worker'?`${moneyPlain(x.unitPrice)}/人`:(x.kind==='fixed'?`${moneyPlain(x.unitPrice)}/月`:'都度')).join('・'))}</div>`; }},
-    {key:'workers', label:'在籍', cls:'r', noFilter:true, val:r=>{
-      const n=workersInMonth(r.id, thisMonth(), 'month_end').length;
-      return n? `<b class="num">${n}名</b>` : '<span class="zero">—</span>'; }},
     {key:'paySite', label:'支払条件', noFilter:true, val:r=>
       r.paySite!=null&&r.paySite!==''? esc(`${r.closingDay||31}日締 / ${r.paySite}か月後 ${r.payDay||31}日`) : '<span class="zero">未設定</span>'},
     {key:'perf', label:'支払いぶり', noFilter:true, val:r=>ledPerfBadge(r.id, r.kind==='仕入先'?'ap':'ar')},
@@ -3920,12 +3923,10 @@ function viewCompanies(){
 }
 function companyExtraDetail(c){
   const rules=rulesOfCompany(c.id);
-  const n=workersInMonth(c.id, thisMonth(), 'month_end').length;
   return `<div class="form-section" style="margin-top:14px;">${IC.yen} 取引状況
       <a class="pillbtn pill-manage" style="margin-left:auto;" onclick="closeModal();openLedger('${c.id}','ar')">台帳（履歴・タイムライン）を見る</a></div>
     ${kv('売掛残高', `<b class="num">${moneyPlain(arBalanceOf(c.id))}</b> 円 ${ledPerfBadge(c.id,'ar')}`)}
     ${kv('買掛残高', `<b class="num">${moneyPlain(apBalanceOf(c.id))}</b> 円 ${ledPerfBadge(c.id,'ap')}`)}
-    ${kv('今月の在籍者', n?`${n}名`:'—')}
     ${kv('請求ルール', rules.length? rules.map(r=>esc(ruleText(r))).join('<br>')+
       `<div style="margin-top:6px;"><a class="pillbtn pill-manage" onclick="closeModal();openRules('${c.id}')">ルールを編集</a></div>`
       : `<span class="muted">未設定</span> <a class="pillbtn pill-new" onclick="closeModal();openRules('${c.id}')">ルールを作る</a>`)}
@@ -3943,10 +3944,12 @@ function openRules(companyId){
   const rules=rulesOfCompany(companyId);
   openModal(`<h3>請求ルール — ${esc(c.name)}</h3>
     <div class="mdsub">毎月の請求を自動で作るための決まりです。ここで作ると「請求を作成（月まとめ）」に出てきます。</div>
+    ${rules.some(r=>r.kind==='per_worker')? `<div class="warnbar">${IC.warn} 「人数×単価」は使わなくなりました（在籍者数の管理をこのシステムから外したため）。
+      いまも計算は続きますが、<b>月額固定</b>に作り直してください。</div>`:''}
     ${rules.length? `<div class="table-wrap"><table>
       <thead><tr><th>種類</th><th>名称</th><th class="r">単価</th><th>数え方</th><th>科目</th><th></th></tr></thead>
       <tbody>${rules.map(r=>`<tr>
-        <td>${esc((BILLING_KINDS.find(k=>k.k===r.kind)||{}).label||r.kind)}</td>
+        <td>${esc((BILLING_KINDS_ALL.find(k=>k.k===r.kind)||{}).label||r.kind)}</td>
         <td>${esc(r.name||'')}</td><td class="r num">${moneyPlain(r.unitPrice)}</td>
         <td>${esc(r.kind==='per_worker'?((COUNT_MODES.find(m=>m.k===(r.countMode||'month_end'))||{}).label):'—')}</td>
         <td>${esc(accountLabel(r.accountCode))}</td>
@@ -3958,8 +3961,7 @@ function openRules(companyId){
       <div><label>名称（請求書に出る文字）</label><input id="rlName" value="支援委託料"></div>
       <div><label>単価（税抜）</label><input id="rlPrice" class="num" style="text-align:right;" oninput="fmtMoneyInput(this)" placeholder="30,000"></div>
       <div><label>勘定科目</label><select id="rlAcc">${accountsOfKind('revenue').map(a=>`<option value="${attr(a.code)}">${esc(a.label)}</option>`).join('')}</select></div>
-      <div id="rlModeWrap"><label>人数の数え方</label><select id="rlMode">${COUNT_MODES.map(m=>`<option value="${m.k}">${esc(m.label)}</option>`).join('')}</select>
-        <div class="fhelp">月の途中で入社・退社した人をどう数えるか。請求書にも書かれます。</div></div>
+      <div id="rlModeWrap" style="display:none;"><label>人数の数え方</label><select id="rlMode">${COUNT_MODES.map(m=>`<option value="${m.k}">${esc(m.label)}</option>`).join('')}</select></div>
       <div><label>税区分</label><select id="rlTax">${TAX_CATS.map(t=>`<option ${t==='課税10%'?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
     </div>
     <div class="modal-actions split">
@@ -4618,19 +4620,10 @@ async function demoSeed(){
     tsu:  put('companies',{name:DEMO_TAG+'グローバル通訳サービス', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'通訳・翻訳（売上原価）'}),
   };
 
-  /* ── 特定技能者と在籍（人数×単価の根拠） ── */
-  const names=['グエン・ヴァン・アン','チャン・ティ・ハー','レー・ミン・トゥアン','ファム・ティ・マイ','ホアン・ヴァン・ナム','ド・ティ・ラン'];
-  const workers=names.map((n,i)=>put('workers',{code:'W9'+String(i+1).padStart(2,'0'), name:DEMO_TAG+n, nationality:'ベトナム',
-    visaStatus:'特定技能1号', visaExp:addMonths(endYm, dint(4,20))+'-15', source:'manual'}));
-  workers.forEach((w,i)=>{
-    const c = i<4? cust[0] : cust[2];
-    put('assignments',{workerId:w.id, companyId:c.id, joinDate: addMonths(endYm,-dint(8,26))+'-01', exitDate:''});
-  });
-
-  /* ── 請求ルール ── */
-  put('billingRules',{companyId:cust[0].id, kind:'per_worker', name:'支援委託料', unitPrice:30000, accountCode:'4100', countMode:'month_end', taxCat:'課税10%', active:true});
-  put('billingRules',{companyId:cust[1].id, kind:'fixed',      name:'月額支援料', unitPrice:165000, accountCode:'4100', taxCat:'課税10%', active:true});
-  put('billingRules',{companyId:cust[2].id, kind:'per_worker', name:'支援委託料', unitPrice:35000, accountCode:'4100', countMode:'month_end', taxCat:'課税10%', active:true});
+  /* ── 請求ルール（月額固定。人数×単価は使わなくなりました） ── */
+  put('billingRules',{companyId:cust[0].id, kind:'fixed', name:'支援委託料', unitPrice:120000, accountCode:'4100', taxCat:'課税10%', active:true});
+  put('billingRules',{companyId:cust[1].id, kind:'fixed', name:'月額支援料', unitPrice:165000, accountCode:'4100', taxCat:'課税10%', active:true});
+  put('billingRules',{companyId:cust[2].id, kind:'fixed', name:'支援委託料', unitPrice:70000,  accountCode:'4100', taxCat:'課税10%', active:true});
 
   /* ── 物件（建物） ── */
   const props=[
@@ -4684,8 +4677,7 @@ async function demoSeed(){
   };
   months.forEach((ym,mi)=>{
     /* さくら製作所: 在籍4名 × 30,000。いつも期日どおり（緑） */
-    const n1=4+(mi>9?1:0);
-    const i1=invOf(cust[0], ym, [{accountCode:'4100', name:'支援委託料', qty:n1, price:30000, taxCat:'課税10%'}]
+    const i1=invOf(cust[0], ym, [{accountCode:'4100', name:'支援委託料', qty:4+(mi>9?1:0), price:30000, taxCat:'課税10%'}]
       .concat(mi%6===3? [{accountCode:'4300', name:'在留期間更新 申請手数料', qty:1, price:44000, taxCat:'課税10%'}]:[]));
     payFor(cust[0], i1, dint(-2,0));
 
@@ -4808,11 +4800,9 @@ function viewCrmLink(){
         <table style="font-size:12.5px;"><tbody>
           <tr><td style="width:150px;"><b>所属機関情報</b></td><td>会社名・カナ・法人番号・住所・電話・担当者・分野<br>
             <span class="muted">→ 取引先マスタに反映。締日・支払サイト・口座など会計項目は上書きされません（このシステムで入力する項目です）。</span></td></tr>
-          <tr><td><b>特定技能者情報</b></td><td>氏名・ID・国籍・在留資格・在留期限<br>
-            <span class="muted">→ 読み取り専用。編集はCRM側で行ってください。</span></td></tr>
-          <tr><td><b>雇用（在籍期間）</b></td><td>誰が・どの会社に・いつからいつまで<br>
-            <span class="muted">→ 支援委託料（人数×単価）の計算根拠になります。</span></td></tr>
         </tbody></table>
+        <div class="fhelp" style="margin-top:8px;">※ 2026-09-13 から、特定技能者・在籍期間は取り込みません。
+          このシステムは「お金」だけを見ます（人はCRMが正）。請求は 月額固定／都度 で作ります。</div>
         <div class="infobar" style="margin-top:10px;">CRMに無い会社（仕入先・外部の取引先）や、CRMで扱わない費用は、このシステムに直接入力します。
           両方が同じ画面に並び、「CRM連携／手入力」のタグで見分けられます。</div>
       </div></div>` });
@@ -4831,7 +4821,6 @@ async function renderCrmStatus(){
         <div class="kpi"><div class="lbl">最終同期</div><div class="num" style="font-size:16px;">${last? esc(String(last.at).slice(0,16).replace('T',' ')) : '—'}</div>
           <div class="sub">${last? (last.ok?'<span class="plus">成功</span>':'<span class="minus">失敗</span>') : 'まだ同期していません'}</div></div>
         <div class="kpi"><div class="lbl">取引先（CRM）</div><div class="num">${(DB.companies||[]).filter(c=>c.source==='crm').length}社</div></div>
-        <div class="kpi"><div class="lbl">特定技能者</div><div class="num">${(DB.workers||[]).length}名</div></div>
       </div>
       ${!d.configured? `<div class="warnbar">APIの接続情報（CRM_API_BASE / CRM_EXPORT_KEY）が未設定です。設定するまでは「CSVから取り込む」をご利用ください。
         <div style="margin-top:4px;font-weight:400;">設定手順は <code>crm-integration/README.md</code> にあります。</div></div>`:''}
@@ -5292,8 +5281,7 @@ function globalSearch(q){
     res.push({t:i.no+' ／ '+companyName(i.companyId).replace(/<[^>]+>/g,''), s:'請求書 '+moneyPlain(docTotal(i))+'円', go:`openDetail('invoices','${i.id}')`}); });
   (DB.bills||[]).forEach(b=>{ if(((b.no||'')+companyName(b.companyId)).toLowerCase().includes(q))
     res.push({t:b.no+' ／ '+companyName(b.companyId).replace(/<[^>]+>/g,''), s:'支払請求', go:`openDetail('bills','${b.id}')`}); });
-  (DB.workers||[]).forEach(w=>{ if(((w.name||'')+(w.code||'')).toLowerCase().includes(q))
-    res.push({t:w.name, s:'特定技能者 '+(w.code||''), go:`goto('workers')`}); });
+  /* 特定技能者はこのシステムの対象から外したため、検索からも外しています（データは残っています）。 */
   box.innerHTML = res.slice(0,10).map(r=>`<div class="ac-item" onmousedown="closeSearch();${r.go}">
     <span>${esc(r.t)}</span><span class="muted" style="font-size:11px;">${esc(r.s)}</span></div>`).join('')
     || `<div class="ac-item muted">「${esc(q)}」に一致する結果がありません</div>`;

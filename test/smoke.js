@@ -258,7 +258,7 @@ ctx.__x.SECTIONS.forEach(sec=>{
 });
 eq('ガイドは全画面を載せる（書き忘れ検出）',
   ctx.__x.SECTIONS.flatMap(s=>s.tabs.map(t=>t.id)).filter(id=>!ctx.__x.PAGE_GUIDE[id]), []);
-eq('メニューは8項目', ctx.__x.SECTIONS.length, 8);
+eq('メニューは7項目（特定技能者を外した）', ctx.__x.SECTIONS.length, 7);
 try{ const h=ctx.guidePromise(); const ok=h.length>200;
   console.log((ok?'  ok  ':'  NG  ')+'数字の約束  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
 
@@ -299,6 +299,7 @@ console.log('\n― 画面が落ちずに描けるか ―');
   const n = ctx.demoCount();
   eq('デモが入った（件数）', n>300, true);
   eq('取引先は9社', _db.companies.filter(c=>c.demo).length, 9);
+  eq('特定技能者は作らない', _db.workers.filter(w=>w.demo).length, 0);
   eq('物件は4件', _db.properties.filter(p=>p.demo).length, 4);
   eq('14か月 × 3社 の請求', _db.invoices.filter(i=>i.demo).length, 42);
   eq('全部に【デモ】の印', _db.companies.filter(c=>c.demo).every(c=>c.name.startsWith('【デモ】')), true);

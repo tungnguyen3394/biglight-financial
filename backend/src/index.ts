@@ -488,14 +488,19 @@ app.get('/crm/status', async (req, res) => {
 async function runCrmSync(source: 'api' | 'csv', actor: string, payloadIn?: any) {
   const client = await pool.connect()
   try {
-    const payload = source === 'api' ? await fetchFromCrm() : payloadIn
+    let payload = source === 'api' ? await fetchFromCrm() : payloadIn
+    /* ★ 2026-09-13 利用者の指示: このシステムは「お金」だけを見る。
+       特定技能者・在籍期間は CRM が正であり、ここには取り込みません
+       （人数×単価の請求をやめたため、必要なくなりました）。
+       戻したくなったら、この1行を消すだけです。データの形は変えていません。 */
+    if (payload) payload = { companies: (payload as any).companies || [] } as any
     await client.query('BEGIN')
     const r = await client.query('SELECT data FROM app_state WHERE id=1 FOR UPDATE')
     const cur = r.rows[0]?.data || {}
     const { state, stats } = applyCrmPayload(cur, payload)
     await client.query('UPDATE app_state SET data=$1::jsonb, updated_at=now() WHERE id=1', [JSON.stringify(state)])
     await client.query('COMMIT')
-    bumpRevs(['companies', 'workers', 'assignments'])
+    bumpRevs(['companies'])
     saveHistory(state, actor, 'crm-sync')
     await logCrmSync(source, actor, true, stats, 'OK')
     sseBroadcast(actor)
