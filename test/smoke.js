@@ -195,6 +195,36 @@ ctx.setCostCell('CI5','2025-11', 99000);
 eq('買掛の費目に経費は作られない', _db.expenses.length, exBefore);
 eq('買掛の月は費用表でも支払請求の額のまま', ctx.costRowsOf(2025).rows.find(r=>r.it.id==='CI5').cells[3], 110000);
 
+console.log('\n― 営業日（期日が土日祝のとき） ―');
+{
+  const H26=[...ctx.jpHolidays(2026)].sort();
+  eq('2026年の祝日（振替・国民の休日を含む）', H26,
+    ['2026-01-01','2026-01-12','2026-02-11','2026-02-23','2026-03-20','2026-04-29','2026-05-03','2026-05-04','2026-05-05','2026-05-06',
+     '2026-07-20','2026-08-11','2026-09-21','2026-09-22','2026-09-23','2026-10-12','2026-11-03','2026-11-23']);
+  const H25=[...ctx.jpHolidays(2025)].sort();
+  eq('2025年の祝日', H25,
+    ['2025-01-01','2025-01-13','2025-02-11','2025-02-23','2025-02-24','2025-03-20','2025-04-29','2025-05-03','2025-05-04','2025-05-05','2025-05-06',
+     '2025-07-21','2025-08-11','2025-09-15','2025-09-23','2025-10-13','2025-11-03','2025-11-23','2025-11-24']);
+  eq('土曜は休業日', ctx.isBankHoliday('2025-10-25'), true);
+  eq('12/31・1/2・1/3 は銀行の休業日', ['2025-12-31','2026-01-02','2026-01-03'].map(ctx.isBankHoliday), [true,true,true]);
+  eq('平日は営業日', ctx.isBankHoliday('2026-09-14'), false);
+  /* C2 の期日 2025-10-25 は土曜 */
+  const inv={ companyId:'C2', dueDate:'2025-10-25' };
+  eq('翌営業日（既定）→ 月曜', ctx.effDue(inv), '2025-10-27');
+  _db.companies.find(c=>c.id==='C2').dueAdjust='前営業日';
+  eq('前営業日 → 金曜', ctx.effDue(inv), '2025-10-24');
+  _db.companies.find(c=>c.id==='C2').dueAdjust='そのまま';
+  eq('そのまま → 土曜のまま', ctx.effDue(inv), '2025-10-25');
+  delete _db.companies.find(c=>c.id==='C2').dueAdjust;
+  eq('年末の期日は年明けの営業日へ（12/31→1/5）', ctx.effDue({ companyId:'C1', dueDate:'2025-12-31' }), '2026-01-05');
+  /* ★ 本題: 土曜が期日で 月曜に入金 → 遅れではない（評価を不当に下げない） */
+  _db.invoices.push({ id:'IH', no:'H', companyId:'C1', bookMonth:'2025-09', dueDate:'2025-10-25', status:'確定',
+    items:[{ accountCode:'4100', amount:10000, taxCat:'課税10%' }] });
+  _db.payments.push({ id:'PH', companyId:'C1', date:'2025-10-27', amount:11000, status:'確定', allocations:[{ invoiceId:'IH', amount:11000 }] });
+  eq('土曜期日を月曜に入金しても期日内', ctx.ledColor(ctx.ledLate('ar', _db.invoices.find(i=>i.id==='IH'))), 'lg-ok');
+  _db.invoices=_db.invoices.filter(i=>i.id!=='IH'); _db.payments=_db.payments.filter(p=>p.id!=='PH');
+}
+
 console.log('\n― 取引先台帳（履歴・タイムライン）―');
 /* ★ 期日は会社ごとに違う。C2 は「20日締・翌々月25日払い」なので、
    計上から85日かかっても期日内。ここを「計上からの日数」で色付けしていないことを確かめる。 */
@@ -206,7 +236,7 @@ _db.payments.push({ id:'P2', companyId:'C2', date:'2025-10-25', amount:55000, st
 
 eq('C2 の期日は会社の条件から', _db.invoices[2].dueDate, '2025-10-25');
 eq('払い終わった日', ctx.ledSettleDate('ar', _db.invoices[2]), '2025-10-25');
-eq('85日かかっても期日内（会社ごとの期日で判定）', ctx.ledLate('ar', _db.invoices[2]).days, 0);
+eq('85日かかっても期日内（会社ごとの期日で判定）', ctx.ledLate('ar', _db.invoices[2]).days<=0, true);
 eq('期日内は緑', ctx.ledColor(ctx.ledLate('ar', _db.invoices[2])), 'lg-ok');
 eq('1日遅れ（I2: 9/30期日を10/1入金）', ctx.ledLate('ar', _db.invoices[1]).days, 1);
 eq('30日までの遅れは黄', ctx.ledColor(ctx.ledLate('ar', _db.invoices[1])), 'lg-warn');

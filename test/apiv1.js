@@ -48,7 +48,7 @@ let code = html.slice(st0 + 8, en0).replace(/\/\* ============ 起動 ==========
 code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v},' +
   ' f:{docTotal,docNet,itemAmount,paidOfInvoice,balanceOfInvoice,invoiceStatus,agingBucket,arTotal,apTotal,' +
   ' paidOfBill,balanceOfBill,billStatus,actualSeries,planSeries,plBook,cashPlanByMonth,cashPlanByWeek,' +
-  ' arBalanceOf,apBalanceOf,lastActualIdx,landing,openInvoices,openBills} };';
+  ' arBalanceOf,apBalanceOf,lastActualIdx,landing,openInvoices,openBills,effDue,jpHolidays,isBankHoliday} };';
 const noop = () => {};
 const el = { innerHTML: '', style: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
   querySelector: () => null, querySelectorAll: () => [], addEventListener: noop, appendChild: noop, focus: noop,
@@ -74,7 +74,7 @@ const state = {
   companies: [
     { id: 'C1', name: '株式会社アルファ', kana: 'アルファ', kind: '得意先', closingDay: 31, paySite: 1, payDay: 31, bankInfo: '○○銀行 1234567', updatedAt: '2026-09-01T00:00:00.000Z' },
     { id: 'C2', name: 'ベータ工業', kind: '得意先', closingDay: 20, paySite: 2, payDay: 25, updatedAt: '2026-09-02T00:00:00.000Z' },
-    { id: 'C3', name: 'ガンマ商事', kind: '仕入先', updatedAt: '2026-09-03T00:00:00.000Z' },
+    { id: 'C3', name: 'ガンマ商事', kind: '仕入先', dueAdjust: 'そのまま', updatedAt: '2026-09-03T00:00:00.000Z' },
   ],
   workers: [{ id: 'W1', name: 'A', code: 'W001', nationality: 'ベトナム', individualNumber: '123456789012', residenceCard: 'AB1234567CD' }],
   assignments: [{ id: 'AS1', workerId: 'W1', companyId: 'C1', joinDate: '2025-04-01', exitDate: '' }],
@@ -146,7 +146,8 @@ for (const inv of state.invoices) {
   eq(`請求 ${inv.id} 入金済み`, H.paidOfInvoice(inv), F.paidOfInvoice(state, inv));
   eq(`請求 ${inv.id} 残高`, H.balanceOfInvoice(inv), F.balanceOfInvoice(state, inv));
   eq(`請求 ${inv.id} 状態`, H.invoiceStatus(inv), F.invoiceStatus(state, inv));
-  eq(`請求 ${inv.id} 年齢区分`, H.agingBucket(inv), F.agingBucket(inv));
+  eq(`請求 ${inv.id} 年齢区分`, H.agingBucket(inv), F.agingBucket(inv, state));
+  eq(`請求 ${inv.id} 調整後の期日`, H.effDue(inv), F.effDue(state, inv));
 }
 for (const b of state.bills) {
   eq(`支払請求 ${b.id} 合計`, H.docTotal(b), F.docTotal(b));
@@ -155,6 +156,9 @@ for (const b of state.bills) {
   eq(`支払請求 ${b.id} 状態`, H.billStatus(b), F.billStatus(state, b));
 }
 eq('未回収の合計（売掛）', H.arTotal(), F.arTotal(state));
+/* 営業日: 祝日の計算と 休業日の判定が 画面とサーバーで同じ */
+[2024,2025,2026,2027,2030].forEach(y=>eq(`祝日 ${y}年`, [...H.jpHolidays(y)].sort(), [...F.jpHolidays(y)].sort()));
+['2025-10-25','2025-12-31','2026-01-02','2026-09-22','2026-05-06','2026-09-14'].forEach(d=>eq(`休業日 ${d}`, H.isBankHoliday(d), F.isBankHoliday(d)));
 eq('未払の合計（買掛）', H.apTotal(), F.apTotal(state));
 eq('C1 の売掛残高', H.arBalanceOf('C1'), F.arBalanceOf(state, 'C1'));
 eq('C3 の買掛残高', H.apBalanceOf('C3'), F.apBalanceOf(state, 'C3'));
@@ -181,9 +185,9 @@ ok('取消の入金は消込に数えない', F.paidOfInvoice(state, state.invoi
 ok('全額入金の請求は「入金済」', F.invoiceStatus(state, state.invoices[0]) === '入金済');
 ok('一部入金かつ期日超過は「一部入金」', F.invoiceStatus(state, state.invoices[1]) === '一部入金');
 ok('未入金かつ期日超過は「延滞」', F.invoiceStatus(state, state.invoices[3]) === '延滞');
-ok('100日超過は「90日超」の区分', F.agingBucket(state.invoices[1]) === '90日超');
-ok('40日超過は「31〜60日」の区分', F.agingBucket(state.invoices[3]) === '31〜60日');
-ok('期日前は「未到来」', F.agingBucket(state.invoices[2]) === '未到来');
+ok('100日超過は「90日超」の区分', F.agingBucket(state.invoices[1], state) === '90日超');
+ok('40日超過は「31〜60日」の区分', F.agingBucket(state.invoices[3], state) === '31〜60日');
+ok('期日前は「未到来」', F.agingBucket(state.invoices[2], state) === '未到来');
 {
   const rev = F.actualSeries(state, 2025, 'revenue');
   ok('売上は計上月に入る（2025-09 は index 1）', rev[1] === 60000, `rev[1]=${rev[1]}`);

@@ -563,6 +563,68 @@ function dueDateOf(bookMonth, closing, site, payDay){
   return payYm+'-'+String(Math.min(payDay, daysInMonth(payYm))).padStart(2,'0');
 }
 
+
+/* ============ 営業日 — 期日が土日・祝日・年末年始に当たるとき ============
+   ★ 2026-09-14 利用者と決めたこと: 期日が銀行の休業日に当たると、お客様は
+     翌営業日（会社によっては前営業日）に払う。それを「遅れ」と数えると、
+     期日どおりの会社の評価が不当に下がる（月末はよく土日に当たる）。
+     だから「遅れているか」は必ず 調整後の期日（effDue）で判断する。
+     請求書に書く期日（dueDate）そのものは変えない。
+   ・銀行の休業日 ＝ 土日 ＋ 国民の祝日（振替休日・国民の休日を含む）＋ 12/31・1/2・1/3
+   ・祝日は計算で出す（外部に取りに行かない）。2020年以降の法律どおり。
+     backend/src/apiv1/finance.ts に同じ式があり、テストで突き合わせる。 */
+const _JP_HOL = new Map();
+function nthMonday(y, m, n){
+  const first=new Date(y, m-1, 1).getDay();
+  return 1 + ((8-first)%7) + (n-1)*7;
+}
+function jpHolidays(y){
+  if(_JP_HOL.has(y)) return _JP_HOL.get(y);
+  const base=new Set();
+  const add=(m,d)=>base.add(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  add(1,1); add(1,nthMonday(y,1,2)); add(2,11);
+  if(y>=2020) add(2,23);
+  add(3, Math.floor(20.8431+0.242194*(y-1980)-Math.floor((y-1980)/4)));
+  add(4,29); add(5,3); add(5,4); add(5,5);
+  if(y===2020){ add(7,23); add(7,24); add(8,10); }
+  else if(y===2021){ add(7,22); add(7,23); add(8,8); }
+  else { add(7,nthMonday(y,7,3)); add(8,11); add(10,nthMonday(y,10,2)); }
+  add(9,nthMonday(y,9,3));
+  add(9, Math.floor(23.2488+0.242194*(y-1980)-Math.floor((y-1980)/4)));
+  add(11,3); add(11,23);
+  const out=new Set(base);
+  /* 国民の休日: 前の日と次の日が祝日にはさまれた日 */
+  [...base].sort().forEach(d=>{ if(base.has(addDays(d,2)) && !base.has(addDays(d,1))) out.add(addDays(d,1)); });
+  /* 振替休日: 日曜の祝日 → 次の「祝日でない日」 */
+  [...out].sort().forEach(d=>{
+    if(new Date(d+'T00:00:00').getDay()===0){ let x=addDays(d,1); while(out.has(x)) x=addDays(x,1); out.add(x); }
+  });
+  _JP_HOL.set(y,out);
+  return out;
+}
+function isBankHoliday(ds){
+  if(!ds) return false;
+  const w=new Date(ds+'T00:00:00').getDay();
+  if(w===0||w===6) return true;
+  const md=ds.slice(5);
+  if(md==='12-31'||md==='01-02'||md==='01-03') return true;
+  return jpHolidays(Number(ds.slice(0,4))).has(ds);
+}
+const DUE_ADJUST = ['翌営業日','前営業日','そのまま'];
+/** 実際に払われるはずの日。会社の設定（期日が休業日のとき）で前後にずらす。 */
+function effDue(doc){
+  const d=doc && doc.dueDate; if(!d) return '';
+  const c=findById('companies', doc.companyId);
+  const mode=(c && c.dueAdjust) || '翌営業日';
+  if(mode==='そのまま') return d;
+  const step = mode==='前営業日' ? -1 : 1;
+  let x=d, guard=0;
+  while(isBankHoliday(x) && guard++<15) x=addDays(x,step);
+  return x;
+}
+const isOverdue  = doc => { const e=effDue(doc); return !!e && e < today(); };
+const daysOverdue = doc => { const e=effDue(doc); return e ? Math.max(0, daysBetween(e, today())) : 0; };
+
 /* ============ ④ 勘定科目 — 予実の骨格 ============
    kind: revenue(収益) / cogs(原価) / sga(販管費) / nonop(営業外)
    利益（粗利・営業利益・経常利益）は保存しない。常に計算（公式 §0.10）。 */
@@ -660,11 +722,15 @@ const ENTITIES = {
       {name:'closingDay', label:'締日',      type:'number', section:'会計情報（このシステムで入力）', secIcon:'yen', help:'例: 末日締めなら 31、20日締めなら 20。'},
       {name:'paySite',    label:'支払サイト（か月後）', type:'number', help:'締めた月の何か月後に支払われるか。例: 翌月払い=1、翌々月=2。'},
       {name:'payDay',     label:'支払日',    type:'number', help:'例: 末日払い=31、25日払い=25。'},
+      {name:'dueAdjust',  label:'期日が土日祝のとき', type:'select', options:DUE_ADJUST,
+        help:'翌営業日＝休み明けに払われる（多くの会社）／前営業日＝休みの前に払われる。遅れの判断と評価は、この調整後の日で行います。'},
+      {name:'creditLimit',label:'与信限度額',   type:'money', help:'未回収がこの額を超えると、ベルと 請求を作るときに知らせます。'},
+      {name:'owner',      label:'回収の担当者', type:'text', ph:'担当者のメール（例: tanaka@biglight.jp）',
+        help:'督促キューで「自分の担当」だけに絞れます。'},
       {name:'taxCat',     label:'既定の税区分', type:'select', options:TAX_CATS},
       {name:'billTo',     label:'請求書送付先', type:'text'},
       {name:'billEmail',  label:'請求書メール', type:'text'},
       {name:'bankInfo',   label:'振込先・口座', type:'text', full:true},
-      {name:'creditLimit',label:'与信限度額',   type:'money'},
       {name:'note',       label:'備考',        type:'textarea', full:true},
     ],
     columns:['name','kind','source','closingDay','paySite','arBalance','apBalance','note'],
@@ -1250,9 +1316,9 @@ function sectionTabs(page){
 function navBadges(){
   if(!DB) return {};
   const t=today(); const b={};
-  const overdueInv = (DB.invoices||[]).filter(i=>INVOICE_OPEN.includes(i.status) && i.dueDate && i.dueDate<t && balanceOfInvoice(i)>0).length;
+  const overdueInv = (DB.invoices||[]).filter(i=>INVOICE_OPEN.includes(i.status) && isOverdue(i) && balanceOfInvoice(i)>0).length;
   if(overdueInv) b.invoices = overdueInv;
-  const dueBills = (DB.bills||[]).filter(x=>BILL_OPEN.includes(x.status) && x.dueDate && x.dueDate<=addDays(t,7) && balanceOfBill(x)>0).length;
+  const dueBills = (DB.bills||[]).filter(x=>BILL_OPEN.includes(x.status) && effDue(x) && effDue(x)<=addDays(t,7) && balanceOfBill(x)>0).length;
   if(dueBills) b.bills = dueBills;
   return b;
 }
@@ -1365,7 +1431,7 @@ function invoiceStatus(inv){
   const bal = balanceOfInvoice(inv);
   if(bal<=0) return '入金済';
   if(paidOfInvoice(inv)>0) return '一部入金';
-  if(inv.dueDate && inv.dueDate < today()) return '延滞';
+  if(isOverdue(inv)) return '延滞';
   return '確定';
 }
 function openInvoices(){ return (DB.invoices||[]).filter(i=>i.status!=='取消'&&i.status!=='作成中'&&balanceOfInvoice(i)>0); }
@@ -1375,7 +1441,7 @@ function arBalanceOf(companyId){
 function arTotal(){ return openInvoices().reduce((s,i)=>s+balanceOfInvoice(i),0); }
 /** 年齢区分: 期日からの経過日数 */
 function agingBucket(inv){
-  const d = inv.dueDate ? daysBetween(inv.dueDate, today()) : 0;
+  const d = effDue(inv) ? daysBetween(effDue(inv), today()) : 0;
   if(d<=0)  return '未到来';
   if(d<=30) return '1〜30日';
   if(d<=60) return '31〜60日';
@@ -1400,7 +1466,7 @@ function billStatus(b){
   const bal = balanceOfBill(b);
   if(bal<=0) return '支払済';
   if(paidOfBill(b)>0) return '一部支払';
-  if(b.dueDate && b.dueDate < today()) return '期日超過';
+  if(isOverdue(b)) return '期日超過';
   return '確定';
 }
 function openBills(){ return (DB.bills||[]).filter(b=>b.status!=='取消'&&b.status!=='作成中'&&balanceOfBill(b)>0); }
@@ -1605,8 +1671,8 @@ function cashPlanByMonth(fromYm, months){
   const out=[];
   for(let k=0;k<months;k++){
     const ym = addMonths(fromYm,k);
-    const inAmt = openInvoices().filter(i=>(i.dueDate||'').slice(0,7)===ym).reduce((s,i)=>s+balanceOfInvoice(i),0);
-    const outAmt= openBills().filter(b=>(b.dueDate||'').slice(0,7)===ym).reduce((s,b)=>s+balanceOfBill(b),0);
+    const inAmt = openInvoices().filter(i=>effDue(i).slice(0,7)===ym).reduce((s,i)=>s+balanceOfInvoice(i),0);
+    const outAmt= openBills().filter(b=>effDue(b).slice(0,7)===ym).reduce((s,b)=>s+balanceOfBill(b),0);
     out.push({ ym, in:inAmt, out:outAmt, net:inAmt-outAmt });
   }
   return out;
@@ -1616,8 +1682,8 @@ function cashPlanByWeek(weeks){
   const dow=new Date(start+'T00:00:00').getDay(); start=addDays(start,-((dow+6)%7));   // 月曜起点
   for(let k=0;k<weeks;k++){
     const s=addDays(start,k*7), e=addDays(s,6);
-    const inAmt = openInvoices().filter(i=>i.dueDate&&i.dueDate>=s&&i.dueDate<=e).reduce((t,i)=>t+balanceOfInvoice(i),0);
-    const outAmt= openBills().filter(b=>b.dueDate&&b.dueDate>=s&&b.dueDate<=e).reduce((t,b)=>t+balanceOfBill(b),0);
+    const inAmt = openInvoices().filter(i=>effDue(i)&&effDue(i)>=s&&effDue(i)<=e).reduce((t,i)=>t+balanceOfInvoice(i),0);
+    const outAmt= openBills().filter(b=>effDue(b)&&effDue(b)>=s&&effDue(b)<=e).reduce((t,b)=>t+balanceOfBill(b),0);
     out.push({ s, e, in:inAmt, out:outAmt, net:inAmt-outAmt });
   }
   return out;
@@ -2435,7 +2501,7 @@ function viewInvoices(){
   rows=rows.filter(r=>fcolPass(p,r));
 
   const t=today();
-  const overdue=(DB.invoices||[]).filter(i=>INVOICE_OPEN.includes(invoiceStatus(i))&&i.dueDate&&i.dueDate<t&&balanceOfInvoice(i)>0);
+  const overdue=(DB.invoices||[]).filter(i=>INVOICE_OPEN.includes(invoiceStatus(i))&&isOverdue(i)&&balanceOfInvoice(i)>0);
   const alert = overdue.length? `<div class="alertbar">${IC.warn} 入金期日を過ぎた請求が ${overdue.length}件（${moneyPlain(overdue.reduce((s,i)=>s+balanceOfInvoice(i),0))}円）あります。
     <button class="btn sm" style="background:#fff;color:var(--danger);border-color:currentColor;margin-left:auto;" onclick="goto('aging')">債権年齢表で確認</button></div>`:'';
 
@@ -2457,7 +2523,7 @@ function viewInvoices(){
     {key:'paid', label:'入金済', cls:'r', noFilter:true, val:r=>money(paidOfInvoice(r))},
     {key:'balance', label:'残高', cls:'r', noFilter:true, val:r=>{const b=balanceOfInvoice(r); return b>0?`<b class="num minus">${moneyPlain(b)}</b>`:'<span class="zero">0</span>';}},
     {key:'dueDate', label:'入金期日', date:true, val:r=>{
-      const b=balanceOfInvoice(r), late=r.dueDate&&r.dueDate<t&&b>0;
+      const b=balanceOfInvoice(r), late=isOverdue(r)&&b>0;
       return r.dueDate? (late?`<span class="badge b-red">${esc(r.dueDate)}</span>`:esc(r.dueDate)) : '<span class="zero">-</span>'; }},
     {key:'att', label:'添付', noFilter:true, val:r=>attBtn('invoices', r.id)},
     {key:'status', label:'状態', raw:r=>invoiceStatus(r), val:r=>statusBadge(invoiceStatus(r))},
@@ -2634,7 +2700,7 @@ function drawPaymentModal(){
   const rows=open.map(i=>{
     const bal=balanceOfInvoice(i)+ (c.id? (allocMap[i.id]||0) : 0);
     return `<tr><td>${esc(i.no)}</td><td>${esc(i.bookMonth||'')}</td>
-      <td>${i.dueDate&&i.dueDate<today()?`<span class="badge b-red">${esc(i.dueDate)}</span>`:esc(i.dueDate||'')}</td>
+      <td>${isOverdue(i)?`<span class="badge b-red">${esc(i.dueDate)}</span>`:esc(i.dueDate||'')}</td>
       <td class="r num">${moneyPlain(bal)}</td>
       <td style="width:130px;"><input class="num" style="width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:right;font-size:12px;"
         value="${allocMap[i.id]?moneyPlain(allocMap[i.id]):''}" oninput="fmtMoneyInput(this);payAlloc('${i.id}',this.value)" placeholder="0"></td></tr>`;
@@ -2716,6 +2782,7 @@ function viewAging(){
     byCo[k].buckets[b]=(byCo[k].buckets[b]||0)+balanceOfInvoice(i);
     byCo[k].total+=balanceOfInvoice(i);
     if(!byCo[k].oldest||(i.dueDate&&i.dueDate<byCo[k].oldest)) byCo[k].oldest=i.dueDate||'';
+    if(isOverdue(i)) byCo[k].late=true;
   });
   const rows=Object.values(byCo).sort((a,b)=>b.total-a.total);
   const totals={}; AGING_BUCKETS.forEach(b=>totals[b]=rows.reduce((s,r)=>s+(r.buckets[b]||0),0));
@@ -2735,7 +2802,7 @@ function viewAging(){
       <td>${coLink(r.id,'ar')}</td>
       ${AGING_BUCKETS.map(b=>`<td class="r num ${(b==='61〜90日'||b==='90日超')&&r.buckets[b]?'minus':''}">${r.buckets[b]?moneyPlain(r.buckets[b]):'<span class="zero">—</span>'}</td>`).join('')}
       <td class="r num"><b>${moneyPlain(r.total)}</b></td>
-      <td>${r.oldest&&r.oldest<today()?`<span class="badge b-red">${esc(r.oldest)}</span>`:esc(r.oldest||'')}</td>
+      <td>${r.late?`<span class="badge b-red">${esc(r.oldest)}</span>`:esc(r.oldest||'')}</td>
       <td><a onclick="agingDetail('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">明細</a></td></tr>`).join('')
       : '<tr><td colspan="9" class="empty">未回収の請求はありません。</td></tr>'}
       ${rows.length?`<tr class="totrow"><td>合計</td>${AGING_BUCKETS.map(b=>`<td class="r num">${moneyPlain(totals[b])}</td>`).join('')}
@@ -2752,7 +2819,7 @@ function agingDetail(companyId){
   openModal(`<h3>${esc(companyName(companyId).replace(/<[^>]+>/g,''))} — 未回収明細</h3>
     <div class="table-wrap"><table><thead><tr><th>請求番号</th><th>計上月</th><th>期日</th><th>経過</th><th class="r">残高</th><th></th></tr></thead>
     <tbody>${list.map(i=>{
-      const d=i.dueDate? daysBetween(i.dueDate,today()):0;
+      const d=daysOverdue(i);
       return `<tr><td>${esc(i.no)}</td><td>${esc(i.bookMonth||'')}</td><td>${esc(i.dueDate||'')}</td>
         <td>${d>0?`<span class="badge ${AGING_COLOR[agingBucket(i)]}">${d}日超過</span>`:'<span class="badge b-gray">未到来</span>'}</td>
         <td class="r num">${moneyPlain(balanceOfInvoice(i))}</td>
@@ -2771,8 +2838,8 @@ function viewBills(){
   let rows=q? all.filter(r=>((r.no||'')+companyName(r.companyId)+(r.note||'')).toLowerCase().includes(q)) : all.slice();
   rows=rows.filter(r=>fcolPass(p,r));
   const t=today();
-  const over=openBills().filter(b=>b.dueDate&&b.dueDate<t);
-  const soon=openBills().filter(b=>b.dueDate&&b.dueDate>=t&&b.dueDate<=addDays(t,7));
+  const over=openBills().filter(b=>isOverdue(b));
+  const soon=openBills().filter(b=>effDue(b)&&effDue(b)>=t&&effDue(b)<=addDays(t,7));
 
   const alert = over.length? `<div class="alertbar">${IC.warn} 支払期日を過ぎた支払が ${over.length}件（${moneyPlain(over.reduce((s,b)=>s+balanceOfBill(b),0))}円）あります。</div>`:'';
   const kpis=`<div class="kpi-grid">
@@ -2799,8 +2866,8 @@ function viewBills(){
     {key:'dueDate', label:'支払期日', date:true, val:r=>{
       const b=balanceOfBill(r);
       if(!r.dueDate) return '<span class="zero">-</span>';
-      if(b>0&&r.dueDate<t) return `<span class="badge b-red">${esc(r.dueDate)}</span>`;
-      if(b>0&&r.dueDate<=addDays(t,7)) return `<span class="badge b-amber">${esc(r.dueDate)}</span>`;
+      if(b>0&&isOverdue(r)) return `<span class="badge b-red">${esc(r.dueDate)}</span>`;
+      if(b>0&&effDue(r)<=addDays(t,7)) return `<span class="badge b-amber">${esc(r.dueDate)}</span>`;
       return esc(r.dueDate); }},
     {key:'att', label:'添付', noFilter:true, val:r=>attBtn('bills', r.id)},
     {key:'status', label:'状態', raw:r=>billStatus(r), val:r=>statusBadge(billStatus(r))},
@@ -2881,7 +2948,7 @@ function drawPayoutModal(){
   const rows=open.map(b=>{
     const bal=balanceOfBill(b)+(c.id?(map[b.id]||0):0);
     return `<tr><td>${esc(b.no)}</td><td>${esc(b.bookMonth||'')}</td>
-      <td>${b.dueDate&&b.dueDate<today()?`<span class="badge b-red">${esc(b.dueDate)}</span>`:esc(b.dueDate||'')}</td>
+      <td>${isOverdue(b)?`<span class="badge b-red">${esc(b.dueDate)}</span>`:esc(b.dueDate||'')}</td>
       <td class="r num">${moneyPlain(bal)}</td>
       <td style="width:130px;"><input class="num" style="width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:right;font-size:12px;"
         value="${map[b.id]?moneyPlain(map[b.id]):''}" oninput="fmtMoneyInput(this);poAlloc('${b.id}',this.value)" placeholder="0"></td></tr>`;
@@ -3692,6 +3759,7 @@ function viewApAging(){
     byCo[k].buckets[g]=(byCo[k].buckets[g]||0)+balanceOfBill(b);
     byCo[k].total+=balanceOfBill(b);
     if(!byCo[k].oldest||(b.dueDate&&b.dueDate<byCo[k].oldest)) byCo[k].oldest=b.dueDate||'';
+    if(isOverdue(b)) byCo[k].late=true;
   });
   const rows=Object.values(byCo).sort((a,b)=>b.total-a.total);
   const totals={}; AGING_BUCKETS.forEach(b=>totals[b]=rows.reduce((s,r)=>s+(r.buckets[b]||0),0));
@@ -3711,7 +3779,7 @@ function viewApAging(){
       <td>${coLink(r.id,'ap')}</td>
       ${AGING_BUCKETS.map(b=>`<td class="r num ${b!=='未到来'&&r.buckets[b]?'minus':''}">${r.buckets[b]?moneyPlain(r.buckets[b]):'<span class="zero">—</span>'}</td>`).join('')}
       <td class="r num"><b>${moneyPlain(r.total)}</b></td>
-      <td>${r.oldest&&r.oldest<today()?`<span class="badge b-red">${esc(r.oldest)}</span>`:esc(r.oldest||'')}</td>
+      <td>${r.late?`<span class="badge b-red">${esc(r.oldest)}</span>`:esc(r.oldest||'')}</td>
       <td><a onclick="apAgingDetail('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">明細</a></td></tr>`).join('')
       : '<tr><td colspan="9" class="empty">未払の支払請求はありません。</td></tr>'}
       ${rows.length?`<tr class="totrow"><td>合計</td>${AGING_BUCKETS.map(b=>`<td class="r num">${moneyPlain(totals[b])}</td>`).join('')}
@@ -3728,7 +3796,7 @@ function apAgingDetail(companyId){
   openModal(`<h3>${esc(String(companyName(companyId)).replace(/<[^>]+>/g,''))} — 未払明細</h3>
     <div class="table-wrap"><table><thead><tr><th>管理番号</th><th>計上月</th><th>期日</th><th>経過</th><th class="r">残高</th><th></th></tr></thead>
     <tbody>${list.map(b=>{
-      const d=b.dueDate? daysBetween(b.dueDate,today()):0;
+      const d=daysOverdue(b);
       return `<tr><td>${esc(b.no||'')}</td><td>${esc(b.bookMonth||'')}</td><td>${esc(b.dueDate||'')}</td>
         <td>${d>0?`<span class="badge ${AGING_COLOR[agingBucket(b)]}">${d}日超過</span>`:'<span class="badge b-gray">未到来</span>'}</td>
         <td class="r num">${moneyPlain(balanceOfBill(b))}</td>
@@ -4629,7 +4697,7 @@ function ledSettleDate(side, doc){
 }
 /** 1枚の伝票の「払われ方」。days は期日から何日遅れたか（マイナスは前倒し）。 */
 function ledLate(side, doc){
-  const S=ledS(side), due=doc.dueDate||'', bal=S.bal(doc), settle=ledSettleDate(side,doc);
+  const S=ledS(side), due=effDue(doc), bal=S.bal(doc), settle=ledSettleDate(side,doc);
   if(bal<0) return {state:'over', days:0, settle};                       // 過入金
   if(settle) return {state:'paid', days: due? daysBetween(due,settle):0, settle};
   if(!due)   return {state:'open', days:0, settle:null};
@@ -5426,7 +5494,7 @@ function krCurrent(kr){
     return sumRange(b,0,i);                       // ytd
   }
   if(a.type==='ar'){
-    if(a.metric==='overdue') return openInvoices().filter(x=>x.dueDate&&x.dueDate<today()).reduce((s,x)=>s+balanceOfInvoice(x),0);
+    if(a.metric==='overdue') return openInvoices().filter(x=>isOverdue(x)).reduce((s,x)=>s+balanceOfInvoice(x),0);
     return arTotal();
   }
   if(a.type==='ap') return apTotal();
@@ -5604,8 +5672,8 @@ function viewDashboard(){
   const act=plBook(fy,'actual'), bud=plBook(fy,'budget'), prev=plBook(fy-1,'actual');
   const cRev=compareSeries(act.revenue,prev.revenue,i), cOrd=compareSeries(act.ordinary,prev.ordinary,i);
   const t=today();
-  const overdue=openInvoices().filter(x=>x.dueDate&&x.dueDate<t);
-  const dueSoon=openBills().filter(b=>b.dueDate&&b.dueDate<=addDays(t,7));
+  const overdue=openInvoices().filter(x=>isOverdue(x));
+  const dueSoon=openBills().filter(b=>effDue(b)&&effDue(b)<=addDays(t,7));
   const week=cashPlanByWeek(4);
   const objs=(DB.objectives||[]).filter(o=>o.period===curPeriod());
 
@@ -5645,7 +5713,7 @@ function viewDashboard(){
         <thead><tr><th>請求番号</th><th>取引先</th><th>期日</th><th class="r">残高</th><th>経過</th></tr></thead>
         <tbody>${overdue.slice(0,6).map(x=>`<tr><td>${esc(x.no)}</td><td>${esc(companyName(x.companyId).replace(/<[^>]+>/g,''))}</td>
           <td>${esc(x.dueDate)}</td><td class="r num">${moneyPlain(balanceOfInvoice(x))}</td>
-          <td><span class="badge ${AGING_COLOR[agingBucket(x)]}">${daysBetween(x.dueDate,t)}日</span></td></tr>`).join('')}</tbody></table></div></div>`:''}
+          <td><span class="badge ${AGING_COLOR[agingBucket(x)]}">${daysOverdue(x)}日</span></td></tr>`).join('')}</tbody></table></div></div>`:''}
 
     <div class="dash-section c-blue"><div class="dash-head clickable" onclick="goto('cashflow')">
         資金繰り（今後4週間）<span class="cnt">差引 ${moneyPlain(week.reduce((s,w)=>s+w.net,0))}円 →</span></div>
@@ -5681,13 +5749,13 @@ function notifItems(){
   if(!DB) return out;
 
   /* ── 債権: 期日を過ぎた請求 ── */
-  const over=openInvoices().filter(i=>i.dueDate&&i.dueDate<t);
+  const over=openInvoices().filter(i=>isOverdue(i));
   if(over.length) out.push({ sev:'danger', key:'ar-over', label:'入金期日を過ぎた請求',
     n:over.length, amount:over.reduce((s,i)=>s+balanceOfInvoice(i),0), go:"goto('aging')",
-    sub:`最長 ${Math.max(...over.map(i=>daysBetween(i.dueDate,t)))}日 超過` });
+    sub:`最長 ${Math.max(...over.map(i=>daysOverdue(i)))}日 超過` });
 
   /* ── 債権: 今週が期日の請求（先に声をかければ遅れない） ── */
-  const soonAr=openInvoices().filter(i=>i.dueDate&&i.dueDate>=t&&i.dueDate<=addDays(t,7));
+  const soonAr=openInvoices().filter(i=>effDue(i)&&effDue(i)>=t&&effDue(i)<=addDays(t,7));
   if(soonAr.length) out.push({ sev:'info', key:'ar-soon', label:'7日以内が入金期日の請求',
     n:soonAr.length, amount:soonAr.reduce((s,i)=>s+balanceOfInvoice(i),0), go:"goto('invoices')" });
 
@@ -5697,11 +5765,11 @@ function notifItems(){
     amount:un, go:"goto('receipts')", sub:'どの請求に充てるか決めると、残高が正しくなります' });
 
   /* ── 債務: 期日を過ぎた支払（相手の信用に関わる） ── */
-  const apOver=openBills().filter(b=>b.dueDate&&b.dueDate<t);
+  const apOver=openBills().filter(b=>isOverdue(b));
   if(apOver.length) out.push({ sev:'danger', key:'ap-over', label:'支払期日を過ぎた支払',
     n:apOver.length, amount:apOver.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('apaging')" });
 
-  const apSoon=openBills().filter(b=>b.dueDate&&b.dueDate>=t&&b.dueDate<=addDays(t,7));
+  const apSoon=openBills().filter(b=>effDue(b)&&effDue(b)>=t&&effDue(b)<=addDays(t,7));
   if(apSoon.length) out.push({ sev:'warn', key:'ap-soon', label:'7日以内に支払う',
     n:apSoon.length, amount:apSoon.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('bills')" });
 

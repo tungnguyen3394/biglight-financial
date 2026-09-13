@@ -49,14 +49,15 @@ export function receivablesReport(st: any, o: ArOpts = {}) {
   const limit = Math.max(1, Math.min(500, Number(o.limit) || 100))
   let open = F.openInvoices(st)
   if (o.companyId) open = open.filter((i: any) => String(i.companyId) === String(o.companyId))
-  const overdue = open.filter((i: any) => i.dueDate && i.dueDate < t)
+  const overdue = open.filter((i: any) => F.isOverdue(st, i))
   const rows = (o.overdueOnly ? overdue : open)
     .map((i: any) => ({
       id: i.id, no: i.no || '', company: brief(st, i.companyId), book_month: i.bookMonth || null,
       issue_date: i.issueDate || null, due_date: i.dueDate || null,
       total: F.docTotal(i), paid: F.paidOfInvoice(st, i), balance: F.balanceOfInvoice(st, i),
-      status: F.invoiceStatus(st, i), aging_bucket: F.agingBucket(i),
-      days_overdue: i.dueDate ? Math.max(0, F.daysBetween(i.dueDate, t)) : null,
+      status: F.invoiceStatus(st, i), aging_bucket: F.agingBucket(i, st),
+      effective_due_date: F.effDue(st, i) || null,
+      days_overdue: i.dueDate ? F.daysOverdue(st, i) : null,
     }))
     .sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')))
 
@@ -67,12 +68,12 @@ export function receivablesReport(st: any, o: ArOpts = {}) {
     if (!byCo[k]) byCo[k] = { company: brief(st, i.companyId), total: 0, buckets: Object.fromEntries(F.AGING_BUCKETS.map(b => [b, 0])), oldest_due_date: '' }
     const bal = F.balanceOfInvoice(st, i)
     byCo[k].total += bal
-    byCo[k].buckets[F.agingBucket(i)] += bal
+    byCo[k].buckets[F.agingBucket(i, st)] += bal
     if (i.dueDate && (!byCo[k].oldest_due_date || i.dueDate < byCo[k].oldest_due_date)) byCo[k].oldest_due_date = i.dueDate
   }
   const aging = Object.values(byCo).sort((a: any, b: any) => b.total - a.total)
   const totalsByBucket = Object.fromEntries(F.AGING_BUCKETS.map(b =>
-    [b, open.filter((i: any) => F.agingBucket(i) === b).reduce((s: number, i: any) => s + F.balanceOfInvoice(st, i), 0)]))
+    [b, open.filter((i: any) => F.agingBucket(i, st) === b).reduce((s: number, i: any) => s + F.balanceOfInvoice(st, i), 0)]))
 
   return {
     as_of: t,
@@ -95,15 +96,16 @@ export function payablesReport(st: any, o: ApOpts = {}) {
   const until = F.addDays(t, within)
   let open = F.openBills(st)
   if (o.companyId) open = open.filter((b: any) => String(b.companyId) === String(o.companyId))
-  const overdue = open.filter((b: any) => b.dueDate && b.dueDate < t)
+  const overdue = open.filter((b: any) => F.isOverdue(st, b))
   const rows = open
-    .filter((b: any) => o.overdueOnly ? (b.dueDate && b.dueDate < t) : (!b.dueDate || b.dueDate <= until))
+    .filter((b: any) => o.overdueOnly ? F.isOverdue(st, b) : (!b.dueDate || F.effDue(st, b) <= until))
     .map((b: any) => ({
       id: b.id, no: b.no || '', company: brief(st, b.companyId), book_month: b.bookMonth || null,
       received_date: b.recvDate || null, due_date: b.dueDate || null,
       total: F.docTotal(b), paid: F.paidOfBill(st, b), balance: F.balanceOfBill(st, b),
       status: F.billStatus(st, b),
-      days_overdue: b.dueDate && b.dueDate < t ? F.daysBetween(b.dueDate, t) : 0,
+      effective_due_date: F.effDue(st, b) || null,
+      days_overdue: F.daysOverdue(st, b),
       accounts: (b.items || []).map((it: any) => ({ code: it.accountCode || null, label: F.accountLabel(st, it.accountCode), kind: F.accountKind(st, it.accountCode), amount: F.itemAmount(it) })),
     }))
     .sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')))
@@ -117,7 +119,7 @@ export function payablesReport(st: any, o: ApOpts = {}) {
     open_total: open.reduce((s: number, b: any) => s + F.balanceOfBill(st, b), 0), open_count: open.length,
     overdue_total: overdue.reduce((s: number, b: any) => s + F.balanceOfBill(st, b), 0), overdue_count: overdue.length,
     due_within_days: within,
-    due_soon_total: open.filter((b: any) => b.dueDate && b.dueDate >= t && b.dueDate <= until).reduce((s: number, b: any) => s + F.balanceOfBill(st, b), 0),
+    due_soon_total: open.filter((b: any) => { const d = F.effDue(st, b); return d && d >= t && d <= until }).reduce((s: number, b: any) => s + F.balanceOfBill(st, b), 0),
     cost_of_sales_in_open_bills: cogsOpen,
     returned: Math.min(rows.length, limit), total_rows: rows.length, items: rows.slice(0, limit),
     note: '支払は費用（予実）を動かしません。買掛金の残高が減るだけです。費用に効くのは計上月です。',
@@ -151,7 +153,7 @@ export function companyAccount(st: any, companyId: string) {
     company: { id: c.id, name: c.name || '', kind: c.kind || null, closing_day: c.closingDay ?? null, pay_site_months: c.paySite ?? null, pay_day: c.payDay ?? null },
     ar_balance: F.arBalanceOf(st, companyId), ap_balance: F.apBalanceOf(st, companyId),
     open_invoices: F.openInvoices(st).filter((i: any) => String(i.companyId) === String(companyId))
-      .map((i: any) => ({ id: i.id, no: i.no || '', due_date: i.dueDate || null, balance: F.balanceOfInvoice(st, i), status: F.invoiceStatus(st, i), aging_bucket: F.agingBucket(i) })),
+      .map((i: any) => ({ id: i.id, no: i.no || '', due_date: i.dueDate || null, balance: F.balanceOfInvoice(st, i), status: F.invoiceStatus(st, i), aging_bucket: F.agingBucket(i, st) })),
     open_bills: F.openBills(st).filter((b: any) => String(b.companyId) === String(companyId))
       .map((b: any) => ({ id: b.id, no: b.no || '', due_date: b.dueDate || null, balance: F.balanceOfBill(st, b), status: F.billStatus(st, b) })),
     recent_payments: pays.slice(-10).reverse().map((p: any) => ({ id: p.id, date: p.date || null, amount: F.num(p.amount), fee: F.num(p.fee), method: p.method || null, applied_to: (p.allocations || []).length })),
@@ -174,7 +176,7 @@ export function invoiceDetail(st: any, inv: any) {
     id: inv.id, no: inv.no || '', company: brief(st, inv.companyId), book_month: inv.bookMonth || null,
     issue_date: inv.issueDate || null, due_date: inv.dueDate || null,
     total: F.docTotal(inv), net: F.docNet(inv), paid: F.paidOfInvoice(st, inv), balance: F.balanceOfInvoice(st, inv),
-    status: F.invoiceStatus(st, inv), aging_bucket: F.agingBucket(inv),
+    status: F.invoiceStatus(st, inv), aging_bucket: F.agingBucket(inv, st),
     items: (inv.items || []).map((it: any) => ({ account_code: it.accountCode || null, account_label: F.accountLabel(st, it.accountCode), name: it.name || '', qty: it.qty ?? null, price: it.price ?? null, amount: F.itemAmount(it), tax_category: it.taxCat || null })),
     payments: pays, note: inv.note || null, updated_at: inv.updatedAt || null,
   }

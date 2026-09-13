@@ -40,6 +40,54 @@ export const addMonths = (ym: string, n: number) => { let [y, m] = ym.split('-')
 export const addDays = (ds: string, n: number) => { const d = new Date(ds + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 export const daysBetween = (a: string, b: string) => Math.round((+new Date(b + 'T00:00:00') - +new Date(a + 'T00:00:00')) / 86400000)
 
+/* ───────── 営業日（web/index.html と同じ式・テストで突き合わせ） ─────────
+   期日が銀行の休業日（土日・祝日・12/31・1/2・1/3）に当たるとき、会社の設定
+   （翌営業日／前営業日／そのまま）でずらした日で「遅れ」を判断する。 */
+const _JP_HOL = new Map<number, Set<string>>()
+const nthMonday = (y: number, m: number, n: number) => 1 + ((8 - new Date(y, m - 1, 1).getDay()) % 7) + (n - 1) * 7
+export function jpHolidays(y: number): Set<string> {
+  const hit = _JP_HOL.get(y); if (hit) return hit
+  const base = new Set<string>()
+  const add = (m: number, d: number) => base.add(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
+  add(1, 1); add(1, nthMonday(y, 1, 2)); add(2, 11)
+  if (y >= 2020) add(2, 23)
+  add(3, Math.floor(20.8431 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4)))
+  add(4, 29); add(5, 3); add(5, 4); add(5, 5)
+  if (y === 2020) { add(7, 23); add(7, 24); add(8, 10) }
+  else if (y === 2021) { add(7, 22); add(7, 23); add(8, 8) }
+  else { add(7, nthMonday(y, 7, 3)); add(8, 11); add(10, nthMonday(y, 10, 2)) }
+  add(9, nthMonday(y, 9, 3))
+  add(9, Math.floor(23.2488 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4)))
+  add(11, 3); add(11, 23)
+  const out = new Set(base)
+  Array.from(base).sort().forEach(d => { if (base.has(addDays(d, 2)) && !base.has(addDays(d, 1))) out.add(addDays(d, 1)) })
+  Array.from(out).sort().forEach(d => {
+    if (new Date(d + 'T00:00:00').getDay() === 0) { let x = addDays(d, 1); while (out.has(x)) x = addDays(x, 1); out.add(x) }
+  })
+  _JP_HOL.set(y, out)
+  return out
+}
+export function isBankHoliday(ds: string): boolean {
+  if (!ds) return false
+  const w = new Date(ds + 'T00:00:00').getDay()
+  if (w === 0 || w === 6) return true
+  const md = ds.slice(5)
+  if (md === '12-31' || md === '01-02' || md === '01-03') return true
+  return jpHolidays(Number(ds.slice(0, 4))).has(ds)
+}
+export function effDue(st: any, doc: any): string {
+  const d = doc && doc.dueDate; if (!d) return ''
+  const c = (Array.isArray(st && st.companies) ? st.companies : []).find((x: any) => String(x.id) === String(doc.companyId))
+  const mode = (c && c.dueAdjust) || '翌営業日'
+  if (mode === 'そのまま') return d
+  const step = mode === '前営業日' ? -1 : 1
+  let x = d, guard = 0
+  while (isBankHoliday(x) && guard++ < 15) x = addDays(x, step)
+  return x
+}
+export const isOverdue = (st: any, doc: any) => { const e = effDue(st, doc); return !!e && e < today() }
+export const daysOverdue = (st: any, doc: any) => { const e = effDue(st, doc); return e ? Math.max(0, daysBetween(e, today())) : 0 }
+
 /* ───────── 勘定科目 ───────── */
 export const DEFAULT_ACCOUNTS = [
   { code: '4100', label: '支援委託料', kind: 'revenue' }, { code: '4200', label: '紹介料', kind: 'revenue' },
@@ -96,7 +144,7 @@ export function invoiceStatus(st: any, inv: any): string {
   const bal = balanceOfInvoice(st, inv)
   if (bal <= 0) return '入金済'
   if (paidOfInvoice(st, inv) > 0) return '一部入金'
-  if (inv.dueDate && inv.dueDate < today()) return '延滞'
+  if (isOverdue(st, inv)) return '延滞'
   return '確定'
 }
 export const openInvoices = (st: any) => arr(st, 'invoices').filter((i: any) => i.status !== '取消' && i.status !== '作成中' && balanceOfInvoice(st, i) > 0)
@@ -104,8 +152,9 @@ export const arBalanceOf = (st: any, companyId: any) => openInvoices(st).filter(
 export const arTotal = (st: any) => openInvoices(st).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
 
 export const AGING_BUCKETS = ['未到来', '1〜30日', '31〜60日', '61〜90日', '90日超']
-export function agingBucket(inv: any): string {
-  const d = inv.dueDate ? daysBetween(inv.dueDate, today()) : 0
+export function agingBucket(inv: any, st?: any): string {
+  const e = effDue(st || {}, inv)
+  const d = e ? daysBetween(e, today()) : 0
   if (d <= 0) return '未到来'
   if (d <= 30) return '1〜30日'
   if (d <= 60) return '31〜60日'
@@ -128,7 +177,7 @@ export function billStatus(st: any, b: any): string {
   const bal = balanceOfBill(st, b)
   if (bal <= 0) return '支払済'
   if (paidOfBill(st, b) > 0) return '一部支払'
-  if (b.dueDate && b.dueDate < today()) return '期日超過'
+  if (isOverdue(st, b)) return '期日超過'
   return '確定'
 }
 export const openBills = (st: any) => arr(st, 'bills').filter((b: any) => b.status !== '取消' && b.status !== '作成中' && balanceOfBill(st, b) > 0)
@@ -220,8 +269,8 @@ export function cashPlanByMonth(st: any, fromYm: string, months: number) {
   const out: any[] = []
   for (let k = 0; k < months; k++) {
     const ym = addMonths(fromYm, k)
-    const inAmt = openInvoices(st).filter((i: any) => String(i.dueDate || '').slice(0, 7) === ym).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
-    const outAmt = openBills(st).filter((b: any) => String(b.dueDate || '').slice(0, 7) === ym).reduce((s, b) => s + balanceOfBill(st, b), 0)
+    const inAmt = openInvoices(st).filter((i: any) => effDue(st, i).slice(0, 7) === ym).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
+    const outAmt = openBills(st).filter((b: any) => effDue(st, b).slice(0, 7) === ym).reduce((s, b) => s + balanceOfBill(st, b), 0)
     out.push({ ym, in: inAmt, out: outAmt, net: inAmt - outAmt })
   }
   return out
@@ -233,8 +282,8 @@ export function cashPlanByWeek(st: any, weeks: number) {
   start = addDays(start, -((dow + 6) % 7))   // 月曜起点
   for (let k = 0; k < weeks; k++) {
     const s = addDays(start, k * 7), e = addDays(s, 6)
-    const inAmt = openInvoices(st).filter((i: any) => i.dueDate && i.dueDate >= s && i.dueDate <= e).reduce((t, i) => t + balanceOfInvoice(st, i), 0)
-    const outAmt = openBills(st).filter((b: any) => b.dueDate && b.dueDate >= s && b.dueDate <= e).reduce((t, b) => t + balanceOfBill(st, b), 0)
+    const inAmt = openInvoices(st).filter((i: any) => { const d = effDue(st, i); return d && d >= s && d <= e }).reduce((t, i) => t + balanceOfInvoice(st, i), 0)
+    const outAmt = openBills(st).filter((b: any) => { const d = effDue(st, b); return d && d >= s && d <= e }).reduce((t, b) => t + balanceOfBill(st, b), 0)
     out.push({ s, e, in: inAmt, out: outAmt, net: inAmt - outAmt })
   }
   return out
