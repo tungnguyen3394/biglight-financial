@@ -72,6 +72,21 @@ echo "▶ ④ 新しい構成を起動（初回はビルドに数分かかりま
 docker compose up -d --build --remove-orphans
 docker compose ps
 
+# ---------- ④' nginx に設定を読み直させる ----------
+# nginx.conf は read-only のバインドマウント。ファイルを差し替えても compose は
+# web コンテナの「設定が変わっていない」と判断して作り直さないため、nginx は
+# 起動時に読んだ古い設定を持ち続けます（2026-09-13: /mcp を足したのに画面のHTMLが
+# 返り続けて発覚）。毎回そっと読み直させます。文法が壊れているときは読み直さない
+# ＝ いま配信できている設定のまま止まらない。
+echo "▶ ④' nginx の設定を読み直し"
+if docker exec yojitsu-web nginx -t >/dev/null 2>&1; then
+  docker exec yojitsu-web nginx -s reload >/dev/null 2>&1 && echo "   ・読み直しました"
+else
+  echo "   !! nginx.conf に文法エラーがあります。読み直しを中止しました（配信は継続）"
+  docker exec yojitsu-web nginx -t || true
+  exit 1
+fi
+
 # ---------- ⑤ 確認 ----------
 echo "▶ ⑤ 動作確認"
 for i in $(seq 1 30); do
