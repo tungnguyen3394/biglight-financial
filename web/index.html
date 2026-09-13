@@ -560,6 +560,10 @@ const PAY_METHODS     = ['銀行振込','現金','口座振替','クレジット
 const BILLING_KINDS   = [{k:'per_worker',label:'人数×単価（支援委託料）'},{k:'fixed',label:'月額固定'},{k:'spot',label:'都度（自動生成しない）'}];
 const COUNT_MODES     = [{k:'month_end',label:'月末在籍'},{k:'month_start',label:'月初在籍'},{k:'prorate',label:'日割り'}];
 const COST_KINDS      = [{k:'fixed',label:'定期（毎月かかる）'},{k:'variable',label:'変動（月によって変わる）'}];
+/* 費目の払い方。★ ENTITIES より前に置くこと（宣言より先に読まれると画面が真っ白になる）。 */
+const PAY_MODES = [{k:'即払い', label:'即払い（経費として毎月打つ）'},
+                   {k:'買掛',   label:'買掛（毎月の支払請求を作る・期日で管理）'}];
+const isApCost = it => !!(it && it.payMode==='買掛');
 const OKR_LEVELS      = ['会社','部門','個人'];
 const OKR_STATUS      = ['順調','注意','遅延','完了','中止'];
 
@@ -626,6 +630,12 @@ const ENTITIES = {
       {name:'accountCode', label:'勘定科目', type:'account', req:true, help:'予実のどの費用に入るかを決めます。'},
       {name:'kind',        label:'区分',     type:'select', options:COST_KINDS, req:true,
         help:'定期＝毎月ほぼ同じ額（家賃・通信・リース）。変動＝月によって変わる（旅費・交際費）。'},
+      /* ★ 2026-09-13 利用者の指示: 費用は「ある会社に定期的に払うお金」。
+         だから支払先の会社を選べるようにし、無ければその場で作れるようにする。 */
+      {name:'companyId',   label:'支払先（取引先）', type:'ref', ref:'companies', quickAdd:'仕入先',
+        help:'期日は この会社の 締日・支払サイト・支払日 から決まります。一覧に無ければ「＋ 新しい取引先」で作れます。'},
+      {name:'payMode',     label:'払い方',   type:'select', options:PAY_MODES,
+        help:'即払い＝月次費用表に金額を打つ（経費）。買掛＝毎月の支払請求を作り、期日と残高で管理する。'},
       {name:'monthly',     label:'月額予定（税込）', type:'money',
         help:'定期費用の目安。実績がここから10%以上ズレると表のマスに色が付きます。'},
       {name:'taxCat',      label:'税区分',   type:'select', options:TAX_CATS,
@@ -730,6 +740,7 @@ const NAV_GROUPS = [
   { gid:'ap', label:'債務（買掛金）', items:[
     {id:'bills',    label:'支払管理',   icon:'bill'},
     {id:'payouts',  label:'支払実行',   icon:'cash'},
+    {id:'apaging',  label:'債務年齢表', icon:'aging'},
     {id:'cashflow', label:'資金繰り',   icon:'compare'},
   ]},
   { gid:'ok', label:'目標', items:[
@@ -1139,6 +1150,7 @@ function renderPage(page){
       case 'invoices':  el.innerHTML=viewInvoices();  break;
       case 'receipts':  el.innerHTML=viewReceipts();  break;
       case 'aging':     el.innerHTML=viewAging();     break;
+      case 'apaging':   el.innerHTML=viewApAging();   break;
       case 'bills':     el.innerHTML=viewBills();     break;
       case 'payouts':   el.innerHTML=viewPayouts();   break;
       case 'cashflow':  el.innerHTML=viewCashflow();  break;
@@ -1623,6 +1635,9 @@ function openForm(entKey, id, preset){
       const list=(DB[f.ref]||[]).filter(x=>!x._gone).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
       input=`<select name="${f.name}" ${locked?'disabled':''} onchange="onRefChange('${entKey}','${f.name}',this.value)"><option value="">-</option>`+
         list.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(v)?'selected':''}>${esc(x.name||x.id)}</option>`).join('')+`</select>`;
+      /* 一覧に無い会社をここで作れる。作りに行って戻ってくると、入力中の内容が消えてしまうため。 */
+      if(f.quickAdd && f.ref==='companies' && !locked && canCreate('companies'))
+        input += `<div style="margin-top:5px;"><a class="pillbtn pill-new" onclick="quickAddCompany('${f.name}','${attr(f.quickAdd)}')">＋ 新しい取引先を作る</a></div>`;
     }
     else if(f.type==='money') input=`<input name="${f.name}" type="text" inputmode="numeric" class="num" style="text-align:right;" value="${attr(v===''?'':moneyPlain(v))}" oninput="fmtMoneyInput(this)" ${locked?'readonly':''}>`;
     else if(f.type==='month') input=`<input name="${f.name}" type="month" value="${attr(String(v).slice(0,7))}" ${locked?'readonly':''}>`;
@@ -1655,6 +1670,41 @@ function fmtMoneyInput(el){
   const n=el.value.replace(/[^\d-]/g,'');
   el.value = n===''? '' : Number(n).toLocaleString('ja-JP');
   try{ el.setSelectionRange(Math.max(0,p+(el.value.length-before)), Math.max(0,p+(el.value.length-before))); }catch(e){}
+}
+/** 入力中の画面から離れずに取引先を1社作る（第2のモーダル）。
+    作ったらその場で選択済みにする。離れて作りに行くと、書きかけが消えてしまうため。 */
+function quickAddCompany(fieldName, kind){
+  if(!canCreate('companies')){ toast('取引先を作る権限がありません。','err'); return; }
+  openModal2(`<h3>新しい取引先</h3>
+    <div class="mdsub">支払期日は「締日・支払サイト・支払日」から自動で決まります。分かる範囲で入れてください（あとで変更できます）。</div>
+    <div class="form-grid">
+      <div class="full"><label>取引先名 <span style="color:var(--danger)">*</span></label><input id="qcName" placeholder="例: 株式会社ABC"></div>
+      <div><label>区分</label><select id="qcKind">${COMPANY_KINDS.map(k=>`<option ${k===kind?'selected':''}>${esc(k)}</option>`).join('')}</select></div>
+      <div><label>締日</label><input id="qcClose" type="number" value="31" placeholder="末日なら31"></div>
+      <div><label>支払サイト（か月後）</label><input id="qcSite" type="number" value="1" placeholder="翌月なら1"></div>
+      <div><label>支払日</label><input id="qcDay" type="number" value="31" placeholder="末日なら31"></div>
+    </div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal2()">キャンセル</button>
+      <button class="btn" onclick="quickAddCompanyGo('${attr(fieldName)}')">作成して選ぶ</button></div>`);
+  setTimeout(()=>{ const el=document.getElementById('qcName'); if(el) el.focus(); },50);
+}
+function quickAddCompanyGo(fieldName){
+  const name=(document.getElementById('qcName').value||'').trim();
+  if(!name){ toast('取引先名を入れてください。','err'); return; }
+  const rec={ name, kind:document.getElementById('qcKind').value,
+    closingDay:num(document.getElementById('qcClose').value)||31,
+    paySite:num(document.getElementById('qcSite').value),
+    payDay:num(document.getElementById('qcDay').value)||31, taxCat:'課税10%' };
+  const { record } = commitRecord('companies', rec, {});
+  closeModal2();
+  /* 開いたままのフォームの選択肢を作り直して、新しい会社を選んだ状態にする */
+  const sel=document.querySelector(`#entForm [name=${fieldName}]`);
+  if(sel){
+    const list=(DB.companies||[]).filter(x=>!x._gone).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+    sel.innerHTML='<option value="">-</option>'+list.map(x=>`<option value="${attr(x.id)}">${esc(x.name||x.id)}</option>`).join('');
+    sel.value=record.id;
+  }
+  toast(`「${name}」を取引先に追加しました。`,'ok');
 }
 function onRefChange(entKey, field, val){
   // 請求先を選んだら支払サイトから期日を自動計算（空欄のときだけ・手入力は尊重）
@@ -2563,7 +2613,10 @@ function viewBills(){
     {key:'companyId', label:'支払先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ap')},
     {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
     {key:'items', label:'内容', noFilter:true, val:r=>{
-      const its=(r.items||[]); if(!its.length) return '<span class="zero">-</span>';
+      const its=(r.items||[]);
+      /* 明細が無い支払請求は勘定科目が決まらない＝予実の費用に入らない。
+         黙って0円で計算されるより、その場で言う（公式 §0.6）。 */
+      if(!its.length) return `<span class="badge b-amber" title="明細（勘定科目）が無いため、この金額は予実の費用に入りません">明細なし</span>`;
       return `<span title="${attr(its.map(x=>x.name).join('、'))}">${esc(its[0].name||accountLabel(its[0].accountCode))}${its.length>1?` <span class="muted">他${its.length-1}件</span>`:''}</span>`; }},
     {key:'total', label:'金額', cls:'r', noFilter:true, val:r=>`<b class="num">${moneyPlain(docTotal(r))}</b>`},
     {key:'balance', label:'未払残', cls:'r', noFilter:true, val:r=>{const b=balanceOfBill(r); return b>0?`<b class="num minus">${moneyPlain(b)}</b>`:'<span class="zero">0</span>';}},
@@ -2582,6 +2635,7 @@ function viewBills(){
   ];
   const tools=`${searchBox(p,'支払先・番号で検索')}${filterClearBtn(p)}
     ${canCreate('bills')?`<button class="btn" onclick="openForm('bills')">＋ 支払請求を登録</button>`:''}
+    ${canCreate('bills')&&costItemsSorted().some(isApCost)?`<button class="btn secondary" onclick="openGenBills()">定期の支払を作成（月まとめ）</button>`:''}
     ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('bills')">${IC.doc} CSV出力</button>
       <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
 
@@ -2758,6 +2812,170 @@ function cfSaveStart(){
   if(!PENDING.changed.settings) PENDING.changed.settings=DB.settings;
   PENDING.changed.settings=DB.settings; schedulePush();
   closeModal(); renderPage('cashflow'); toast('保存しました。','ok');
+}
+
+/* ============================================================================
+   ⑪'' 買掛の自動作成（定期支払）と 債務年齢表
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-13）:
+     「費用は、ある会社に定期的に払うお金を管理するためのもの。
+       だから新しい会社をその場で作れるようにしてほしい」
+   そこで 費目マスタに【支払先（取引先）】と【払い方】を足しました。
+
+     払い方 = 即払い … いままでどおり。月次費用表のマスに金額を打つ＝経費に入る。
+                        買掛の残高は持たない（カード・口座振替など、その場で出ていくもの）
+     払い方 = 買掛   … 毎月「支払請求」を作る。期日はその会社の締日・サイト・支払日から
+                        自動で決まり、支払実行で消し込む。残高・年齢表・資金繰りに乗る。
+
+   ★ 二重計上しないための決まり: 買掛の費目は expenses を作りません。
+     金額は「その月の支払請求の明細」が唯一の出どころで、月次費用表はそれを読むだけ。
+   ========================================================================== */
+/** 買掛の費目 × 月 → その月の支払請求の明細（税込）。無ければ null。 */
+function costBillCell(costItemId, ym){
+  for(const b of (DB.bills||[])){
+    if(!b || b.status==='取消') continue;
+    if((b.bookMonth||'').slice(0,7)!==ym) continue;
+    const it=(b.items||[]).find(x=>x && String(x.costItemId)===String(costItemId));
+    if(it){
+      const net=itemAmount(it), rate=TAX_RATE[it.taxCat||'課税10%']||0;
+      return { bill:b, item:it, gross: net+Math.floor(net*rate) };
+    }
+  }
+  return null;
+}
+/** その会社に、その月の「定期支払」の支払請求を作る材料を集める */
+function apPlanFor(ym){
+  const byCo={};
+  costItemsSorted().forEach(it=>{
+    if(!isApCost(it)) return;
+    if(!it.companyId) return;                       // 支払先が無いと期日が決まらない
+    if(!costItemActive(it, ym)) return;
+    const gross=num(it.monthly); if(!gross) return;
+    const c=findById('companies', it.companyId); if(!c) return;
+    const k=String(it.companyId);
+    if(!byCo[k]) byCo[k]={ company:c, items:[], already:false };
+    if(costBillCell(it.id, ym)) byCo[k].already=true;   // もう作ってある
+    else byCo[k].items.push({ accountCode:it.accountCode||'', name:it.name||'',
+      amount: netOfGross(gross, it.taxCat), taxCat: it.taxCat||'課税10%', costItemId:String(it.id) });
+  });
+  return Object.values(byCo);
+}
+let GENB_CTX=null;
+function openGenBills(){
+  const ym=thisMonth();
+  openModal(`<h3>定期の支払をまとめて作成</h3>
+    <div class="mdsub">費目マスタで「買掛」にした費目から、その月の支払請求（作成中）を会社ごとにまとめて作ります。
+      支払期日は、その会社の締日・支払サイト・支払日から自動で決まります。</div>
+    <div class="form-grid"><div class="full"><label>対象月（計上月）</label>
+      <input id="genbYm" type="month" value="${attr(ym)}" onchange="genBillsPreview()"></div></div>
+    <div id="genbBox" style="margin-top:12px;"></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="genBillsGo()">この内容で作成</button></div>`,'lg');
+  genBillsPreview();
+}
+function genBillsPreview(){
+  const ym=document.getElementById('genbYm').value;
+  const box=document.getElementById('genbBox');
+  if(!ym){ box.innerHTML=''; return; }
+  const plan=apPlanFor(ym).filter(p=>p.items.length);
+  const done=apPlanFor(ym).filter(p=>!p.items.length&&p.already);
+  GENB_CTX={ ym, plan };
+  const noCo=costItemsSorted().filter(it=>isApCost(it)&&!it.companyId);
+  box.innerHTML = `
+    ${plan.length? `<div class="table-wrap"><table>
+      <thead><tr><th style="width:34px;"><input type="checkbox" checked onchange="document.querySelectorAll('.genbck').forEach(c=>c.checked=this.checked)"></th>
+        <th>支払先</th><th>内容</th><th class="r">金額（税込）</th><th>支払期日</th></tr></thead>
+      <tbody>${plan.map((p,i)=>{
+        const total=itemsSubtotal(p.items)+itemsTax(p.items);
+        const due=dueDateOf(ym, p.company.closingDay, p.company.paySite, p.company.payDay);
+        return `<tr><td><input type="checkbox" class="genbck" data-i="${i}" checked></td>
+          <td><b>${esc(p.company.name)}</b><div class="muted" style="font-size:10.5px;">${esc((p.company.closingDay||31)+'日締 / '+(p.company.paySite==null||p.company.paySite===''?'サイト未設定':p.company.paySite+'か月後 '+(p.company.payDay||31)+'日'))}</div></td>
+          <td style="white-space:normal;font-size:11.5px;" class="muted">${p.items.map(x=>esc(x.name)).join('、')}</td>
+          <td class="r num"><b>${moneyPlain(total)}</b></td>
+          <td>${p.company.paySite==null||p.company.paySite===''?'<span class="badge b-amber">条件未設定</span>':esc(due)}</td></tr>`;
+      }).join('')}</tbody></table></div>`
+      : `<div class="warnbar">この月に作れる定期支払はありません。費目マスタで「払い方＝買掛」「支払先」「月額予定」を入れると、ここに出てきます。</div>`}
+    ${done.length? `<div class="infobar">すでに ${ym} の支払請求がある支払先（作りません）：${done.map(p=>esc(p.company.name)).join('、')}</div>`:''}
+    ${noCo.length? `<div class="warnbar">支払先が未設定の費目：${noCo.map(it=>`<a onclick="closeModal();openForm('costItems','${it.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(it.name)}</a>`).join('、')}
+      <div style="margin-top:4px;font-weight:400;">支払先を決めないと、支払期日が計算できません。</div></div>`:''}`;
+}
+/** 実際に作るところ。画面（チェックボックス）から切り離してあるのでテストできる。 */
+function apCreateBills(ym, plans){
+  let n=0;
+  (plans||[]).forEach(p=>{
+    if(!p.items.length) return;
+    const rec={ companyId:p.company.id, bookMonth:ym, recvDate:'', status:'作成中',
+      items:p.items, note:'自動作成（定期支払・費目マスタ）' };
+    prepareDoc('bills', rec, null);
+    /* 期日はその会社の条件から。会社ごとに違うので、ここで固定の日数を使ってはいけない。 */
+    rec.dueDate = dueDateOf(ym, p.company.closingDay, p.company.paySite, p.company.payDay);
+    commitRecord('bills', rec, {}); n++;
+  });
+  return n;
+}
+function genBillsGo(){
+  if(!GENB_CTX||!GENB_CTX.plan.length){ toast('作成する対象がありません。','err'); return; }
+  const picked=[...document.querySelectorAll('.genbck:checked')].map(c=>GENB_CTX.plan[Number(c.dataset.i)]);
+  if(!picked.length){ toast('対象を選んでください。','err'); return; }
+  const n=apCreateBills(GENB_CTX.ym, picked);
+  closeModal(); renderPage(CURRENT_PAGE); toast(`${n}件の支払請求（作成中）を作成しました。`,'ok');
+}
+
+/* ---------- 債務年齢表（債権年齢表の裏返し） ---------- */
+function viewApAging(){
+  const open=openBills();
+  const byCo={};
+  open.forEach(b=>{
+    const k=String(b.companyId||'-');
+    if(!byCo[k]) byCo[k]={ id:k, name:String(companyName(b.companyId)).replace(/<[^>]+>/g,''), buckets:{}, total:0, oldest:'' };
+    const g=agingBucket(b);                       // 期日からの経過日数（請求と同じ区分）
+    byCo[k].buckets[g]=(byCo[k].buckets[g]||0)+balanceOfBill(b);
+    byCo[k].total+=balanceOfBill(b);
+    if(!byCo[k].oldest||(b.dueDate&&b.dueDate<byCo[k].oldest)) byCo[k].oldest=b.dueDate||'';
+  });
+  const rows=Object.values(byCo).sort((a,b)=>b.total-a.total);
+  const totals={}; AGING_BUCKETS.forEach(b=>totals[b]=rows.reduce((s,r)=>s+(r.buckets[b]||0),0));
+  const grand=rows.reduce((s,r)=>s+r.total,0);
+
+  const kpis=`<div class="kpi-grid">
+    ${AGING_BUCKETS.map(b=>`<div class="kpi"><div class="lbl">${esc(b==='未到来'?'未到来（これから）':b+' 超過')}</div>
+      <div class="num ${b!=='未到来'?'minus':''}">${moneyPlain(totals[b])}</div>
+      <div class="sub">${grand?((totals[b]/grand)*100).toFixed(0)+'%':'—'}</div></div>`).join('')}
+  </div>`;
+
+  const table=`<div class="table-wrap"><table class="stick1">
+    <thead><tr><th style="min-width:180px;">支払先</th>
+      ${AGING_BUCKETS.map(b=>`<th class="r">${esc(b)}</th>`).join('')}
+      <th class="r">合計</th><th>最も古い期日</th><th></th></tr></thead>
+    <tbody>${rows.length? rows.map(r=>`<tr>
+      <td>${coLink(r.id,'ap')}</td>
+      ${AGING_BUCKETS.map(b=>`<td class="r num ${b!=='未到来'&&r.buckets[b]?'minus':''}">${r.buckets[b]?moneyPlain(r.buckets[b]):'<span class="zero">—</span>'}</td>`).join('')}
+      <td class="r num"><b>${moneyPlain(r.total)}</b></td>
+      <td>${r.oldest&&r.oldest<today()?`<span class="badge b-red">${esc(r.oldest)}</span>`:esc(r.oldest||'')}</td>
+      <td><a onclick="apAgingDetail('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">明細</a></td></tr>`).join('')
+      : '<tr><td colspan="9" class="empty">未払の支払請求はありません。</td></tr>'}
+      ${rows.length?`<tr class="totrow"><td>合計</td>${AGING_BUCKETS.map(b=>`<td class="r num">${moneyPlain(totals[b])}</td>`).join('')}
+        <td class="r num">${moneyPlain(grand)}</td><td></td><td></td></tr>`:''}
+    </tbody></table></div>`;
+
+  return pageShell({ title:'債務年齢表', sub:'支払期日からの経過日数で区分。超過しているものは、相手の信用に関わります。',
+    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`),
+    body: kpis+table });
+}
+function apAgingDetail(companyId){
+  const list=openBills().filter(b=>String(b.companyId)===String(companyId))
+    .sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||'')));
+  openModal(`<h3>${esc(String(companyName(companyId)).replace(/<[^>]+>/g,''))} — 未払明細</h3>
+    <div class="table-wrap"><table><thead><tr><th>管理番号</th><th>計上月</th><th>期日</th><th>経過</th><th class="r">残高</th><th></th></tr></thead>
+    <tbody>${list.map(b=>{
+      const d=b.dueDate? daysBetween(b.dueDate,today()):0;
+      return `<tr><td>${esc(b.no||'')}</td><td>${esc(b.bookMonth||'')}</td><td>${esc(b.dueDate||'')}</td>
+        <td>${d>0?`<span class="badge ${AGING_COLOR[agingBucket(b)]}">${d}日超過</span>`:'<span class="badge b-gray">未到来</span>'}</td>
+        <td class="r num">${moneyPlain(balanceOfBill(b))}</td>
+        <td>${canEdit('payouts')?`<a class="pillbtn pill-save" onclick="closeModal();openPayoutFor('${b.id}')">支払</a>`:''}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    <div class="modal-actions split"><button class="btn secondary" onclick="closeModal();openLedger('${companyId}','ap')">台帳を見る</button>
+      <button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
 }
 
 /* ============================================================================
@@ -3151,6 +3369,8 @@ function netOfGross(gross, taxCat){
 /** マスに書き込む。空欄・0 にすると行ごと消す（残すと「0円の費用」が残ってしまう）。 */
 function setCostCell(costItemId, ym, amount){
   const it = findById('costItems', costItemId); if(!it) return;
+  /* 買掛の費目は支払請求が唯一の入口。ここで経費も作ると、予実に二重に乗る。 */
+  if(isApCost(it)){ toast('この費目は「買掛」です。金額は支払請求（支払管理）で直します。','err'); return; }
   const v = num(amount);
   const r = costCell(costItemId, ym);
   if(!r){
@@ -3191,11 +3411,18 @@ function costRerenderSoon(){
 /** 費目 × 12か月（税込）。期間外のマスは null。 */
 function costRowsOf(fy){
   const months = fyMonths(fy);
-  const rows = costItemsSorted().map(it=>({
-    it,
-    kind: it.kind==='variable'?'variable':'fixed',
-    cells: months.map(ym => costItemActive(it,ym) ? costCellAmount(it.id,ym) : null),
-  }));
+  const rows = costItemsSorted().map(it=>{
+    const ap = isApCost(it);
+    return {
+      it, ap,
+      kind: it.kind==='variable'?'variable':'fixed',
+      /* 買掛の費目は expenses を持たない。金額の出どころは「その月の支払請求の明細」だけ
+         （二重計上を防ぐため）。だから表はそれを読むだけで、打ち込みはできない。 */
+      cells: months.map(ym => !costItemActive(it,ym) ? null
+        : (ap ? ((costBillCell(it.id,ym)||{}).gross || 0) : costCellAmount(it.id,ym))),
+      bills: ap ? months.map(ym => costBillCell(it.id,ym)) : null,
+    };
+  });
   return { months, rows };
 }
 /** 費目のない経費（過去の個別入力・CSV取込）。隠さずに1行にまとめて出す。 */
@@ -3260,6 +3487,14 @@ function viewExpenses(){
   const cellHtml = (r,i) => {
     const v = r.cells[i];
     if(v==null) return `<td class="r"><span class="zero">—</span></td>`;
+    if(r.ap){
+      const hit = r.bills && r.bills[i];
+      if(!hit) return `<td class="r ${i===curIdx?'curcol':''}"><span class="zero">未作成</span></td>`;
+      const bal = balanceOfBill(hit.bill);
+      return `<td class="r num ${i===curIdx?'curcol':''}"><a onclick="openDetail('bills','${hit.bill.id}')"
+        style="cursor:pointer;color:var(--primary);" title="支払請求 ${attr(hit.bill.no||'')}（${attr(billStatus(hit.bill))}）">${moneyPlain(hit.gross)}</a>
+        ${bal>0?`<div class="lgdot" style="color:var(--warning);">未払</div>`:''}</td>`;
+    }
     if(!canE) return `<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`;
     let cls='cellin';
     const plan=num(r.it.monthly);
@@ -3276,7 +3511,9 @@ function viewExpenses(){
     const nMon = r.cells.filter(c=>c).length;
     return `<tr>
       <td><a onclick="openForm('costItems','${attr(r.it.id)}')" style="cursor:pointer;font-weight:600;">${esc(r.it.name||'(名称なし)')}</a>
-        ${r.it.vendor?`<div class="muted" style="font-size:11px;">${esc(r.it.vendor)}</div>`:''}</td>
+        ${r.ap?' <span class="badge b-blue" title="毎月の支払請求で管理（期日・残高あり）">買掛</span>':''}
+        ${r.it.companyId? `<div class="muted" style="font-size:11px;">${coLink(r.it.companyId,'ap')}</div>`
+          : (r.it.vendor?`<div class="muted" style="font-size:11px;">${esc(r.it.vendor)}</div>`:'')}</td>
       <td class="muted" style="font-size:11.5px;">${esc(accountLabel(r.it.accountCode))}</td>
       <td class="muted" style="font-size:11.5px;">${esc(TAX_CATS.indexOf(r.it.taxCat)>=0?r.it.taxCat:'課税10%')}</td>
       <td class="r num muted">${num(r.it.monthly)?moneyPlain(r.it.monthly):'<span class="zero">—</span>'}</td>
@@ -3325,7 +3562,8 @@ function viewExpenses(){
       </tbody></table></div>`;
 
   const tools=`
-    ${canCreate('expenses')?`<button class="btn" onclick="openForm('costItems',null,{kind:'fixed',taxCat:'課税10%'})">＋ 費目を追加</button>`:''}
+    ${canCreate('expenses')?`<button class="btn" onclick="openForm('costItems',null,{kind:'fixed',taxCat:'課税10%',payMode:'即払い'})">＋ 費目を追加</button>`:''}
+    ${canCreate('bills')&&costItemsSorted().some(isApCost)?`<button class="btn secondary" onclick="openGenBills()">定期の支払を作成（月まとめ）</button>`:''}
     ${canE&&fixed.length?`<button class="btn secondary" onclick="costReflect()">定期費用を反映</button>`:''}
     ${toolsMenu(`
       <button class="btn secondary" onclick="exportCsvCost()">${IC.doc} 月次費用表をCSV</button>

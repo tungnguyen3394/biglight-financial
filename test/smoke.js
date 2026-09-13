@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -169,6 +169,32 @@ ctx.setCostCell('CI1','2025-10',0);
 eq('0にするとマスごと消える', ctx.costCellAmount('CI1','2025-10'), 0);
 eq('消したら予実からも消える', ctx.actualSeries(2025,'sga')[2], 0);
 
+console.log('\n― 定期の支払（買掛）―');
+/* 「費用＝ある会社に定期的に払うお金」。支払先を選び、払い方を 買掛 にすると
+   毎月の支払請求ができ、期日はその会社の条件（C2: 20日締・翌々月25日払い）で決まる。 */
+_db.costItems.push({ id:'CI5', name:'システム保守料', accountCode:'6220', kind:'fixed',
+  monthly:110000, taxCat:'課税10%', payMode:'買掛', companyId:'C2' });
+_db.costItems.push({ id:'CI6', name:'支払先なし保守', accountCode:'6220', kind:'fixed',
+  monthly:5500, taxCat:'課税10%', payMode:'買掛' });
+
+eq('買掛の費目だと分かる', ctx.__x.isApCost(_db.costItems[4]), true);
+let plan = ctx.apPlanFor('2025-11');
+eq('支払先のある買掛だけが対象', plan.length, 1);
+eq('税込の月額予定を税抜にして明細にする', plan[0].items[0].amount, 100000);
+
+eq('作った支払請求の数', ctx.apCreateBills('2025-11', plan), 1);
+const nb = _db.bills.find(b=>b.bookMonth==='2025-11');
+eq('期日は取引先の条件から（20日締・翌々月25日）', nb.dueDate, '2026-01-25');
+eq('自動作成は「作成中」から', nb.status, '作成中');
+eq('月次費用表は支払請求から読む（税込）', ctx.costBillCell('CI5','2025-11').gross, 110000);
+eq('同じ月に二度は作らない', ctx.apPlanFor('2025-11').filter(p=>p.items.length).length, 0);
+
+/* 二重計上しないこと: 買掛の費目は経費（expenses）を作らない */
+const exBefore = _db.expenses.length;
+ctx.setCostCell('CI5','2025-11', 99000);
+eq('買掛の費目に経費は作られない', _db.expenses.length, exBefore);
+eq('買掛の月は費用表でも支払請求の額のまま', ctx.costRowsOf(2025).rows.find(r=>r.it.id==='CI5').cells[3], 110000);
+
 console.log('\n― 取引先台帳（履歴・タイムライン）―');
 /* ★ 期日は会社ごとに違う。C2 は「20日締・翌々月25日払い」なので、
    計上から85日かかっても期日内。ここを「計上からの日数」で色付けしていないことを確かめる。 */
@@ -210,7 +236,7 @@ eq('支払側の台帳も残高が合う', ctx.ledEvents('C3','ap').pop().bal, c
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',
- 'viewCrmLink','viewUsers','viewAudit','viewSettings'].forEach(fn => {
+ 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging'].forEach(fn => {
   try {
     const h = ctx[fn]();
     const ok = typeof h === 'string' && h.length > 80;
