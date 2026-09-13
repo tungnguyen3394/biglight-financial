@@ -29,24 +29,41 @@
 
 ---
 
-## 2. 開ける手順（サーバー側・1回だけ）
+## 2. 開ける手順（VPS で1回だけ）
 
-VPS の `~/apps/biglight-financial`（配置場所に読み替えてください）で:
+Termius などで VPS に入り、**そのまま貼り付け**てください。置き場所は動いているコンテナ自身に聞くので、
+ディレクトリ名を覚えていなくて大丈夫です。
 
 ```bash
-cp .env .env.bak.$(date +%Y%m%d%H%M)     # ← 先に控える
-openssl rand -hex 32                      # ← 出た文字列を MCP_TOKEN_SECRET に使う（ログに残さない）
+# ① 予実のリポジトリへ移動（パスを覚えなくていい）
+DIR=$(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
+cd "$DIR" && pwd
 
-# .env を編集
+# ② .env を控えてから書き換える（秘密はこの中で作る。画面にも GitHub にも出ません）
+cp -a .env ".env.bak-$(date +%Y%m%d-%H%M%S)"
+SECRET=$(openssl rand -hex 32)
+grep -vE '^(API_V1_ENABLED|API_V1_PUBLIC_BASE|MCP_ENABLED|MCP_PUBLIC_URL|MCP_TOKEN_SECRET|MCP_OAUTH_)' .env > .env.new
+cat >> .env.new <<EOF
 API_V1_ENABLED=true
 API_V1_PUBLIC_BASE=https://finance.biglight.jp
 MCP_ENABLED=true
 MCP_PUBLIC_URL=https://finance.biglight.jp/mcp
-MCP_TOKEN_SECRET=（上で作った32文字以上）
+MCP_TOKEN_SECRET=$SECRET
+MCP_OAUTH_REDIRECT_URIS=https://chatgpt.com/connector_platform_oauth_redirect
+MCP_OAUTH_REDIRECT_PREFIXES=https://chatgpt.com/connector/oauth/
+MCP_OAUTH_ALLOW_DCR=true
+EOF
+mv .env.new .env && chmod 600 .env && unset SECRET
 
-docker compose up -d --build
-docker compose logs api | tail -20        # [BOOT] API v1: 有効 / [BOOT] MCP: 有効 を確認
+# ③ api だけ作り直す（env_file はコンテナを作るときにしか読まれません。再起動では効きません）
+docker compose up -d --force-recreate api
+docker compose logs api --tail 20 | grep BOOT
+#   [BOOT] API v1: 有効（読み取り専用）
+#   [BOOT] MCP: 有効 https://finance.biglight.jp/mcp
 ```
+
+> nginx の設定（`/mcp` と `/.well-known/oauth-*`）は `deploy.sh` が毎回読み直させます。
+> 手で触る必要はありません。
 
 **外から見て確かめる（4本とも通ること）**
 
@@ -60,7 +77,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://finance.biglight.jp/mcp
 ```
 
 **閉じ方**
-- 全部止める: `.env` で `MCP_ENABLED=false`（＋必要なら `API_V1_ENABLED=false`）→ `docker compose up -d --build`。データは何も変わりません。
+- 全部止める: `.env` の2行を `false` にして `docker compose up -d --force-recreate api`。
+  ルートが 404 に戻るだけで、データも鍵も記録も何も変わりません。
 - 1人だけ止める: 画面で その人の鍵を **失効**。
 - 全員のAIを今すぐ切る: `MCP_TOKEN_SECRET` を作り直す（発行済みトークンが全部無効になります）。
 
