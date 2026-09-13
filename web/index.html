@@ -1252,42 +1252,51 @@ function goto(page){
 function renderPage(page){
   const el=document.getElementById('main');
   if(!DB){ el.innerHTML='<div class="empty">読み込み中…</div>'; return; }
+  /* ★ 2026-09-13 の不具合と、その直し方（同じ失敗を二度としないために）:
+     以前はここで画面を入れたあと、もう一度 el.innerHTML = タブ + el.innerHTML と
+     書き足していた。すると最初に作った要素は DOM から切り離される。
+     ユーザー一覧のように「先に箱を捕まえてから fetch して、あとで箱に書き込む」
+     読み込みは、切り離された箱に書くことになり、画面には何も出なかった。
+     → HTML を全部組み立ててから 一度だけ 入れる。読み込みはそのあとに走らせる。 */
   const bar = sectionTabs(page);
+  let html='', after=null;
   try{
     switch(page){
-      case 'dashboard': el.innerHTML=viewDashboard(); break;
-      case 'yojitsu':   el.innerHTML=viewYojitsu();   break;
-      case 'compare':   el.innerHTML=viewCompare();   break;
-      case 'mikomi':    el.innerHTML=viewMikomi();    break;
-      case 'invoices':  el.innerHTML=viewInvoices();  break;
-      case 'receipts':  el.innerHTML=viewReceipts();  break;
-      case 'aging':     el.innerHTML=viewAging();     break;
-      case 'apaging':   el.innerHTML=viewApAging();   break;
-      case 'bills':     el.innerHTML=viewBills();     break;
-      case 'payouts':   el.innerHTML=viewPayouts();   break;
-      case 'cashflow':  el.innerHTML=viewCashflow();  break;
-      case 'okr':       el.innerHTML=viewOkr();       break;
-      case 'companies': el.innerHTML=viewCompanies('');       break;
-      case 'vendors':   el.innerHTML=viewCompanies('vendor'); break;
-      case 'ledger':    el.innerHTML=viewLedger();    break;
-      case 'workers':   el.innerHTML=viewWorkers();   break;
-      case 'expenses':  el.innerHTML=viewExpenses();  break;
-      case 'properties':el.innerHTML=viewProperties();break;
-      case 'kbunrui':   el.innerHTML=viewKbunrui();  break;
-      case 'crmlink':   el.innerHTML=viewCrmLink();   renderCrmStatus(); break;
-      case 'users':     el.innerHTML=viewUsers();     loadUsers(); break;
-      case 'audit':     el.innerHTML=viewAudit();     loadAudit(); break;
-      case 'apilink':   el.innerHTML=viewApiLink();   loadApiLink(); break;
-      case 'accounts':  el.innerHTML=viewAccounts();  break;
-      case 'settings':  el.innerHTML=viewSettings();  break;
-      default: el.innerHTML='<div class="empty">画面がありません。</div>';
+      case 'dashboard': html=viewDashboard(); break;
+      case 'yojitsu':   html=viewYojitsu();   break;
+      case 'compare':   html=viewCompare();   break;
+      case 'mikomi':    html=viewMikomi();    break;
+      case 'invoices':  html=viewInvoices();  break;
+      case 'receipts':  html=viewReceipts();  break;
+      case 'aging':     html=viewAging();     break;
+      case 'apaging':   html=viewApAging();   break;
+      case 'bills':     html=viewBills();     break;
+      case 'payouts':   html=viewPayouts();   break;
+      case 'cashflow':  html=viewCashflow();  break;
+      case 'okr':       html=viewOkr();       break;
+      case 'companies': html=viewCompanies('');       break;
+      case 'vendors':   html=viewCompanies('vendor'); break;
+      case 'ledger':    html=viewLedger();    break;
+      case 'workers':   html=viewWorkers();   break;
+      case 'expenses':  html=viewExpenses();  break;
+      case 'properties':html=viewProperties();break;
+      case 'kbunrui':   html=viewKbunrui();   break;
+      case 'crmlink':   html=viewCrmLink();   after=renderCrmStatus; break;
+      case 'users':     html=viewUsers();     after=loadUsers;  break;
+      case 'audit':     html=viewAudit();     after=loadAudit;  break;
+      case 'apilink':   html=viewApiLink();   after=loadApiLink; break;
+      case 'accounts':  html=viewAccounts();  break;
+      case 'settings':  html=viewSettings();  break;
+      default: html='<div class="empty">画面がありません。</div>';
     }
   }catch(err){
     console.error(err);
-    el.innerHTML = `<div class="alertbar">画面の表示中にエラーが発生しました：${esc(err.message)}<br>
+    html = `<div class="alertbar">画面の表示中にエラーが発生しました：${esc(err.message)}<br>
       <span style="font-weight:400;">この内容を管理者にお伝えください。データは失われていません。</span></div>`;
+    after=null;
   }
-  if(bar) el.innerHTML = bar + el.innerHTML;
+  el.innerHTML = bar + html;          // ← 入れるのは1回だけ
+  if(after){ try{ after(); }catch(e){ console.error(e); } }
   syncBadge();
   try{ notifBadge(); }catch(e){ /* 通知が数えられなくても画面は出す */ }
 }
@@ -1674,6 +1683,7 @@ function _fpopApply(p,col,clear){
   _fpopClose(); renderPage(CURRENT_PAGE);
 }
 function setSearch(p,v){
+  if(p==='users'){ SEARCH[p]=v; drawUsers(); return; }
   SEARCH[p]=v; renderPage(CURRENT_PAGE);
   const i=document.querySelector(`[data-sb="${p}"]`);
   if(i){ i.focus(); try{ i.setSelectionRange(i.value.length,i.value.length); }catch(e){} }   // 再描画で focus を失わせない
@@ -5381,31 +5391,120 @@ async function crmCsvGo(){
 
 /* ---------- ユーザー管理 ---------- */
 function viewUsers(){
-  return pageShell({ title:'ユーザー', sub:'@biglight.jp のGoogleアカウントだけが入れます。新しい人は「承認待ち」から始まり、ここで有効にするまでデータは1行も見られません。',
-    body:`<div class="warnbar">${IC.warn} この画面には 取引先ごとの金額・家賃・給与 が入っています。
-        新しい人は <b>承認待ち・閲覧のみ</b>で始まります。<b>状態を「有効」にして、見せる画面を決めてから</b>渡してください。</div>
+  return pageShell({ title:'ユーザー', count:_USERS.length||undefined,
+    sub:'@biglight.jp のGoogleアカウントだけが入れます。新しい人は「承認待ち」で始まり、ここで有効にするまでデータは1行も見られません。',
+    tools:`${searchBox('users','氏名・メールで検索')}
+      ${toolsMenu(`<button class="btn secondary" onclick="loadUsers()">${IC.doc} 読み込み直す</button>
+        <button class="btn secondary" onclick="userLoginLog()">${IC.audit} ログイン履歴</button>`)}`,
+    body:`<div class="warnbar">${IC.warn} この画面の先には <b>取引先ごとの金額・家賃・給与</b>があります。
+        新しい人は <b>承認待ち・閲覧のみ</b>で始まります。<b>「有効」にして、見せる画面を決めてから</b>渡してください。</div>
       <div id="usersBox"><div class="empty">読み込み中…</div></div>` });
 }
+let _USERS=[];
+const USER_STATUS={ active:['有効','b-green'], pending:['承認待ち','b-amber'], disabled:['停止','b-gray'] };
+const ROLE_NOTE={ Admin:'すべての画面と設定。ユーザーの管理もできます',
+  Manager:'経営の数字を見て直せます。伝票の削除はできません',
+  Staff:'日々の入力（請求・入金・支払・費用）。設定は触れません',
+  Viewer:'見るだけ。何も直せません' };
+
 async function loadUsers(){
   const box=document.getElementById('usersBox'); if(!box) return;
+  box.innerHTML='<div class="empty">読み込み中…</div>';
+  let d;
   try{
     const r=await fetch(API_BASE+'/users',{headers:headers()});
+    if(!r.ok){
+      const j=await r.json().catch(()=>({}));
+      /* 取れなかった理由をそのまま出す。「何も出ない」がいちばん困る（2026-09-13） */
+      const b=document.getElementById('usersBox'); if(!b) return;
+      b.innerHTML=`<div class="alertbar">${IC.warn} ユーザー一覧を取得できませんでした（HTTP ${r.status}${j.error?' ・ '+esc(j.error):''}）。
+        ${j.message?`<br><span style="font-weight:400;">${esc(j.message)}</span>`:''}
+        <button class="btn sm" style="margin-left:auto;" onclick="loadUsers()">もう一度</button></div>`;
+      return;
+    }
+    d=await r.json();
+  }catch(e){
+    const b=document.getElementById('usersBox'); if(!b) return;
+    b.innerHTML=`<div class="alertbar">${IC.warn} 通信に失敗しました（${esc(e.message||'')}）。
+      <button class="btn sm" style="margin-left:auto;" onclick="loadUsers()">もう一度</button></div>`;
+    return;
+  }
+  _USERS=(d.items||[]);
+  drawUsers();
+}
+function drawUsers(){
+  const box=document.getElementById('usersBox'); if(!box) return;
+  const q=(SEARCH['users']||'').toLowerCase();
+  const list=_USERS.filter(u=>!q || ((u.name||'')+(u.email||'')).toLowerCase().includes(q));
+  const wait=_USERS.filter(u=>u.status==='pending');
+  const me=(SESSION&&SESSION.email)||'';
+  const ad=isAdmin();
+
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">使える人</div><div class="num">${_USERS.filter(u=>u.status==='active').length}</div>
+      <div class="sub">全 ${_USERS.length}人</div></div>
+    <div class="kpi ${wait.length?'clickable':''}"><div class="lbl">承認待ち</div>
+      <div class="num ${wait.length?'minus':''}">${wait.length}</div><div class="sub">この人たちは何も見えません</div></div>
+    <div class="kpi"><div class="lbl">管理者</div><div class="num">${_USERS.filter(u=>u.role==='Admin').length}</div>
+      <div class="sub">設定とユーザーを触れる人</div></div>
+    <div class="kpi"><div class="lbl">閲覧のみ</div><div class="num">${_USERS.filter(u=>u.role==='Viewer').length}</div>
+      <div class="sub">直せない人</div></div>
+  </div>`;
+
+  const waitBox = wait.length? `<div class="panel"><div class="panel-hd"><b>承認待ち（${wait.length}人）</b>
+      <span class="sub">「有効にする」を押すと入れるようになります。先に見せる画面を決めても構いません</span></div>
+    <div class="panel-bd tight"><div class="table-wrap" style="border:0;"><table><tbody>
+      ${wait.map(u=>`<tr><td><b>${esc(u.name||u.email)}</b><div class="muted" style="font-size:11px;">${esc(u.email)}</div></td>
+        <td class="muted" style="font-size:11.5px;">初回ログイン ${u.last_login? esc(String(u.last_login).slice(0,16).replace('T',' ')):'—'}</td>
+        <td class="r">${ad?`<a class="pillbtn pill-save" onclick="permModal('${attr(u.email)}','${attr(u.role)}')">見せる画面を決める</a>
+          <a class="pillbtn pill-new" onclick="userSet('${attr(u.email)}','status','active')">有効にする</a>
+          <a class="pillbtn pill-del" onclick="userSet('${attr(u.email)}','status','disabled')">断る</a>`:''}</td></tr>`).join('')}
+    </tbody></table></div></div></div>`:'';
+
+  const rows=list.map(u=>{
+    const st=USER_STATUS[u.status]||[u.status,'b-gray'];
+    const self=String(u.email).toLowerCase()===String(me).toLowerCase();
+    return `<tr style="${u.status!=='active'?'opacity:.6;':''}">
+      <td><b>${esc(u.name||'')}</b>${self?' <span class="badge b-blue">あなた</span>':''}
+        <div class="muted" style="font-size:11px;">${esc(u.email)}</div></td>
+      <td>${ad&&!self? `<select onchange="userSet('${attr(u.email)}','role',this.value)"
+            style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+            ${Object.keys(ROLES).map(k=>`<option value="${k}" ${u.role===k?'selected':''}>${esc(ROLES[k].label)}</option>`).join('')}</select>
+          <div class="muted" style="font-size:10.5px;">${esc(ROLE_NOTE[u.role]||'')}</div>`
+        : `${esc((ROLES[u.role]||{}).label||u.role)}<div class="muted" style="font-size:10.5px;">${esc(ROLE_NOTE[u.role]||'')}</div>`}</td>
+      <td>${ad&&!self? `<select onchange="userSet('${attr(u.email)}','status',this.value)"
+            style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+            ${Object.keys(USER_STATUS).map(k=>`<option value="${k}" ${u.status===k?'selected':''}>${esc(USER_STATUS[k][0])}</option>`).join('')}</select>`
+        : `<span class="badge ${st[1]}">${esc(st[0])}</span>`}</td>
+      <td>${permSeenText(u.email, u.role)}</td>
+      <td class="muted" style="font-size:11.5px;">${u.last_login? esc(String(u.last_login).slice(0,16).replace('T',' ')):'<span class="zero">未ログイン</span>'}</td>
+      <td>${ad?`<a class="pillbtn pill-save" onclick="permModal('${attr(u.email)}','${attr(u.role)}')">見せる画面</a>`:''}</td></tr>`;
+  }).join('');
+
+  box.innerHTML = kpis + waitBox + `<div class="table-wrap"><table>
+      <thead><tr><th style="min-width:210px;">氏名・メール</th><th style="min-width:180px;">役割</th>
+        <th style="min-width:110px;">状態</th><th style="min-width:130px;">見られる画面</th>
+        <th style="min-width:130px;">最終ログイン</th><th style="min-width:110px;"></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="empty" style="padding:18px;">${q?'一致する人がいません。':'まだ誰もログインしていません。'}</td></tr>`}</tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;">
+      <b>状態</b>：有効＝使える／承認待ち・停止＝ログインしてもデータは1行も見られません（画面には「承認待ちです」と出ます）。<br>
+      <b>役割</b>は大まかな既定、<b>見せる画面</b>は1画面ずつの上書きです。表示を外した画面は、その人の左メニューから消えます。<br>
+      自分自身の役割と状態は変えられません（管理者が誰も居なくなるのを防ぐため）。</div>`;
+}
+/** 誰がいつ入ったか。乗っ取りを疑うときに最初に見る場所。 */
+async function userLoginLog(){
+  openModal(`<h3>ログイン履歴</h3><div id="llBox"><div class="empty">読み込み中…</div></div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+  try{
+    const r=await fetch(API_BASE+'/login-log',{headers:headers()});
     const d=await r.json();
-    box.innerHTML=`<div class="table-wrap"><table>
-      <thead><tr><th>氏名</th><th>メール</th><th>役割</th><th>状態</th><th>最終ログイン</th><th>見られる画面</th><th></th></tr></thead>
-      <tbody>${(d.items||[]).map(u=>`<tr>
-        <td><b>${esc(u.name||'')}</b></td><td>${esc(u.email)}</td>
-        <td>${isAdmin()? `<select onchange="userSet('${attr(u.email)}','role',this.value)" style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
-            ${Object.keys(ROLES).map(k=>`<option value="${k}" ${u.role===k?'selected':''}>${esc(ROLES[k].label)}</option>`).join('')}</select>`
-          : esc((ROLES[u.role]||{}).label||u.role)}</td>
-        <td>${isAdmin()? `<select onchange="userSet('${attr(u.email)}','status',this.value)" style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
-            ${['active','pending','disabled'].map(s=>`<option value="${s}" ${u.status===s?'selected':''}>${s==='active'?'有効':(s==='pending'?'承認待ち':'停止')}</option>`).join('')}</select>`
-          : statusBadge(u.status)}</td>
-        <td class="muted">${u.last_login? esc(String(u.last_login).slice(0,16).replace('T',' ')):'—'}</td>
-        <td>${permSeenText(u.email, u.role)}</td>
-        <td>${isAdmin()?`<a onclick="permModal('${attr(u.email)}','${attr(u.role)}')" style="cursor:pointer;color:var(--primary);font-size:12px;font-weight:600;">見せる画面を決める</a>`:''}</td>
-      </tr>`).join('')}</tbody></table></div>`;
-  }catch(e){ box.innerHTML='<div class="alertbar">ユーザー一覧を取得できませんでした。</div>'; }
+    const box=document.getElementById('llBox'); if(!box) return;
+    box.innerHTML=`<div class="table-wrap"><table><thead><tr><th>日時</th><th>メール</th><th>IP</th><th>端末</th></tr></thead>
+      <tbody>${(d.items||[]).map(x=>`<tr><td class="muted">${esc(String(x.at).slice(0,19).replace('T',' '))}</td>
+        <td>${esc(x.email)}</td><td class="muted" style="font-size:11.5px;">${esc(x.ip||'')}</td>
+        <td class="muted" style="font-size:11px;">${esc(String(x.user_agent||'').slice(0,60))}</td></tr>`).join('')
+        || '<tr><td colspan="4" class="empty">記録がありません。</td></tr>'}</tbody></table></div>`;
+  }catch(e){ const b=document.getElementById('llBox'); if(b) b.innerHTML='<div class="alertbar">取得できませんでした。</div>'; }
 }
 /** その人が今どれだけ見られるか。数だけでなく「全部」「一部」で言う。 */
 function permSeenText(email, role){

@@ -286,6 +286,27 @@ console.log('\n― 画面が落ちずに描けるか ―');
   }catch(e){ console.log(`  NG  viewLedger(${side}/${tab})  →  `+e.message); fail++; }
 });
 
+console.log('\n― 画面の入れ替えは1回だけ ―');
+/* ★ 2026-09-13 の不具合の再発防止:
+   画面を入れたあとに もう一度 innerHTML を組み直すと、先に作った要素が DOM から
+   切り離される。ユーザー一覧のように「箱を捕まえてから fetch して、あとで書き込む」
+   読み込みは、切り離された箱に書くので何も出なくなる。
+   だから renderPage は el.innerHTML に「1回だけ」入れること。 */
+{
+  let writes=0;
+  const mainEl={ _h:'', get innerHTML(){ return this._h; }, set innerHTML(v){ writes++; this._h=v; },
+    style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
+    querySelector:()=>null, querySelectorAll:()=>[], addEventListener:noop, appendChild:noop };
+  const orig=ctx.document.getElementById;
+  ctx.document.getElementById=(id)=> id==='main'? mainEl : orig(id);
+  ['users','audit','apilink','crmlink','invoices','expenses','ledger'].forEach(pg=>{
+    writes=0;
+    try{ ctx.renderPage(pg); }catch(e){ console.log('  NG  renderPage('+pg+') → '+e.message); fail++; return; }
+    eq('renderPage('+pg+') は1回だけ書く', writes, 1);
+  });
+  ctx.document.getElementById=orig;
+}
+
 console.log('\n― 見せる画面（権限） ―');
 /* ★ 費用の情報を扱う画面なので、「見せない」が本当に効くことを確かめる */
 _db.userPerms = { 'staff@biglight.jp': { expenses:{v:0}, properties:{v:0}, kbunrui:{v:0} } };
@@ -331,6 +352,29 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
    デモデータ — 入れて・確かめて・消す
    本物が巻き込まれないことまで見る（ここが一番大事） ══════════════════ */
 (async ()=>{
+  console.log('\n― ユーザー管理の画面（実際に読み込ませる） ―');
+  {
+    const origFetch=ctx.fetch;
+    ctx.fetch=async(url)=>String(url).endsWith('/users')
+      ? { ok:true, status:200, json:async()=>({ items:[
+          {email:'a@biglight.jp',name:'管理者A',role:'Admin',status:'active',last_login:'2026-09-13T09:00:00Z'},
+          {email:'b@biglight.jp',name:'新人B', role:'Viewer',status:'pending',last_login:null},
+          {email:'c@biglight.jp',name:'経理C', role:'Staff', status:'active',last_login:'2026-09-12T01:00:00Z'} ]}) }
+      : { ok:false, status:404, json:async()=>({}) };
+    await ctx.loadUsers();
+    /* ★ ここが 2026-09-13 に「何も出ない」となっていたところ */
+    eq('一覧が実際に描かれる', el.innerHTML.length>800, true);
+    eq('承認待ちの人を上に出す', el.innerHTML.includes('承認待ち（1人）'), true);
+    eq('見られる画面の欄が出る', el.innerHTML.includes('見られる画面'), true);
+    eq('自分の行は役割を変えられない', el.innerHTML.includes('あなた'), false);   // SESSION は test@ なので該当なし
+    /* 取れないときは黙らない */
+    ctx.fetch=async()=>({ ok:false, status:403, json:async()=>({error:'account-pending', message:'まだ承認されていません'}) });
+    await ctx.loadUsers();
+    eq('取れないときは理由（HTTP）を出す', el.innerHTML.includes('403'), true);
+    eq('取れないときは もう一度 を出す', el.innerHTML.includes('もう一度'), true);
+    ctx.fetch=origFetch;
+  }
+
   console.log('\n― デモデータ ―');
   /* 本物のデータを1件置いておく。消したあとも残っていなければならない */
   const realId='REAL-KEEP';
