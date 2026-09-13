@@ -592,9 +592,14 @@ const PL_ROWS = [
 ];
 
 function accounts(){ const a = (DB && DB.accounts && DB.accounts.length) ? DB.accounts : DEFAULT_ACCOUNTS; return a; }
-function accountsOfKind(kind){ return accounts().filter(a=>a.kind===kind); }
+/** 区分ごとの「選べる科目」＝末端だけ（親を選べると二重に数える） */
+function accountsOfKind(kind){
+  const list=accounts().filter(a=>a.active!==false && accountKindOf(a)===kind && accountIsLeaf(a));
+  return list.length? list : accounts().filter(a=>a.kind===kind);   // 木がまだ無いときは今までどおり
+}
 function accountLabel(code){ const a=accounts().find(x=>x.code===code); return a?a.label:(code||'-'); }
-function accountKind(code){ const a=accounts().find(x=>x.code===code); return a?a.kind:''; }
+/** 区分。自分に無ければ親から受け継ぐ（大分類でだけ決める） */
+function accountKind(code){ const a=accounts().find(x=>x.code===code); return a? accountKindOf(a) : ''; }
 
 /* ============ 選択肢 ============ */
 const COMPANY_KINDS   = ['得意先','仕入先','両方'];
@@ -837,7 +842,8 @@ const SECTIONS = [
     {id:'mikomi',  label:'見込実績表'},
     {id:'okr',     label:'目標 OKR'} ]},
   { id:'sec-sys', label:'設定', icon:'gear', tabs:[
-    {id:'settings', label:'勘定科目・基本'},
+    {id:'accounts', label:'勘定科目の登録'},
+    {id:'settings', label:'基本設定'},
     {id:'crmlink',  label:'CRM連携'},
     {id:'users',    label:'ユーザー'},
     {id:'apilink',  label:'API・AI連携'},
@@ -1252,6 +1258,7 @@ function renderPage(page){
       case 'users':     el.innerHTML=viewUsers();     loadUsers(); break;
       case 'audit':     el.innerHTML=viewAudit();     loadAudit(); break;
       case 'apilink':   el.innerHTML=viewApiLink();   loadApiLink(); break;
+      case 'accounts':  el.innerHTML=viewAccounts();  break;
       case 'settings':  el.innerHTML=viewSettings();  break;
       default: el.innerHTML='<div class="empty">画面がありません。</div>';
     }
@@ -1721,7 +1728,7 @@ function openForm(entKey, id, preset){
     else if(f.type==='select') input=`<select name="${f.name}" ${locked?'disabled':''}><option value="">-</option>`+
       selOpts(f.options||[], v)+`</select>`;
     else if(f.type==='account') input=`<select name="${f.name}" ${locked?'disabled':''}><option value="">-</option>`+
-      accounts().map(a=>`<option value="${attr(a.code)}" ${a.code===v?'selected':''}>${esc(a.code+' '+a.label)}（${KIND_LABEL[a.kind]}）</option>`).join('')+`</select>`;
+      accountOptionsHtml(v)+`</select>`;
     else if(f.type==='dept') input=`<select name="${f.name}"><option value="">-</option>`+
       (DB.departments||[]).map(d=>`<option value="${attr(d.code)}" ${d.code===v?'selected':''}>${esc(d.label||d.code)}</option>`).join('')+`</select>`;
     else if(f.type==='ref'){
@@ -1863,7 +1870,7 @@ function itemsEditorHtml(){
   const rows = its.map((it,i)=>`<tr>
     <td><select onchange="itemSet(${i},'accountCode',this.value)" style="width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
       <option value="">科目…</option>
-      ${accounts().map(a=>`<option value="${attr(a.code)}" ${a.code===it.accountCode?'selected':''}>${esc(a.label)}</option>`).join('')}</select></td>
+      ${accountOptionsHtml(it.accountCode)}</select></td>
     <td><input value="${attr(it.name||'')}" oninput="itemSet(${i},'name',this.value)" placeholder="内容"
         style="width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:12px;"></td>
     <td style="width:74px;"><input value="${attr(it.qty??'')}" oninput="itemSet(${i},'qty',this.value)" class="num"
@@ -2905,6 +2912,227 @@ function cfSaveStart(){
   if(!PENDING.changed.settings) PENDING.changed.settings=DB.settings;
   PENDING.changed.settings=DB.settings; schedulePush();
   closeModal(); renderPage('cashflow'); toast('保存しました。','ok');
+}
+
+/* ============================================================================
+   勘定科目の登録 — 大分類 › 中分類 › 小分類（もっと深くもできる）
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-13）:「勘定科目を 大・中・小 で定義する画面がほしい。
+   さらに増やせるように。どの階層でも、その下の対象（建物など）を一覧で見たい」
+
+   決めごと（ここを外すと数字が合わなくなります）:
+   ・区分（収益／売上原価／販管費／営業外）は いちばん上でだけ決め、下は受け継ぐ。
+     途中で変えられると、同じ科目が損益の2か所に出てしまうため。
+   ・伝票・費目に選べるのは <b>末端（子を持たない科目）</b>だけ。
+     親も選べると「親の金額＋子の金額」で二重に数えてしまう。
+   ・コードは今までのまま。上に器（大分類）をかぶせるだけなので、
+     すでに入っている請求・支払・費用・予算は1行も書き換えません。
+   ========================================================================== */
+const ACC_ROOTS = [
+  { code:'R4', label:'売上高',   kind:'revenue' },
+  { code:'R5', label:'売上原価', kind:'cogs' },
+  { code:'R6', label:'販売費及び一般管理費', kind:'sga' },
+  { code:'R7', label:'営業外損益', kind:'nonop' },
+];
+const accountById   = id   => (DB.accounts||[]).find(a=>String(a.id)===String(id)) || null;
+const accountByCode = code => accounts().find(a=>String(a.code)===String(code)) || null;
+const accountChildren = parentId => accounts().filter(a=>String(a.parentId||'')===String(parentId||''))
+  .slice().sort((a,b)=> (Number(a.order||0)-Number(b.order||0)) || String(a.code||'').localeCompare(String(b.code||'')));
+const accountRoots  = () => accountChildren('');
+const accountIsLeaf = a  => !!a && !accountChildren(a.id).length;
+/** 親をたどって区分を決める（自分に区分が無ければ受け継ぐ） */
+function accountKindOf(a){
+  let cur=a, guard=0;
+  while(cur && !cur.kind && cur.parentId && guard++<12) cur=accountById(cur.parentId);
+  return cur && cur.kind ? cur.kind : '';
+}
+/** 「販管費 › 地代家賃 › 電気代」 */
+function accountPath(code){
+  let a=accountByCode(code), out=[], guard=0;
+  while(a && guard++<12){ out.unshift(a); a = a.parentId? accountById(a.parentId) : null; }
+  return out;
+}
+const accountPathLabel = code => accountPath(code).map(a=>a.label).join(' › ') || String(code||'-');
+/** その科目と、その下にぶら下がる全部のコード（集計に使う） */
+function accountCodesUnder(code){
+  const a=accountByCode(code); if(!a) return [code];
+  const out=[]; (function walk(n){ out.push(n.code); accountChildren(n.id).forEach(walk); })(a);
+  return out;
+}
+/** その科目を使っている伝票・費目・予算の数（消してよいかの判断に出す） */
+function accountUsage(code){
+  let n=0;
+  const cnt = arr => (arr||[]).forEach(x=>{ if(String(x.accountCode)===String(code)) n++; });
+  (DB.invoices||[]).forEach(i=>cnt(i.items)); (DB.bills||[]).forEach(b=>cnt(b.items));
+  cnt(DB.expenses); cnt(DB.costItems); cnt(DB.budgets); cnt(DB.forecasts); cnt(DB.actualAdjust); cnt(DB.billingRules);
+  return n;
+}
+/** 選べるのは末端だけ。親は見出しとして出す（選べない）。 */
+function accountOptionsHtml(selected, kindFilter){
+  let html='';
+  (function walk(parentId, depth){
+    accountChildren(parentId).forEach(a=>{
+      if(a.active===false) return;
+      const leaf=accountIsLeaf(a), kind=accountKindOf(a);
+      const kids=accountChildren(a.id);
+      if(kindFilter && leaf && kind!==kindFilter) return;
+      const pad='　'.repeat(depth);
+      if(leaf) html += `<option value="${attr(a.code)}" ${String(a.code)===String(selected)?'selected':''}>${esc(pad+a.label)}（${esc(a.code)}）</option>`;
+      else     html += `<option disabled>${esc(pad+'── '+a.label)}</option>`;
+      if(kids.length) walk(a.id, depth+1);
+    });
+  })('',0);
+  /* 木がまだ無い（初期セット前）ときは、今までどおり平らな一覧を出す */
+  if(!html) html = accounts().filter(a=>!kindFilter||a.kind===kindFilter)
+    .map(a=>`<option value="${attr(a.code)}" ${String(a.code)===String(selected)?'selected':''}>${esc(a.code+' '+a.label)}（${esc(KIND_LABEL[a.kind]||'')}）</option>`).join('');
+  return html;
+}
+/** 階層がもう作られているか。
+    ★ 「親のいない科目があるか」で見てはいけない — 平らな一覧はみんな親がいない。
+      「親を持つ科目が1つでもあるか」で見る。 */
+const accTreeReady = () => accounts().some(a=>a.parentId);
+
+/* ---------- 画面 ---------- */
+function viewAccounts(){
+  const canE=canEdit('settings');
+  const fy=CUR_FY;
+  const roots=accountRoots();
+
+  const rowsHtml = (parentId, depth) => accountChildren(parentId).map(a=>{
+    const kids=accountChildren(a.id), leaf=!kids.length, use=accountUsage(a.code);
+    const codes=accountCodesUnder(a.code);
+    const amt=codes.reduce((s,c)=>s+sum12(seriesByAccount(fy,c,'actual')),0);
+    const lv=['大分類','中分類','小分類'][depth] || `第${depth+1}階層`;
+    return `<tr class="${depth===0?'totrow':''}" style="${a.active===false?'opacity:.45;':''}">
+      <td style="padding-left:${8+depth*22}px;">
+        ${depth?'<span class="muted" style="font-size:11px;">└ </span>':''}<b>${esc(a.label)}</b>
+        ${a.active===false?' <span class="badge b-gray">停止</span>':''}
+        ${leaf?'':` <span class="muted" style="font-size:10.5px;">（${kids.length}件）</span>`}
+        <div class="muted" style="font-size:10.5px;">${esc(lv)}${leaf?' ・ 伝票で選べます':' ・ 見出し（選べません）'}</div></td>
+      <td class="muted" style="font-size:11.5px;">${esc(a.code)}</td>
+      <td>${depth===0? `<span class="badge b-blue">${esc(KIND_LABEL[a.kind]||'')}</span>` : `<span class="muted" style="font-size:11px;">${esc(KIND_LABEL[accountKindOf(a)]||'')}</span>`}</td>
+      <td class="r num">${use? use+'件' : '<span class="zero">—</span>'}</td>
+      <td class="r num">${amt? moneyPlain(amt) : '<span class="zero">—</span>'}</td>
+      <td>${canE? `<a class="pillbtn pill-new" onclick="accNodeForm('','${attr(a.id)}')">＋子</a>
+        <a class="pillbtn pill-save" onclick="accNodeForm('${attr(a.id)}')">編集</a>
+        <a class="pillbtn" onclick="accMove('${attr(a.id)}',-1)">↑</a>
+        <a class="pillbtn" onclick="accMove('${attr(a.id)}',1)">↓</a>`:''}</td></tr>`
+      + (kids.length? rowsHtml(a.id, depth+1) : '');
+  }).join('');
+
+  const body = accTreeReady()
+    ? `<div class="table-wrap"><table>
+        <thead><tr><th style="min-width:280px;">科目</th><th style="min-width:70px;">コード</th><th style="min-width:90px;">区分</th>
+          <th class="r" style="min-width:80px;">使用中</th><th class="r" style="min-width:110px;">${fy}年度 実績</th><th style="min-width:170px;"></th></tr></thead>
+        <tbody>${rowsHtml('',0)}</tbody></table></div>`
+    : `<div class="warnbar">まだ階層が作られていません。「初期セット」を押すと、いま使っている勘定科目を
+        <b>売上高／売上原価／販売費及び一般管理費／営業外損益</b> の4つの大分類に振り分けます。<br>
+        <span style="font-weight:400;">コードも名前も変えません。いま入っている請求・支払・費用・予算はそのまま動きます。</span></div>`;
+
+  return pageShell({ title:'勘定科目の登録', count:accounts().length,
+    sub:'大分類 › 中分類 › 小分類（もっと深くもできます）。区分は大分類で決め、下は受け継ぎます。',
+    tools:`${canE&&!accTreeReady()?`<button class="btn" onclick="accInitTree()">初期セット（今の科目を4分類に振り分け）</button>`:''}
+      ${canE&&accTreeReady()?`<button class="btn" onclick="accNodeForm('','')">＋ 大分類を追加</button>`:''}
+      ${toolsMenu(`<button class="btn secondary" onclick="goto('kbunrui')">分類別の集計を見る</button>
+        <button class="btn secondary" onclick="exportCsvAccounts()">${IC.doc} CSV出力</button>`)}`,
+    body: body + `<div class="fhelp" style="margin-top:8px;">
+      伝票や費目で選べるのは <b>末端の科目</b>（子を持たないもの）だけです。親も選べると、親と子で同じお金を二重に数えてしまうためです。<br>
+      使用中の件数が出ている科目は、消す前に伝票の付け替えが必要です。使わなくなったものは「停止」にすると、新しく選べなくなります（過去の数字はそのまま）。</div>` });
+}
+/** 今ある平らな科目を、区分ごとの大分類の下にぶら下げる。コードは触らない。 */
+function accInitTree(){
+  if(!canEdit('settings')){ toast('権限がありません。','err'); return; }
+  if(!confirm('いま使っている勘定科目を、4つの大分類の下に振り分けます。\nコードも名前も金額も変わりません。よろしいですか？')) return;
+  /* まだ DB に科目が1件も無ければ、既定の科目をそのまま登録してから木にする */
+  if(!(DB.accounts||[]).length) DEFAULT_ACCOUNTS.forEach((a,i)=>commitRecord('accounts',{...a, order:i+1},{}));
+  const rootId={};
+  ACC_ROOTS.forEach((r,i)=>{
+    let ex=(DB.accounts||[]).find(a=>a.code===r.code);
+    if(!ex) ex=commitRecord('accounts',{...r, parentId:'', order:i+1},{}).record;
+    rootId[r.kind]=ex.id;
+  });
+  (DB.accounts||[]).forEach(a=>{
+    if(ACC_ROOTS.some(r=>r.code===a.code)) return;
+    if(a.parentId) return;
+    a.parentId = rootId[a.kind] || rootId.sga;
+    if(!a.order) a.order = Number(String(a.code).replace(/\D/g,'')) || 0;
+    markDirty('accounts', a);
+  });
+  renderPage('accounts'); toast('初期セットしました。ここから 中分類・小分類 を足せます。','ok');
+}
+function accNodeForm(id, parentId){
+  const a = id? accountById(id) : null;
+  const pid = a? (a.parentId||'') : (parentId||'');
+  const parent = pid? accountById(pid) : null;
+  const depth = parent? accountPath(parent.code).length : 0;
+  const lv = ['大分類','中分類','小分類'][depth] || `第${depth+1}階層`;
+  openModal(`<h3>${a?'科目の編集':lv+'を追加'}</h3>
+    <div class="mdsub">${parent? `<b>${esc(accountPathLabel(parent.code))}</b> の下に作ります。`
+      : '区分（損益のどこに入るか）は、この大分類で決まります。下の科目はこれを受け継ぎます。'}</div>
+    <div class="form-grid">
+      <div class="full"><label>名称 <span style="color:var(--danger)">*</span></label>
+        <input id="acL" value="${attr(a?a.label:'')}" placeholder="${attr(depth===0?'例: 販売費及び一般管理費':(depth===1?'例: 水道光熱費':'例: 電気代'))}"></div>
+      <div><label>コード <span style="color:var(--danger)">*</span></label>
+        <input id="acC" value="${attr(a?a.code:'')}" placeholder="${attr(depth===0?'R6':'6210')}">
+        <div class="fhelp">伝票に記録される印。あとから変えると過去の数字と結び付かなくなります。</div></div>
+      ${depth===0? `<div><label>区分 <span style="color:var(--danger)">*</span></label>
+        <select id="acK">${selOpts(Object.keys(KIND_LABEL).map(k=>({k,label:KIND_LABEL[k]})), a?a.kind:'sga')}</select></div>`
+        : `<div><label>区分</label><input value="${attr(KIND_LABEL[accountKindOf(parent)]||'')}" readonly>
+            <div class="fhelp">上の分類から受け継ぎます。</div></div>`}
+      <div><label>並び順</label><input id="acO" type="number" value="${attr(a?(a.order||''):'')}" placeholder="小さいほど上"></div>
+      <div><label>使う／停止</label><select id="acA">
+        <option value="1" ${a&&a.active===false?'':'selected'}>使う</option>
+        <option value="0" ${a&&a.active===false?'selected':''}>停止（新しく選べない）</option></select></div>
+    </div>
+    <div class="modal-actions ${a?'split':''}">
+      ${a&&canDelete('settings')?`<button class="btn danger" onclick="accNodeDelete('${attr(a.id)}')">削除</button>`:''}
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" onclick="closeModal()">キャンセル</button>
+        <button class="btn" onclick="accNodeSave('${attr(id||'')}','${attr(pid)}')">保存</button></div></div>`);
+}
+function accNodeSave(id, parentId){
+  const label=(document.getElementById('acL').value||'').trim();
+  const code=(document.getElementById('acC').value||'').trim();
+  if(!label||!code){ toast('名称とコードを入れてください。','err'); return; }
+  const dup=accounts().find(a=>a.code===code && String(a.id)!==String(id));
+  if(dup){ toast(`コード ${code} は「${dup.label}」で使われています。`,'err'); return; }
+  const rec={ label, code, parentId:parentId||'',
+    order:num(document.getElementById('acO').value),
+    active: document.getElementById('acA').value==='1' };
+  const kEl=document.getElementById('acK');
+  if(kEl) rec.kind=kEl.value; else rec.kind='';        // 下の階層は区分を持たない（受け継ぐ）
+  commitRecord('accounts', rec, { existingId:id||null });
+  closeModal(); renderPage('accounts'); toast('保存しました。','ok');
+}
+function accNodeDelete(id){
+  const a=accountById(id); if(!a) return;
+  if(accountChildren(id).length){ toast('下に科目があります。先にそちらを消すか、移してください。','err'); return; }
+  const use=accountUsage(a.code);
+  if(use){ toast(`この科目は ${use}件の伝票・費目で使われています。消せません（「停止」にしてください）。`,'err'); return; }
+  if(!confirm(`「${a.label}」を消します。よろしいですか？`)) return;
+  if(deleteRecord('accounts', id, a.label)){ closeModal(); renderPage('accounts'); }
+}
+function accMove(id, dir){
+  const a=accountById(id); if(!a) return;
+  const sib=accountChildren(a.parentId||'');
+  const i=sib.findIndex(x=>String(x.id)===String(id));
+  const j=i+dir; if(j<0||j>=sib.length) return;
+  sib.forEach((x,k)=>{ x.order=(k+1)*10; });
+  a.order=(j+1)*10; sib[j].order=(i+1)*10;
+  sib.forEach(x=>markDirty('accounts',x));
+  renderPage('accounts');
+}
+function exportCsvAccounts(){
+  const rows=[['階層','大分類','中分類','小分類','コード','名称','区分','使用中','年度実績']];
+  (function walk(parentId, depth, path){
+    accountChildren(parentId).forEach(a=>{
+      const p=path.concat([a.label]);
+      rows.push([depth+1, p[0]||'', p[1]||'', p[2]||'', a.code, a.label, KIND_LABEL[accountKindOf(a)]||'',
+        accountUsage(a.code), sum12(seriesByAccount(CUR_FY,a.code,'actual'))]);
+      walk(a.id, depth+1, p);
+    });
+  })('',0,[]);
+  downloadCsv(`勘定科目_${CUR_FY}年度`, rows);
 }
 
 /* ============================================================================
@@ -4494,9 +4722,11 @@ const PAGE_GUIDE = {
   okr:        { step:'⑤', what:'目標（Objective）と主要成果（KR）。KRは予実から<b>自動で取れます</b>',
                 effect:'手で写さないこと。写すと必ずズレます' },
 
-  settings:   { step:'①', what:'<b>勘定科目</b>（収益／売上原価／販管費／営業外）・資金繰りの開始残高',
-                effect:'予実の行になります' },
-  crmlink:    { step:'①', what:'CRMから 所属機関・特定技能者・在籍期間を取り込む（CSVでも可）',
+  accounts:   { step:'①', what:'<b>勘定科目</b>を 大分類 › 中分類 › 小分類 で定義する。区分は大分類でだけ決める',
+                effect:'予実の行・分類別集計。伝票で選べるのは末端だけです' },
+  settings:   { step:'①', what:'資金繰りの開始残高（通帳の残高）・デモデータ',
+                effect:'資金繰りの残高見込みが実際の数字になります' },
+  crmlink:    { step:'①', what:'CRMから 所属機関（取引先）を取り込む（CSVでも可）',
                 effect:'CRMから来た項目は同期で上書き。<b>締日・サイト・口座・請求ルールは触られません</b>' },
   users:      { step:'', what:'役割（管理者／経営／経理／閲覧）とページごとの権限', effect:'見える画面・できる操作が変わります' },
   apilink:    { step:'', what:'外部システムやAIに<b>読ませる</b>ための鍵。1人1鍵', effect:'読むだけ。金額は書き換えられません' },

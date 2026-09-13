@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -283,6 +283,32 @@ console.log('\n― 画面が落ちずに描けるか ―');
     ok?pass++:fail++;
   }catch(e){ console.log(`  NG  viewLedger(${side}/${tab})  →  `+e.message); fail++; }
 });
+
+console.log('\n― 勘定科目の階層（大・中・小） ―');
+eq('初期セット前は階層なし', ctx.__x.accTreeReady(), false);
+eq('平らなときは全部が根に見える', ctx.__x.accountRoots().length>0, true);
+eq('そのときは今までどおり平らに選べる', ctx.accountsOfKind('sga').length>0, true);
+ctx.accInitTree();
+eq('階層ができた', ctx.__x.accTreeReady(), true);
+eq('大分類は4つ', ctx.__x.accountRoots().length, 4);
+eq('コードは変わらない（6200 は残る）', !!ctx.__x.accountByCode('6200'), true);
+const sgaRoot = ctx.__x.accountRoots().find(r=>r.kind==='sga');
+eq('今までの科目が大分類の下に入る', ctx.__x.accountChildren(sgaRoot.id).length>0, true);
+
+const mid  = ctx.commitRecord('accounts',{code:'6215',label:'水道光熱費',parentId:sgaRoot.id,kind:'',order:5},{}).record;
+const leaf = ctx.commitRecord('accounts',{code:'6216',label:'電気代',    parentId:mid.id,    kind:'',order:1},{}).record;
+eq('区分は上から受け継ぐ', ctx.accountKind('6216'), 'sga');
+eq('道筋が出る', ctx.__x.accountPathLabel('6216'), '販売費及び一般管理費 › 水道光熱費 › 電気代');
+eq('子を持つ科目は末端ではない', ctx.__x.accountIsLeaf(mid), false);
+eq('その下のコードを全部集める', ctx.__x.accountCodesUnder('6215').slice().sort(), ['6215','6216']);
+/* ★ 二重計上を止める肝: 親は選べない */
+const opts = ctx.accountOptionsHtml('', null);
+eq('親は選べない（value が付かない）', opts.includes('value="6215"'), false);
+eq('末端は選べる', opts.includes('value="6216"'), true);
+eq('区分で絞ると末端だけ出る', ctx.accountsOfKind('sga').some(a=>a.code==='6215'), false);
+eq('使用中の件数を数える', ctx.accountUsage('6200')>0, true);
+try{ const h=ctx.viewAccounts(); const ok=h.length>500;
+  console.log((ok?'  ok  ':'  NG  ')+'viewAccounts  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ console.log('  NG  viewAccounts → '+e.message); fail++; }
 
 /* ══════════════════════════════════════════════════════════════════════
    デモデータ — 入れて・確かめて・消す
