@@ -350,6 +350,13 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .lgcell{padding:6px 4px !important;}
   .lgdue{outline:2px dashed var(--text-muted); outline-offset:1px;}
   .lgdot{font-size:10px; line-height:1.3; text-align:center; color:var(--text-secondary);}
+  .attbtn{display:inline-flex; align-items:center; gap:2px; color:var(--text-muted); cursor:pointer; padding:2px 4px; border-radius:6px;}
+  .attbtn:hover{background:var(--bg-hover); color:var(--primary);}
+  .attbtn.has{color:var(--primary);}
+  .attbtn span{font-size:11px; font-weight:700; font-variant-numeric:tabular-nums;}
+  .attdrop{display:block; border:2px dashed var(--border-strong); border-radius:12px; padding:18px; text-align:center;
+    cursor:pointer; background:var(--bg-subtle); font-size:13px; line-height:1.8;}
+  .attdrop:hover,.attdrop.over{border-color:var(--primary); background:var(--primary-soft);}
   .kbtw{display:inline-block; width:16px; color:var(--text-muted); font-size:10px; user-select:none;}
   .lgkey{display:inline-block; width:14px; height:9px; border-radius:2px; margin-right:3px; vertical-align:middle;}
   .printonly{display:none;}
@@ -502,8 +509,10 @@ function permOf(page){
   if(role==='Admin') return {c:1,e:1,d:1,v:1};
   const own = (DB && DB.userPerms && DB.userPerms[(SESSION&&SESSION.email)||''] || {})[page];
   const def = (ROLE_DEFAULT[role]||{})[page] || {c:0,e:0,d:0};
-  return { c: own&&'c' in own?+own.c:def.c, e: own&&'e' in own?+own.e:def.e,
-           d: own&&'d' in own?+own.d:def.d, v: own&&'v' in own?+own.v:1 };
+  /* 見せない画面は、作る・直す・消す もできない（backend/src/authz.ts と同じ決まり） */
+  const v = own&&'v' in own? +own.v : 1;
+  return { c: v&&(own&&'c' in own?+own.c:def.c)?1:0, e: v&&(own&&'e' in own?+own.e:def.e)?1:0,
+           d: v&&(own&&'d' in own?+own.d:def.d)?1:0, v };
 }
 const canCreate = p => !!permOf(p).c;
 const canEdit   = p => !!permOf(p).e;
@@ -786,6 +795,8 @@ const IC = {
   import:   li('<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>'),
   close:    li('<path d="M6 6l12 12M18 6 6 18"/>'),
   check:    li('<path d="m4 12.5 5 5L20 6.5"/>'),
+  clip:     li('<path d="m21 11.5-8.6 8.6a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l8-8"/>'),
+  mail:     li('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'),
 };
 /** フォームの見出し1行（アイコン＋文字）。宣言側は section と secIcon を書くだけ。 */
 function secHead(f, style){
@@ -1984,6 +1995,7 @@ function openDetail(entKey, id){
     if(entKey==='companies') html += companyExtraDetail(row);
   }
   const page=E.page;
+  html += attSection(entKey, row.id);
   openModal(`<h3>${esc(row.name||row.no||E.label)} ${sourceTag(row)}</h3>
     <div class="mdsub">${esc(E.label)}</div>${html}
     <div class="modal-actions">
@@ -2446,6 +2458,7 @@ function viewInvoices(){
     {key:'dueDate', label:'入金期日', date:true, val:r=>{
       const b=balanceOfInvoice(r), late=r.dueDate&&r.dueDate<t&&b>0;
       return r.dueDate? (late?`<span class="badge b-red">${esc(r.dueDate)}</span>`:esc(r.dueDate)) : '<span class="zero">-</span>'; }},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('invoices', r.id)},
     {key:'status', label:'状態', raw:r=>invoiceStatus(r), val:r=>statusBadge(invoiceStatus(r))},
     {key:'act', label:'', noFilter:true, val:r=>{
       let h='';
@@ -2572,6 +2585,7 @@ function viewReceipts(){
       if(!a.length) return '<span class="badge b-amber">未消込</span>';
       const first=findById('invoices',a[0].invoiceId);
       return `${esc(first?first.no:'-')}${a.length>1?` <span class="muted">他${a.length-1}件</span>`:''}`; }},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payments', r.id)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
     {key:'note', label:'備考', noFilter:true, val:r=>esc(r.note||'')},
     {key:'act', label:'', noFilter:true, val:r=>canEdit('receipts')?
@@ -2787,6 +2801,7 @@ function viewBills(){
       if(b>0&&r.dueDate<t) return `<span class="badge b-red">${esc(r.dueDate)}</span>`;
       if(b>0&&r.dueDate<=addDays(t,7)) return `<span class="badge b-amber">${esc(r.dueDate)}</span>`;
       return esc(r.dueDate); }},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('bills', r.id)},
     {key:'status', label:'状態', raw:r=>billStatus(r), val:r=>statusBadge(billStatus(r))},
     {key:'act', label:'', noFilter:true, val:r=>{
       let h='';
@@ -2831,6 +2846,7 @@ function viewPayouts(){
       const a=(r.allocations||[]); if(!a.length) return '<span class="badge b-amber">未消込</span>';
       const f=findById('bills',a[0].billId);
       return `${esc(f?f.no:'-')}${a.length>1?` <span class="muted">他${a.length-1}件</span>`:''}`; }},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payouts', r.id)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
     {key:'note', label:'備考', noFilter:true, val:r=>esc(r.note||'')},
   ];
@@ -3469,7 +3485,7 @@ function viewProperties(){
 
   const NCOL = 4+12+1;
   const rowHtml = r => `<tr onclick="propertyDetail('${attr(r.pr.id)}')" style="cursor:pointer;">
-    <td><b>${esc(r.pr.name||'(名称なし)')}</b>
+    <td>${attBtn('properties', r.pr.id)} <b>${esc(r.pr.name||'(名称なし)')}</b>
       <div class="muted" style="font-size:10.5px;">${esc(r.pr.kind||'')}${r.pr.address?' ／ '+esc(r.pr.address):''}</div></td>
     <td style="font-size:11.5px;">${r.pr.companyId? coLink(r.pr.companyId,'ap') : '<span class="zero">—</span>'}</td>
     <td>${propEndBadge(r.pr)}</td>
@@ -3526,6 +3542,7 @@ function propertyDetail(id){
     ${num(pr.deposit)?line('敷金・保証金', `<b class="num">${moneyPlain(pr.deposit)}</b> 円`):''}
     ${pr.rooms||pr.capacity?line('部屋・定員', `${pr.rooms?esc(pr.rooms)+'部屋':''}${pr.rooms&&pr.capacity?' ／ ':''}${pr.capacity?esc(pr.capacity)+'名まで':''}`):''}
     ${pr.note?line('メモ', esc(pr.note)):''}
+    ${attSection('properties', pr.id)}
 
     <div class="form-section" style="margin-top:14px;">${IC.yen} ${fyLabel(fy)}の費用（費目ごと・税込）</div>
     ${me.items.length? `<div class="table-wrap"><table>
@@ -3718,6 +3735,137 @@ function apAgingDetail(companyId){
     }).join('')}</tbody></table></div>
     <div class="modal-actions split"><button class="btn secondary" onclick="closeModal();openLedger('${companyId}','ap')">台帳を見る</button>
       <button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+
+/* ============================================================================
+   添付ファイル（画面側）— どの伝票にも 📎 を
+   ----------------------------------------------------------------------------
+   ファイルの中身は サーバーの別の表にあり、画面の同期データ（DB）には入れません。
+   一覧の数は1画面ぶんを1回で取り（/files/counts）、中身は押したときだけ取りに行きます。
+   付ける・消す は その伝票の画面の 編集・削除 の権限。見るのは 表示 の権限。
+   ========================================================================== */
+const ATT_PAGE = { invoices:'invoices', payments:'receipts', bills:'bills', payouts:'payouts',
+  expenses:'expenses', costItems:'expenses', properties:'properties', companies:'companies' };
+const ATT_LABEL = { invoices:'請求書', payments:'入金', bills:'支払請求', payouts:'支払', expenses:'費用',
+  costItems:'費目', properties:'物件', companies:'取引先' };
+const ATT_MAX = 10*1024*1024;
+let ATT_COUNTS = {}, _attLoading = {};
+
+async function attLoadCounts(entity){
+  if(_attLoading[entity]) return;
+  _attLoading[entity]=true;
+  try{
+    const r=await fetch(API_BASE+'/files/counts?entity='+encodeURIComponent(entity),{headers:headers()});
+    const d=r.ok? await r.json() : { counts:{} };
+    ATT_COUNTS[entity]=d.counts||{};
+  }catch(e){ ATT_COUNTS[entity]={}; }
+  _attLoading[entity]=false;
+  /* 数が分かったら、今の画面だけ描き直す（入力中の画面は描き直さない） */
+  const a=document.activeElement;
+  if(!(a && /INPUT|TEXTAREA|SELECT/.test(a.tagName))) renderPage(CURRENT_PAGE);
+}
+/** 一覧の行に置く小さなボタン。数がまだ分からなければ、裏で取りに行く。 */
+function attBtn(entity, id){
+  if(!ATT_PAGE[entity] || !id) return '';
+  if(!ATT_COUNTS[entity] && !_attLoading[entity] && GTOKEN) attLoadCounts(entity);
+  const n=(ATT_COUNTS[entity]||{})[id]||0;
+  return `<a class="attbtn${n?' has':''}" onclick="event.stopPropagation();attOpen('${entity}','${attr(id)}')" title="添付ファイル${n?`（${n}件）`:''}">${IC.clip}${n?`<span>${n}</span>`:''}</a>`;
+}
+const attSize = b => b>=1048576 ? (b/1048576).toFixed(1)+'MB' : Math.max(1,Math.round(b/1024))+'KB';
+
+async function attOpen(entity, id){
+  const page=ATT_PAGE[entity];
+  const canUp=canEdit(page)||canCreate(page), canDel=canDelete(page);
+  openModal2(`<h3>${IC.clip} 添付ファイル　<span style="font-size:12px;color:var(--muted);font-weight:400;">${esc(ATT_LABEL[entity]||'')}</span></h3>
+    ${canUp? `<label class="attdrop" id="attDrop" ondragover="event.preventDefault();this.classList.add('over')"
+        ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');attUpload('${entity}','${attr(id)}',event.dataTransfer.files)">
+        <input type="file" multiple style="display:none;" onchange="attUpload('${entity}','${attr(id)}',this.files)"
+          accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.xlsx,.xls,.docx,.doc">
+        <b>ここにファイルをドロップ</b> または <u>選ぶ</u><br>
+        <span class="muted" style="font-size:11.5px;">PDF・画像・Excel・Word ／ 1ファイル10MBまで（マクロ入りは受け付けません）</span></label>`
+      : `<div class="infobar">見るだけの権限です。付ける・消すには この画面の編集権限が要ります。</div>`}
+    <div id="attList" style="margin-top:10px;"><div class="empty">読み込み中…</div></div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal2()">閉じる</button></div>`,'lg');
+  attRefresh(entity, id, canDel);
+}
+async function attRefresh(entity, id, canDel){
+  try{
+    const r=await fetch(API_BASE+'/files?entity='+encodeURIComponent(entity)+'&id='+encodeURIComponent(id),{headers:headers()});
+    const d=await r.json().catch(()=>({}));
+    const box=document.getElementById('attList'); if(!box) return;      // 待っている間に閉じられていたら何もしない
+    if(!r.ok){ box.innerHTML=`<div class="alertbar">${esc(d.message||'添付を取得できませんでした（HTTP '+r.status+'）')}</div>`; return; }
+    const items=d.items||[];
+    (ATT_COUNTS[entity]=ATT_COUNTS[entity]||{})[id]=items.length;
+    box.innerHTML = items.length? `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>種類</th><th class="r">大きさ</th><th>付けた人・日時</th><th></th></tr></thead>
+      <tbody>${items.map(f=>`<tr>
+        <td><a onclick="attView('${attr(f.id)}','${attr(f.mime)}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(f.fileName)}</a></td>
+        <td><span class="badge b-gray">${esc(f.kind)}</span></td><td class="r num">${attSize(f.size)}</td>
+        <td class="muted" style="font-size:11.5px;">${esc(String(f.uploadedBy||'').split('@')[0])} ・ ${esc(String(f.createdAt).slice(0,16).replace('T',' '))}</td>
+        <td class="r"><a class="pillbtn pill-save" onclick="attDownload('${attr(f.id)}','${attr(f.fileName)}')">保存</a>
+          ${canDel?`<a class="pillbtn pill-del" onclick="attDelete('${entity}','${attr(id)}','${attr(f.id)}','${attr(f.fileName)}')">削除</a>`:''}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">まだ添付はありません。</div>';
+  }catch(e){ const b=document.getElementById('attList'); if(b) b.innerHTML='<div class="alertbar">通信に失敗しました。</div>'; }
+}
+function attReadB64(file){
+  return new Promise((ok,ng)=>{ const fr=new FileReader(); fr.onload=()=>ok(String(fr.result).split(',')[1]||''); fr.onerror=ng; fr.readAsDataURL(file); });
+}
+async function attUpload(entity, id, fileList){
+  const files=[...(fileList||[])]; if(!files.length) return;
+  const box=document.getElementById('attList');
+  let okN=0; const errs=[];
+  for(const f of files){
+    if(f.size>ATT_MAX){ errs.push(`${f.name}：10MBを超えています`); continue; }
+    if(box) box.insertAdjacentHTML('afterbegin', `<div class="infobar" data-up="${attr(f.name)}">「${esc(f.name)}」を送っています…</div>`);
+    try{
+      const dataBase64=await attReadB64(f);
+      const r=await fetch(API_BASE+'/files',{method:'POST',headers:headers(),body:JSON.stringify({entity, entityId:id, fileName:f.name, dataBase64})});
+      const d=await r.json().catch(()=>({}));
+      if(r.ok) okN++; else errs.push(`${f.name}：${d.message||('HTTP '+r.status)}`);
+    }catch(e){ errs.push(`${f.name}：通信に失敗しました`); }
+  }
+  if(okN) toast(`${okN}件 添付しました。`,'ok');
+  if(errs.length) toast('付けられなかったファイルがあります：\n'+errs.join('\n'),'err');
+  attRefresh(entity, id, canDelete(ATT_PAGE[entity]));
+  renderPage(CURRENT_PAGE);
+}
+async function attBlob(fileId){
+  const r=await fetch(API_BASE+'/files/'+encodeURIComponent(fileId),{headers:headers()});
+  if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.message||('HTTP '+r.status)); }
+  return r.blob();
+}
+async function attDownload(fileId, name){
+  try{
+    const b=await attBlob(fileId), url=URL.createObjectURL(b), a=document.createElement('a');
+    a.href=url; a.download=name||'file'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  }catch(e){ toast('保存できませんでした：'+e.message,'err'); }
+}
+/** PDF と画像はその場で開く。それ以外は保存。 */
+async function attView(fileId, mime){
+  if(!/^(application\/pdf|image\/(png|jpeg|gif|webp))/.test(mime||'')){ return attDownload(fileId); }
+  try{
+    const b=await attBlob(fileId), url=URL.createObjectURL(b);
+    const w=window.open(url,'_blank');
+    if(!w) toast('ポップアップが止められました。「保存」から開いてください。','err');
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
+  }catch(e){ toast('開けませんでした：'+e.message,'err'); }
+}
+async function attDelete(entity, id, fileId, name){
+  if(!confirm(`「${name}」を消します。\n消した記録は操作履歴に残ります。よろしいですか？`)) return;
+  try{
+    const r=await fetch(API_BASE+'/files/'+encodeURIComponent(fileId),{method:'DELETE',headers:headers()});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ toast(d.message||'消せませんでした。','err'); return; }
+    toast('消しました。','ok');
+  }catch(e){ toast('通信に失敗しました。','err'); }
+  attRefresh(entity, id, true); renderPage(CURRENT_PAGE);
+}
+/** 詳細モーダルの中に置く「添付」の欄（数だけ出し、押すと開く） */
+function attSection(entity, id){
+  if(!ATT_PAGE[entity] || !canSee(ATT_PAGE[entity])) return '';
+  const n=(ATT_COUNTS[entity]||{})[id]||0;
+  return `<div class="form-section" style="margin-top:14px;">${IC.clip} 添付ファイル
+    <a class="pillbtn pill-save" style="margin-left:auto;" onclick="attOpen('${entity}','${attr(id)}')">${n?`${n}件を見る・追加`:'ファイルを付ける'}</a></div>`;
 }
 
 /* ============================================================================
@@ -4016,7 +4164,7 @@ function viewCoList(side){
       <td class="r">${r.perf.avgLate?r.perf.avgLate+'日':'<span class="zero">—</span>'}</td>
       ${side==='ar'?`<td class="r num"><b>${moneyPlain(r.next.total)}</b><div class="muted" style="font-size:10px;">${esc(r.next.ym)}分</div></td>`:''}
       <td class="muted" style="font-size:11.5px;">${esc(r.lastPay||'—')}</td>
-      <td>${side==='ar'&&typeof mailCompose==='function'?`<a class="pillbtn pill-save" onclick="event.stopPropagation();mailCompose('ar','${attr(r.c.id)}')" title="メールを書く">✉</a>`:''}</td></tr>`).join('');
+      <td>${side==='ar'&&typeof mailCompose==='function'?`<a class="pillbtn pill-save" onclick="event.stopPropagation();mailCompose('ar','${attr(r.c.id)}')" title="メールを書く">${IC.mail}</a>`:''}</td></tr>`).join('');
 
   return pageShell({ title: side==='ap'?'支払先別':'取引先別', count:rows.length, shown:shown.length,
     sub:`${esc(R.label)}にお金が動いた会社と、いま残高がある会社。押すと その会社のすべてが見られます。`,
@@ -4089,7 +4237,7 @@ function viewCoDetail(side, companyId){
 
   LED_CO=String(c.id); LED_SIDE=side;          // 印刷・CSV は台帳の関数をそのまま使う
   return pageShell({ title:c.name||'', sub:`${side==='ap'?'支払先':'取引先'}の すべてのお金の出入り`,
-    tools:`${side==='ar'&&typeof mailCompose==='function'?`<button class="btn" onclick="mailCompose('ar','${attr(c.id)}')">✉ メール</button>`:''}
+    tools:`${side==='ar'&&typeof mailCompose==='function'?`<button class="btn" onclick="mailCompose('ar','${attr(c.id)}')">${IC.mail} メール</button>`:''}
       ${canEdit(S.payPage)?`<button class="btn secondary" onclick="${side==='ap'?`openPayout(null,{companyId:'${attr(c.id)}'})`:`openPayment(null,{companyId:'${attr(c.id)}'})`}">＋ ${esc(S.payLabel)}を記録</button>`:''}
       ${toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（残高確認書）</button>
         <button class="btn secondary" onclick="exportCsvLedger()">${IC.doc} 履歴をCSV</button>
@@ -4323,7 +4471,7 @@ function ledHistoryHtml(c, side, fy){
       return `<tr onclick="openDetail('${side==='ap'?'bills':'invoices'}','${d.id}')" style="cursor:pointer;">
         <td>${esc(e.date)}</td>
         <td><span class="badge b-blue">${esc(S.docLabel)}</span></td>
-        <td><b>${esc(d.no||'')}</b>${d.bookMonth?`<div class="muted" style="font-size:10.5px;">計上 ${esc(d.bookMonth)}</div>`:''}</td>
+        <td>${attBtn(side==='ap'?'bills':'invoices', d.id)} <b>${esc(d.no||'')}</b>${d.bookMonth?`<div class="muted" style="font-size:10.5px;">計上 ${esc(d.bookMonth)}</div>`:''}</td>
         <td class="r num"><b>${moneyPlain(e.amount)}</b></td>
         <td class="r"><span class="zero">—</span></td>
         <td class="r num">${moneyPlain(e.bal)}</td>
@@ -4337,7 +4485,7 @@ function ledHistoryHtml(c, side, fy){
       return d? esc(d.no||'') : '—'; }).join('、');
     return `<tr onclick="${side==='ap'?`openPayout('${p.id}')`:`openPayment('${p.id}')`}" style="cursor:pointer;">
       <td>${esc(e.date)}</td>
-      <td><span class="badge b-green">${esc(S.payLabel)}</span></td>
+      <td><span class="badge b-green">${esc(S.payLabel)}</span> ${attBtn(side==='ap'?'payouts':'payments', p.id)}</td>
       <td class="muted" style="font-size:11.5px;">${to2||'<span class="badge b-amber">未消込</span>'}${e.fee?`<div class="muted" style="font-size:10.5px;">手数料 ${moneyPlain(e.fee)}</div>`:''}</td>
       <td class="r"><span class="zero">—</span></td>
       <td class="r num plus"><b>${moneyPlain(e.amount)}</b>${rest?`<div style="font-size:10.5px;color:var(--warning);">うち未消込 ${moneyPlain(rest)}</div>`:''}</td>
@@ -4641,7 +4789,7 @@ function viewExpenses(){
     const tot = r.cells.reduce((s,c)=>s+(c||0),0);
     const nMon = r.cells.filter(c=>c).length;
     return `<tr>
-      <td><a onclick="openForm('costItems','${attr(r.it.id)}')" style="cursor:pointer;font-weight:600;">${esc(r.it.name||'(名称なし)')}</a>
+      <td>${attBtn('costItems', r.it.id)} <a onclick="openForm('costItems','${attr(r.it.id)}')" style="cursor:pointer;font-weight:600;">${esc(r.it.name||'(名称なし)')}</a>
         ${r.ap?' <span class="badge b-blue" title="毎月の支払請求で管理（期日・残高あり）">買掛</span>':''}
         ${r.it.companyId? `<div class="muted" style="font-size:11px;">${coLink(r.it.companyId,'ap')}</div>`
           : (r.it.vendor?`<div class="muted" style="font-size:11px;">${esc(r.it.vendor)}</div>`:'')}</td>
@@ -4796,6 +4944,7 @@ function viewCompanies(mode){
       if(!rl.length) return `<a onclick="event.stopPropagation();openRules('${r.id}')" style="cursor:pointer;color:var(--amber);font-weight:600;font-size:12px;">未設定</a>`;
       return `<a onclick="event.stopPropagation();openRules('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">${rl.length}件</a>
         <div class="muted" style="font-size:10.5px;">${esc(rl.map(x=>x.kind==='per_worker'?`${moneyPlain(x.unitPrice)}/人`:(x.kind==='fixed'?`${moneyPlain(x.unitPrice)}/月`:'都度')).join('・'))}</div>`; }},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('companies', r.id)},
     {key:'paySite', label:'支払条件', noFilter:true, val:r=>
       r.paySite!=null&&r.paySite!==''? esc(`${r.closingDay||31}日締 / ${r.paySite}か月後 ${r.payDay||31}日`) : '<span class="zero">未設定</span>'},
     {key:'perf', label:'支払いぶり', noFilter:true, val:r=>ledPerfBadge(r.id, r.kind==='仕入先'?'ap':'ar')},

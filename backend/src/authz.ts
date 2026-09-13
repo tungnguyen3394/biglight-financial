@@ -45,11 +45,15 @@ export function permOf(state: any, email: string, role: string, page: string) {
   const per = (state && state.userPerms && state.userPerms[String(email || '').toLowerCase()]) || null
   const own = per && per[page]
   const def = (ROLE_DEFAULT[role] || {})[page] || { c: false, e: false, d: false }
+  /* ★ 2026-09-14（テストで発覚）: 以前は「表示」を外しても、役割の既定の 作成・編集・削除 が
+     そのまま残っていた。画面を見せていない人が、裏から伝票を書いたり添付を付けたりできた。
+     見せない画面は、作ることも・直すことも・消すこともできない。 */
+  const v = own && 'v' in own ? !!own.v : true
   return {
-    c: own && 'c' in own ? !!own.c : def.c,
-    e: own && 'e' in own ? !!own.e : def.e,
-    d: own && 'd' in own ? !!own.d : def.d,
-    v: own && 'v' in own ? !!own.v : true,
+    c: v && (own && 'c' in own ? !!own.c : def.c),
+    e: v && (own && 'e' in own ? !!own.e : def.e),
+    d: v && (own && 'd' in own ? !!own.d : def.d),
+    v,
   }
 }
 

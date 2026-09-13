@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -341,6 +341,28 @@ console.log('\n― 請求書（繰越式） ―');
   ctx.__x.setDB(_db); ctx.DB=_db;
 }
 
+console.log('\n― 添付ファイル（画面側） ―');
+{
+  /* 画面とサーバーで「どの台帳に添付でき、どの画面の権限を見るか」が同じであること */
+  const srv=fs.readFileSync(require('path').join(__dirname,'..','backend','src','files.ts'),'utf8');
+  const m=srv.match(/ATTACH_ENTITIES[^{]*{([\s\S]*?)}/);
+  const pairs={}; (m?m[1]:'').replace(/(\w+):\s*'(\w+)'/g,(_,k,v)=>{ pairs[k]=v; return ''; });
+  eq('添付の台帳と権限の画面が サーバーと同じ', JSON.stringify(Object.keys(pairs).sort().map(k=>k+'='+pairs[k])),
+    JSON.stringify(Object.keys(ctx.__x.ATT_PAGE).sort().map(k=>k+'='+ctx.__x.ATT_PAGE[k])));
+  ctx.__x.setAttCounts({ invoices:{ I1:3 } });
+  eq('一覧のボタンに件数が出る', ctx.attBtn('invoices','I1').includes('<span>3</span>'), true);
+  eq('件数0なら数字を出さない', ctx.attBtn('invoices','I2').includes('<span>'), false);
+  eq('添付できない台帳にはボタンを出さない', ctx.attBtn('budgets','X'), '');
+  /* 見せていない画面の伝票には、添付の欄も出さない */
+  _db.userPerms = { 'staff2@biglight.jp': { invoices:{v:0} } };
+  ctx.__x.setSession({ email:'staff2@biglight.jp', role:'Staff', status:'active' });
+  eq('見せていない画面の添付欄は出ない', ctx.attSection('invoices','I1'), '');
+  _db.userPerms = {};
+  ctx.__x.setSession({ email:'test@biglight.jp', role:'Admin', status:'active' });
+  eq('管理者には添付欄が出る', ctx.attSection('invoices','I1').includes('3件'), true);
+  ctx.__x.setAttCounts({});
+}
+
 console.log('\n― 画面の入れ替えは1回だけ ―');
 /* ★ 2026-09-13 の不具合の再発防止:
    画面を入れたあとに もう一度 innerHTML を組み直すと、先に作った要素が DOM から
@@ -367,6 +389,10 @@ console.log('\n― 見せる画面（権限） ―');
 _db.userPerms = { 'staff@biglight.jp': { expenses:{v:0}, properties:{v:0}, kbunrui:{v:0} } };
 ctx.__x.setSession({ email:'staff@biglight.jp', role:'Staff', status:'active' });
 eq('表示を外した画面は見えない', ctx.canSee('expenses'), false);
+/* ★ 見せない画面は、作る・直す・消す もできない（2026-09-14 の穴の再発防止） */
+eq('見せない画面では作れない', !!ctx.__x.canCreate('expenses'), false);
+eq('見せない画面では直せない', !!ctx.__x.canEdit('expenses'), false);
+eq('見せない画面では消せない', !!ctx.__x.canDelete('expenses'), false);
 eq('物件も見えない', ctx.canSee('properties'), false);
 eq('外していない画面は見える', ctx.canSee('invoices'), true);
 eq('メニューにも出ない', ctx.__x.SECTIONS.find(x=>x.id==='sec-cost').tabs.filter(t=>ctx.canSee(t.id)).length, 0);

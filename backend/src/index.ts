@@ -13,7 +13,9 @@ import cors from 'cors'
 import { pool, ensureTables, cfgGet, cfgSet } from './db'
 import { verifyBearer, loginWithToken, profileOf, canWriteAtAll } from './auth'
 import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from './merge'
-import { checkCollections, checkMoneyRules } from './authz'
+import { checkCollections, checkMoneyRules, permOf } from './authz'
+import { initFiles, filesRouter } from './files'
+import { loadStateCached } from './statecache'
 /* CSV_MAP_WORKER / CSV_MAP_ASSIGN は crmsync.ts に残してあります（人を扱う必要が戻ったら
    この import と下の map の分岐を足すだけ。公式 §16「使わなくなってもコードは消さない」）。 */
 import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY } from './crmsync'
@@ -485,6 +487,16 @@ if (API_V1_ENABLED) {
   console.warn('[BOOT] MCP: API_V1_ENABLED=true が必要です（鍵と範囲は API v1 のもの）— 起動しません')
 }
 
+/* ===================== 添付ファイル（files.ts） ===================== */
+app.use(filesRouter({
+  pool, requireActive,
+  permOf: (st: any, email: string, role: string, page: string) => permOf(st, email, role, page),
+  loadState: () => loadStateCached(pool),
+  audit: (email: string, action: string, id: string, detail: any) =>
+    pool.query('INSERT INTO audit_log(actor_email,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5::jsonb)',
+      [email, action, 'files', id, JSON.stringify(detail || {})]).then(() => {}).catch((e: any) => console.error('[files] audit:', e?.message)),
+}))
+
 /* ===================== CRM連携 ===================== */
 app.get('/crm/status', async (req, res) => {
   const me = await requireActive(req, res); if (!me) return
@@ -560,6 +572,7 @@ app.post('/crm/import-csv', async (req, res) => {
 /* ===================== Khởi động ===================== */
 async function start() {
   await ensureTables()
+  await initFiles(pool)
   if (API_V1_ENABLED) await initApiKeys(pool)
   stateEpoch = (await cfgGet('epoch')) || ('e' + Date.now().toString(36))
   await cfgSet('epoch', stateEpoch)

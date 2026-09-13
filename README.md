@@ -55,8 +55,10 @@ docker compose up -d --build
 計算ロジックの確認はテストで行います：
 
 ```bash
-node test/smoke.js web/index.html
-node test/apiv1.js
+node test/smoke.js web/index.html   # 画面の計算・権限・繰越式・デモデータ
+node test/apiv1.js                  # 外部API・MCP（画面と同じ数字か）
+node test/files.js                  # 添付: 種類は中身で判断・マクロを断る
+node test/files-http.js             # 添付: 役割ごとに 見る・付ける・消す を HTTP で確かめる
 ```
 
 ---
