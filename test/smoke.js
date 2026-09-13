@@ -364,6 +364,31 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   try{ const h=ctx.viewLedger(); const ok=h.length>2000;
     console.log((ok?'  ok  ':'  NG  ')+'viewLedger（デモ・タイムライン）  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
 
+  /* ── 分類別集計: いちばん大事なのは「予実と1円も違わない」こと ── */
+  console.log('\n― 分類別集計（デモの量で） ―');
+  [2025, 2026].forEach(fy=>{
+    ['revenue','cogs','sga','nonop'].forEach(kind=>{
+      const a=Array(12).fill(0);
+      ctx.moneyLines(fy).filter(l=>l.kind===kind).forEach(l=>{ a[l.i]+=l.amount; });
+      eq(`分類別の合計＝予実（${fy}/${kind}）`, a, ctx.actualSeries(fy,kind));
+    });
+  });
+  /* 建物ごとに分かれているか（A棟の電気・水道・ガス・家賃） */
+  const aTou=_db.properties.find(p=>p.name.includes('A棟'));
+  const aLines=ctx.moneyLines(2025).filter(l=>String(l.propertyId)===String(aTou.id));
+  eq('A棟に費用が紐づく', aLines.length>0, true);
+  eq('A棟には複数の科目がある（家賃・電気・水道・ガス）', new Set(aLines.map(l=>l.code)).size>=3, true);
+  eq('デモは 地代家賃 の下に建物別の小分類を作る', !!ctx.__x.accountByCode('6201'), true);
+  eq('水道光熱費 の下は 電気・水道・ガス', ctx.__x.accountChildren(ctx.__x.accountByCode('6210').id).length, 3);
+  eq('電気代の道筋', ctx.__x.accountPathLabel('6211').includes('水道光熱費'), true);
+  eq('小分類でも区分は受け継ぐ', ctx.accountKind('6211'), 'sga');
+  eq('建物なしの行もちゃんと残る', ctx.moneyLines(2025).some(l=>!l.propertyId), true);
+  ['account','property'].forEach(ax=>{
+    try{ ctx.setKbAxis(ax); const h=ctx.viewKbunrui(); const ok=h.length>1000;
+      console.log((ok?'  ok  ':'  NG  ')+`viewKbunrui(${ax}）  →  `+h.length+' 文字'); ok?pass++:fail++;
+    }catch(e){ console.log(`  NG  viewKbunrui(${ax}） → `+e.message); fail++; }
+  });
+
   /* 消す: デモだけが消え、本物は残る */
   await ctx.demoRemove(true);
   eq('デモは全部消えた', ctx.demoCount(), 0);

@@ -350,6 +350,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .lgcell{padding:6px 4px !important;}
   .lgdue{outline:2px dashed var(--text-muted); outline-offset:1px;}
   .lgdot{font-size:10px; line-height:1.3; text-align:center; color:var(--text-secondary);}
+  .kbtw{display:inline-block; width:16px; color:var(--text-muted); font-size:10px; user-select:none;}
   .lgkey{display:inline-block; width:14px; height:9px; border-radius:2px; margin-right:3px; vertical-align:middle;}
   .printonly{display:none;}
   .plus{color:var(--plus);} .minus{color:var(--minus);} .zero{color:var(--zero);}
@@ -835,7 +836,8 @@ const SECTIONS = [
        コードとデータは残してあります（公式 §16「menuから外すときコードは消さない」）。 */
   { id:'sec-cost', label:'費用・物件', icon:'expense', tabs:[
     {id:'expenses',   label:'月次費用表'},
-    {id:'properties', label:'物件（建物）'} ]},
+    {id:'properties', label:'物件（建物）'},
+    {id:'kbunrui',    label:'分類別集計'} ]},
   { id:'sec-yj', label:'予実管理', icon:'target', tabs:[
     {id:'yojitsu', label:'予実'},
     {id:'compare', label:'期間比較'},
@@ -1254,6 +1256,7 @@ function renderPage(page){
       case 'workers':   el.innerHTML=viewWorkers();   break;
       case 'expenses':  el.innerHTML=viewExpenses();  break;
       case 'properties':el.innerHTML=viewProperties();break;
+      case 'kbunrui':   el.innerHTML=viewKbunrui();  break;
       case 'crmlink':   el.innerHTML=viewCrmLink();   renderCrmStatus(); break;
       case 'users':     el.innerHTML=viewUsers();     loadUsers(); break;
       case 'audit':     el.innerHTML=viewAudit();     loadAudit(); break;
@@ -3136,6 +3139,211 @@ function exportCsvAccounts(){
 }
 
 /* ============================================================================
+   分類別集計 — 「どの科目に、どの建物で、いくら使ったか」
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-13）:「大分類・中分類・小分類 それぞれで、その下の対象
+   （建物）の一覧と金額を見たい。A棟は電気・水道・ガスでいくらか」
+
+   数字の出どころは 予実（actualSeries）と同じ伝票です。ここで別の計算をしません。
+   ★ テストで「分類別の合計 ＝ 予実の合計」を突き合わせています。ズレたら赤になります。
+   ========================================================================== */
+let KB_AXIS='account';      // account = 科目でまとめる / property = 建物でまとめる
+let KB_KIND='';             // '' = 全部 / revenue / cogs / sga / nonop
+let KB_OPEN={};             // 開いている行
+const KB_NOPROP='(物件なし)';
+
+function setKbAxis(a){ KB_AXIS=a; KB_OPEN={}; renderPage('kbunrui'); }
+function setKbKind(k){ KB_KIND=k; renderPage('kbunrui'); }
+function kbToggle(key){ KB_OPEN[key]=!KB_OPEN[key]; renderPage('kbunrui'); }
+
+/** その費目の物件（費目マスタで決めた建物） */
+function propOfCostItem(id){ const it=findById('costItems',id); return it? (it.propertyId||'') : ''; }
+
+/** お金の動きを1本の表にする。1行 ＝ 1つの明細（税抜）。予実と同じ拾い方。 */
+function moneyLines(fy){
+  const months=fyMonths(fy), idx={}; months.forEach((m,i)=>{ idx[m]=i; });
+  const out=[];
+  const add=(ym, code, amount, propertyId, src)=>{
+    const i=idx[ym]; if(i==null || !amount) return;
+    out.push({ i, ym, code, amount, propertyId:propertyId||'', kind:accountKind(code), src });
+  };
+  /* ★ 取るのは「取消以外」。作成中も入れます — 予実（actualSeries）がそうだからです。
+     ここで条件を変えると、同じ会社の同じ月なのに 予実 と 分類別 で数字が違う、という
+     いちばん質の悪いズレが起きます。テストで両方を突き合わせています。 */
+  (DB.invoices||[]).forEach(inv=>{
+    if(inv.status==='取消') return;
+    const ym=(inv.bookMonth||'').slice(0,7);
+    (inv.items||[]).forEach(it=>add(ym, it.accountCode, itemAmount(it), it.propertyId,
+      {t:'invoices', id:inv.id, label:(inv.no||'')+' ／ '+String(companyName(inv.companyId)).replace(/<[^>]+>/g,'')}));
+  });
+  (DB.bills||[]).forEach(b=>{
+    if(b.status==='取消') return;
+    const ym=(b.bookMonth||'').slice(0,7);
+    (b.items||[]).forEach(it=>add(ym, it.accountCode, itemAmount(it), it.propertyId||propOfCostItem(it.costItemId),
+      {t:'bills', id:b.id, label:(b.no||'')+' ／ '+String(companyName(b.companyId)).replace(/<[^>]+>/g,'')}));
+  });
+  (DB.expenses||[]).forEach(e=>{
+    const ym=(e.bookMonth||e.date||'').slice(0,7);
+    const rate=TAX_RATE[e.taxCat||'課税10%']||0;
+    add(ym, e.accountCode, Math.round(num(e.amount)/(1+rate)), e.propertyId||propOfCostItem(e.costItemId),
+      {t:'expenses', id:e.id, label:(e.note||accountLabel(e.accountCode))+(e.vendor?' ／ '+e.vendor:'')});
+  });
+  (DB.actualAdjust||[]).forEach(a=>{
+    if(Number(a.fy)!==Number(fy)) return;
+    const i=Number(a.mIndex); if(!(i>=0&&i<12) || !num(a.amount)) return;
+    out.push({ i, ym:months[i], code:a.accountCode, amount:num(a.amount), propertyId:'',
+      kind:accountKind(a.accountCode), src:{t:'adjust', id:a.id, label:'実績調整'} });
+  });
+  return out;
+}
+const kbZero = () => Array(12).fill(0);
+const kbSum  = arr => arr.reduce((s,v)=>s+(v||0),0);
+
+function viewKbunrui(){
+  const fy=CUR_FY;
+  const lines=moneyLines(fy).filter(l=>!KB_KIND || l.kind===KB_KIND);
+  const cur=thisMonth(), curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
+
+  /* 集計の下ごしらえ（1回だけ回す） */
+  const byCode={}, byCodeProp={}, byProp={}, byPropCode={};
+  lines.forEach(l=>{
+    byCode[l.code]=byCode[l.code]||kbZero(); byCode[l.code][l.i]+=l.amount;
+    const pk=l.propertyId||KB_NOPROP;
+    byCodeProp[l.code]=byCodeProp[l.code]||{};
+    byCodeProp[l.code][pk]=byCodeProp[l.code][pk]||kbZero(); byCodeProp[l.code][pk][l.i]+=l.amount;
+    byProp[pk]=byProp[pk]||kbZero(); byProp[pk][l.i]+=l.amount;
+    byPropCode[pk]=byPropCode[pk]||{};
+    byPropCode[pk][l.code]=byPropCode[pk][l.code]||kbZero(); byPropCode[pk][l.code][l.i]+=l.amount;
+  });
+  const sumCodes = codes => { const a=kbZero(); codes.forEach(c=>{ const s=byCode[c]; if(s) s.forEach((v,i)=>{ a[i]+=v; }); }); return a; };
+  const propName = pk => pk===KB_NOPROP? KB_NOPROP : ((findById('properties',pk)||{}).name||'(消えた物件)');
+
+  const cells=arr=>arr.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')
+    +`<td class="r num"><b>${moneyPlain(kbSum(arr))}</b></td>`;
+  const twist=(key,has)=>has? `<span class="kbtw">${KB_OPEN[key]?'▼':'▶'}</span>` : '<span class="kbtw" style="visibility:hidden;">▶</span>';
+  const cellLinks=(arr,code,pk)=>arr.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v
+    ?`<a onclick="event.stopPropagation();kbDrill('${attr(code)}','${attr(pk)}',${i})" style="cursor:pointer;color:var(--primary);">${moneyPlain(v)}</a>`
+    :'<span class="zero">—</span>'}</td>`).join('')+`<td class="r num">${moneyPlain(kbSum(arr))}</td>`;
+
+  let rows='', grand=kbZero();
+
+  if(KB_AXIS==='account'){
+    const walk=(parentId, depth)=>{
+      accountChildren(parentId).forEach(a=>{
+        if(KB_KIND && accountKindOf(a)!==KB_KIND) return;
+        const codes=accountCodesUnder(a.code), arr=sumCodes(codes);
+        const kids=accountChildren(a.id), leaf=!kids.length;
+        const props=leaf? Object.keys(byCodeProp[a.code]||{}) : [];
+        if(!kbSum(arr) && !props.length) return;
+        const key='a:'+a.id;
+        rows+=`<tr class="${depth===0?'totrow':''}" onclick="kbToggle('${attr(key)}')" style="cursor:pointer;">
+          <td style="padding-left:${8+depth*20}px;">${twist(key, kids.length||props.length)}
+            <b>${esc(a.label)}</b> <span class="muted" style="font-size:10.5px;">${esc(a.code)}</span></td>
+          ${cells(arr)}</tr>`;
+        if(depth===0) arr.forEach((v,i)=>{ grand[i]+=v; });
+        if(KB_OPEN[key]){
+          if(kids.length) walk(a.id, depth+1);
+          else props.sort((x,y)=>kbSum(byCodeProp[a.code][y])-kbSum(byCodeProp[a.code][x])).forEach(pk=>{
+            rows+=`<tr><td style="padding-left:${8+(depth+1)*20}px;" class="muted">
+              <span class="kbtw" style="visibility:hidden;">▶</span>${esc(propName(pk))}
+              ${pk!==KB_NOPROP?`<a class="pillbtn" style="margin-left:6px;" onclick="event.stopPropagation();propertyDetail('${attr(pk)}')">物件</a>`:''}</td>
+              ${cellLinks(byCodeProp[a.code][pk], a.code, pk)}</tr>`;
+          });
+        }
+      });
+    };
+    walk('',0);
+    /* 木に入っていない科目（初期セット前・コードだけの行）も落とさない */
+    const orphan=Object.keys(byCode).filter(c=>{ const a=accountByCode(c); return !a || (!a.parentId && accountChildren(a.id).length===0 && accTreeReady()); });
+    if(orphan.length && accTreeReady()){
+      const arr=sumCodes(orphan);
+      rows+=`<tr class="grprow"><td colspan="14">分類に入っていない科目（勘定科目の登録で整理できます）</td></tr>
+        <tr><td style="padding-left:28px;">${orphan.map(c=>esc(accountLabel(c))).join('、')}</td>${cells(arr)}</tr>`;
+      arr.forEach((v,i)=>{ grand[i]+=v; });
+    }
+    if(!accTreeReady()){
+      /* 階層をまだ作っていない環境: 科目をそのまま並べる（何も見えないより良い） */
+      Object.keys(byCode).forEach(c=>{
+        const arr=byCode[c];
+        rows+=`<tr><td>${esc(accountLabel(c))} <span class="muted" style="font-size:10.5px;">${esc(c)}</span></td>${cells(arr)}</tr>`;
+        arr.forEach((v,i)=>{ grand[i]+=v; });
+      });
+    }
+  }else{
+    Object.keys(byProp).sort((x,y)=>kbSum(byProp[y])-kbSum(byProp[x])).forEach(pk=>{
+      const arr=byProp[pk], key='p:'+pk;
+      rows+=`<tr class="totrow" onclick="kbToggle('${attr(key)}')" style="cursor:pointer;">
+        <td>${twist(key,true)}<b>${esc(propName(pk))}</b>
+          ${pk!==KB_NOPROP?`<a class="pillbtn" style="margin-left:6px;" onclick="event.stopPropagation();propertyDetail('${attr(pk)}')">物件</a>`:''}</td>
+        ${cells(arr)}</tr>`;
+      arr.forEach((v,i)=>{ grand[i]+=v; });
+      if(KB_OPEN[key]){
+        Object.keys(byPropCode[pk]).sort((x,y)=>kbSum(byPropCode[pk][y])-kbSum(byPropCode[pk][x])).forEach(c=>{
+          rows+=`<tr><td style="padding-left:28px;" class="muted"><span class="kbtw" style="visibility:hidden;">▶</span>
+            ${esc(accountPathLabel(c))}</td>${cellLinks(byPropCode[pk][c], c, pk)}</tr>`;
+        });
+      }
+    });
+  }
+
+  const kinds=[['','すべて'],['revenue','収益'],['cogs','売上原価'],['sga','販管費'],['nonop','営業外']];
+  const tools=`<div class="seg">
+      <button class="${KB_AXIS==='account'?'on':''}" onclick="setKbAxis('account')">科目でまとめる</button>
+      <button class="${KB_AXIS==='property'?'on':''}" onclick="setKbAxis('property')">建物でまとめる</button>
+    </div>
+    <select onchange="setKbKind(this.value)" style="margin-left:8px;">${kinds.map(k=>`<option value="${k[0]}" ${KB_KIND===k[0]?'selected':''}>${esc(k[1])}</option>`).join('')}</select>
+    ${toolsMenu(`<button class="btn secondary" onclick="exportCsvKbunrui()">${IC.doc} CSV出力</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>
+      <hr><button class="btn secondary" onclick="goto('accounts')">勘定科目の登録へ</button>`)}`;
+
+  return pageShell({ title:'分類別集計', sub:`${fyLabel(fy)}・税抜。金額は予実と同じ伝票から数えています。`,
+    tools,
+    body:`<div class="table-wrap"><table class="stick1">
+        <thead><tr><th style="min-width:270px;">${KB_AXIS==='account'?'勘定科目（大 › 中 › 小 › 建物）':'建物 › 勘定科目'}</th>
+          ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:92px;">${m}</th>`).join('')}
+          <th class="r" style="min-width:110px;">年間計</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="14" class="empty" style="padding:20px;">${fyLabel(fy)}に数字がありません。</td></tr>`}
+          <tr class="totrow"><td><b>合計</b></td>${cells(grand)}</tr></tbody></table></div>
+      <div class="fhelp" style="margin-top:8px;">行を押すと下の階層が開きます。いちばん下は <b>建物（物件）</b>です。
+        金額を押すと、その月にその科目・その建物で動いた伝票が出ます。<br>
+        建物は 費用管理の費目（または支払請求の明細）で選びます。選んでいないものは「${esc(KB_NOPROP)}」にまとまります。</div>` });
+}
+/** 金額の裏づけ: その月・その科目・その建物で動いた伝票を出す */
+function kbDrill(code, propKey, monthIdx){
+  const fy=CUR_FY;
+  const lines=moneyLines(fy).filter(l=>String(l.code)===String(code) && l.i===Number(monthIdx)
+    && String(l.propertyId||KB_NOPROP)===String(propKey));
+  const total=lines.reduce((s,l)=>s+l.amount,0);
+  const T={invoices:'請求書', bills:'支払請求', expenses:'費用', adjust:'実績調整'};
+  openModal(`<h3>${esc(accountPathLabel(code))} ／ ${esc(propKey===KB_NOPROP?KB_NOPROP:((findById('properties',propKey)||{}).name||''))}</h3>
+    <div class="mdsub">${esc(fyMonths(fy)[monthIdx])}（${esc(FY_MONTH_LABELS[monthIdx])}）の内訳。税抜。合計 <b class="num">${moneyPlain(total)}</b> 円</div>
+    <div class="table-wrap"><table><thead><tr><th>種類</th><th>伝票</th><th class="r">金額（税抜）</th><th></th></tr></thead>
+      <tbody>${lines.map(l=>`<tr><td><span class="badge ${l.src.t==='invoices'?'b-green':'b-blue'}">${esc(T[l.src.t]||l.src.t)}</span></td>
+        <td>${esc(l.src.label)}</td><td class="r num">${moneyPlain(l.amount)}</td>
+        <td>${['invoices','bills'].includes(l.src.t)?`<a class="pillbtn pill-save" onclick="closeModal();openDetail('${l.src.t}','${attr(l.src.id)}')">開く</a>`:''}</td></tr>`).join('')
+        || '<tr><td colspan="4" class="empty">明細がありません。</td></tr>'}</tbody></table></div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+function exportCsvKbunrui(){
+  const fy=CUR_FY, months=fyMonths(fy);
+  const lines=moneyLines(fy).filter(l=>!KB_KIND || l.kind===KB_KIND);
+  const map={};
+  lines.forEach(l=>{
+    const path=accountPath(l.code).map(a=>a.label);
+    const pk=l.propertyId||KB_NOPROP;
+    const key=JSON.stringify([path[0]||'', path[1]||'', path[2]||'', accountLabel(l.code), pk]);
+    if(!map[key]) map[key]=kbZero();
+    map[key][l.i]+=l.amount;
+  });
+  const rows=[['大分類','中分類','小分類','科目','建物',...months,'年間計']];
+  Object.keys(map).sort().forEach(key=>{
+    const p=JSON.parse(key), a=map[key], pk=p[4];
+    rows.push([p[0],p[1],p[2],p[3], pk===KB_NOPROP?KB_NOPROP:((findById('properties',pk)||{}).name||''), ...a, kbSum(a)]);
+  });
+  downloadCsv(`分類別集計_${fy}年度`, rows);
+}
+
+/* ============================================================================
    物件（建物）管理 — 借りている建物ごとに、契約と毎月のお金をまとめて見る
    ----------------------------------------------------------------------------
    利用者の指示（2026-09-13）:「家賃・電気・水道…を、借りている建物ごとに
@@ -4711,6 +4919,8 @@ const PAGE_GUIDE = {
 
   expenses:   { step:'②', what:'<b>費目</b>を作る：勘定科目・<b>支払先</b>・<b>物件</b>・<b>払い方</b>（即払い／買掛）・月額予定。あとは毎月マスに金額を打つだけ',
                 effect:'税抜に直して予実の費用へ。買掛にすると支払請求と期日で管理できます' },
+  kbunrui:    { step:'', what:'（入力なし）大分類 › 中分類 › 小分類 › 建物 の順に開いて金額を見る',
+                effect:'金額を押すと、その月に動いた伝票そのものが出ます' },
   properties: { step:'②', what:'借りている建物：貸主・契約期間・家賃・共益費・駐車場代',
                 effect:'物件ごとの12か月の費用。契約満了の90日前から知らせます' },
 
@@ -4799,7 +5009,7 @@ const dint = (lo,hi)=>lo+Math.floor(drnd()*(hi-lo+1));
 const dvar = (base,pct)=>Math.round(base*(1+(drnd()*2-1)*pct)/100)*100;
 
 function demoCount(){
-  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','workers','assignments'];
+  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','accounts','workers','assignments'];
   return keys.reduce((n,k)=>n+((DB[k]||[]).filter(x=>x&&x.demo).length),0);
 }
 function demoPanel(){
@@ -4855,6 +5065,22 @@ async function demoSeed(){
   put('billingRules',{companyId:cust[1].id, kind:'fixed', name:'月額支援料', unitPrice:165000, accountCode:'4100', taxCat:'課税10%', active:true});
   put('billingRules',{companyId:cust[2].id, kind:'fixed', name:'支援委託料', unitPrice:70000,  accountCode:'4100', taxCat:'課税10%', active:true});
 
+  /* ── 勘定科目の階層（利用者の例のとおり: 地代家賃→建物ごと、水道光熱費→電気・水道・ガス） ── */
+  if(!accTreeReady()) accInitTree();
+  const accOf=(code,label,parentCode)=>{
+    const ex=accountByCode(code); if(ex) return ex;
+    const par=accountByCode(parentCode);
+    return commitRecord('accounts', D({code, label:DEMO_TAG+label, parentId:par?par.id:'', kind:'', order:Number(code)||0}), {}).record;
+  };
+  const A={
+    rentDorm:  accOf('6201','社宅・寮 家賃','6200').code,
+    rentOffice:accOf('6202','事務所 家賃','6200').code,
+    rentPark:  accOf('6203','駐車場代','6200').code,
+    denki:     accOf('6211','電気代','6210').code,
+    suido:     accOf('6212','水道代','6210').code,
+    gas:       accOf('6213','ガス代','6210').code,
+  };
+
   /* ── 物件（建物） ── */
   const props=[
     put('properties',{name:DEMO_TAG+'さくら寮 A棟', kind:'社宅・寮', address:'栃木県小山市本郷町1-2-3', companyId:vend.oya.id,
@@ -4873,13 +5099,15 @@ async function demoSeed(){
   /* ── 費目（月次費用表の行） ──
      家賃と清掃は「買掛」＝毎月の支払請求になる。光熱費は「即払い」＝マスに打つ。 */
   const ci=(o)=>put('costItems', Object.assign({kind:'fixed', taxCat:'課税10%', active:true}, o));
-  const rentItems = props.map(pr=>ci({name:DEMO_TAG+pr.name.replace(DEMO_TAG,'')+' 家賃', accountCode:'6200',
+  const rentAcc = pr => pr.kind==='駐車場'? A.rentPark : (pr.kind==='事務所'? A.rentOffice : A.rentDorm);
+  const rentItems = props.map(pr=>ci({name:DEMO_TAG+pr.name.replace(DEMO_TAG,'')+' 家賃', accountCode:rentAcc(pr),
     monthly:num(pr.rent)+num(pr.kyoeki)+num(pr.parking), payMode:'買掛', companyId:vend.oya.id, propertyId:pr.id}));
   const util=[];
+  const uAcc={ '電気代':A.denki, '水道代':A.suido, 'ガス代':A.gas };
   [[0,'電気代',18000,vend.den],[0,'水道代',9000,vend.sui],[0,'ガス代',14000,vend.gas],
    [1,'電気代',12000,vend.den],[1,'水道代',6500,vend.sui],[1,'ガス代',9000,vend.gas],
    [2,'電気代',22000,vend.den],[2,'水道代',5000,vend.sui]].forEach(([pi,nm,base,co])=>{
-    util.push({ it: ci({name:DEMO_TAG+props[pi].name.replace(DEMO_TAG,'')+' '+nm, accountCode:'6210',
+    util.push({ it: ci({name:DEMO_TAG+props[pi].name.replace(DEMO_TAG,'')+' '+nm, accountCode:uAcc[nm],
       monthly:base, payMode:'即払い', companyId:co.id, propertyId:props[pi].id}), base, kind:nm });
   });
   const cleanItem = ci({name:DEMO_TAG+'寮の共用部清掃', accountCode:'6900', monthly:33000, payMode:'買掛',
@@ -4939,7 +5167,7 @@ async function demoSeed(){
   };
   months.forEach((ym,mi)=>{
     /* 家賃: 大家さんへ1枚にまとめて（物件ごとの明細） */
-    const rentBill=billOf(vend.oya, ym, props.map((pr,i)=>({ accountCode:'6200', costItemId:rentItems[i].id,
+    const rentBill=billOf(vend.oya, ym, props.map((pr,i)=>({ accountCode:rentAcc(pr), costItemId:rentItems[i].id,
       name:pr.name.replace(DEMO_TAG,'')+' 家賃', amount: netOfGross(num(pr.rent)+num(pr.kyoeki)+num(pr.parking),'課税10%'), taxCat:'課税10%' })), '家賃');
     payoutFor(vend.oya, rentBill, mi>=months.length-1? null : 0);
     /* 清掃 */
@@ -4997,7 +5225,8 @@ async function demoSeed(){
 /** 印（demo:true）が付いた行だけを消す。本物には触れない。 */
 async function demoRemove(quiet){
   if(!isAdmin()){ toast('管理者だけが消せます。','err'); return; }
-  const keys=['payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies'];
+  /* 消す順番: 使っている側から先に。科目は最後（費目・伝票が参照しているため） */
+  const keys=['payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies','accounts'];
   const total=demoCount();
   if(!total){ toast('デモデータはありません。','ok'); return; }
   if(!quiet && !confirm(`デモデータ ${total}件 を全部消します。\n【デモ】の印が付いた行だけを消すので、本物のデータは残ります。\n\nよろしいですか？`)) return;
