@@ -1,0 +1,241 @@
+/* ============================================================================
+   お金の計算 — API v1 / MCP が返す数字の出どころ
+   ----------------------------------------------------------------------------
+   ★★ ここは web/index.html の「⑦ 計算エンジン」と同じ計算です。
+      片方だけ直すと、画面と AI が違う数字を言い出します（公式 §16 の
+      「二つの似た規則」）。直したら必ず両方直し、`node test/apiv1.js` を
+      通してください。テストは index.html の関数と この関数を同じデータで
+      突き合わせ、1円でもずれたら赤になります。
+
+   会計の約束（THIET-KE-YOJITSU.md §4.2 と同じ）:
+     ・bookMonth（計上月）が予実を決める。入金日・支払日ではない（発生主義）。
+     ・入金／支払は P/L に影響しない。債権・債務の残高を減らすだけ。
+     ・実績は保存しない。毎回、伝票から計算する。
+     ・予実の金額は税抜。消費税は預り金であって儲けではない。
+   ============================================================================ */
+
+/* ───────── 会計年度: 8/1〜翌7/31。月配列の index 0 は必ず「8月」 ───────── */
+export const FY_START_MONTH = 8
+export const FY_MONTH_LABELS = ['8月', '9月', '10月', '11月', '12月', '1月', '2月', '3月', '4月', '5月', '6月', '7月']
+
+export const num = (v: any): number => {
+  const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, ''))
+  return isFinite(n) ? n : 0
+}
+export const TAX_RATE: Record<string, number> = { '課税10%': 0.10, '軽減8%': 0.08, '非課税': 0, '対象外': 0 }
+export const KIND_LABEL: Record<string, string> = { revenue: '収益', cogs: '売上原価', sga: '販管費', nonop: '営業外' }
+export const INVOICE_OPEN = ['確定', '一部入金', '延滞']
+export const BILL_OPEN = ['確定', '一部支払', '期日超過']
+
+export const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+export const thisMonth = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') }
+export const fyOf = (ym: string): number | null => { if (!ym) return null; const [y, m] = String(ym).split('-').map(Number); return m >= FY_START_MONTH ? y : y - 1 }
+export const fyMonths = (fy: number): string[] => Array.from({ length: 12 }, (_, i) => {
+  const t = FY_START_MONTH + i, y = fy + Math.floor((t - 1) / 12), m = ((t - 1) % 12) + 1
+  return `${y}-${String(m).padStart(2, '0')}`
+})
+export const fyIndexOf = (ym: string): number => { const m = Number(String(ym).split('-')[1]); return (m - FY_START_MONTH + 12) % 12 }
+export const quarterOfIdx = (i: number) => Math.floor(i / 3) + 1
+export const addMonths = (ym: string, n: number) => { let [y, m] = ym.split('-').map(Number); m += n; y += Math.floor((m - 1) / 12); m = ((m - 1) % 12 + 12) % 12 + 1; return y + '-' + String(m).padStart(2, '0') }
+export const addDays = (ds: string, n: number) => { const d = new Date(ds + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+export const daysBetween = (a: string, b: string) => Math.round((+new Date(b + 'T00:00:00') - +new Date(a + 'T00:00:00')) / 86400000)
+
+/* ───────── 勘定科目 ───────── */
+export const DEFAULT_ACCOUNTS = [
+  { code: '4100', label: '支援委託料', kind: 'revenue' }, { code: '4200', label: '紹介料', kind: 'revenue' },
+  { code: '4300', label: '申請・更新手数料', kind: 'revenue' }, { code: '4900', label: 'その他売上', kind: 'revenue' },
+  { code: '5100', label: '外注費', kind: 'cogs' }, { code: '5200', label: '通訳・翻訳費', kind: 'cogs' }, { code: '5300', label: '支援業務費', kind: 'cogs' },
+  { code: '6100', label: '役員報酬', kind: 'sga' }, { code: '6110', label: '給与手当', kind: 'sga' }, { code: '6120', label: '法定福利費', kind: 'sga' },
+  { code: '6200', label: '地代家賃', kind: 'sga' }, { code: '6210', label: '水道光熱費', kind: 'sga' }, { code: '6220', label: '通信費', kind: 'sga' },
+  { code: '6300', label: '旅費交通費', kind: 'sga' }, { code: '6310', label: '広告宣伝費', kind: 'sga' }, { code: '6320', label: '接待交際費', kind: 'sga' },
+  { code: '6400', label: '支払手数料', kind: 'sga' }, { code: '6410', label: '消耗品費', kind: 'sga' }, { code: '6900', label: 'その他販管費', kind: 'sga' },
+  { code: '7100', label: '営業外収益', kind: 'nonop' }, { code: '7200', label: '営業外費用', kind: 'nonop' },
+]
+export const accounts = (st: any) => (st && Array.isArray(st.accounts) && st.accounts.length) ? st.accounts : DEFAULT_ACCOUNTS
+export const accountLabel = (st: any, code: any) => { const a = accounts(st).find((x: any) => x.code === code); return a ? a.label : (code || '-') }
+export const accountKind = (st: any, code: any) => { const a = accounts(st).find((x: any) => x.code === code); return a ? a.kind : '' }
+
+const arr = (st: any, k: string): any[] => Array.isArray(st && st[k]) ? st[k] : []
+export const companyName = (st: any, id: any) => { const c = arr(st, 'companies').find((x: any) => String(x.id) === String(id)); return c ? String(c.name || '') : '' }
+
+/* ───────── 明細 → 金額 ───────── */
+export function itemAmount(it: any): number {
+  if (!it) return 0
+  if (it.amount != null && it.amount !== '') return num(it.amount)
+  return Math.round(num(it.qty == null ? 1 : it.qty) * num(it.price || 0))
+}
+export const itemsSubtotal = (items: any[]) => (items || []).reduce((s, it) => s + itemAmount(it), 0)
+export const itemsTax = (items: any[]) => (items || []).reduce((s, it) => s + Math.floor(itemAmount(it) * (TAX_RATE[it.taxCat || '課税10%'] || 0)), 0)
+/** 税込合計 */
+export function docTotal(doc: any): number {
+  if (!doc) return 0
+  if (Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items) + itemsTax(doc.items)
+  return num(doc.total)
+}
+/** 税抜合計（予実はこちら） */
+export function docNet(doc: any): number {
+  if (!doc) return 0
+  if (Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items)
+  return Math.round(num(doc.total) / 1.1)
+}
+export const ymOfDoc = (d: any) => String((d && d.bookMonth) || '').slice(0, 7)
+
+/* ───────── 債権（売掛金）— 回収 ───────── */
+export function paidOfInvoice(st: any, inv: any): number {
+  let s = 0
+  arr(st, 'payments').forEach((p: any) => {
+    if (p.status === '取消') return
+    ;(p.allocations || []).forEach((a: any) => { if (String(a.invoiceId) === String(inv.id)) s += num(a.amount) })
+  })
+  return s
+}
+export const balanceOfInvoice = (st: any, inv: any) => docTotal(inv) - paidOfInvoice(st, inv)
+/** 状態は保存された値ではなく事実から決める（押し忘れで実態とズレない） */
+export function invoiceStatus(st: any, inv: any): string {
+  if (inv.status === '取消' || inv.status === '作成中') return inv.status
+  const bal = balanceOfInvoice(st, inv)
+  if (bal <= 0) return '入金済'
+  if (paidOfInvoice(st, inv) > 0) return '一部入金'
+  if (inv.dueDate && inv.dueDate < today()) return '延滞'
+  return '確定'
+}
+export const openInvoices = (st: any) => arr(st, 'invoices').filter((i: any) => i.status !== '取消' && i.status !== '作成中' && balanceOfInvoice(st, i) > 0)
+export const arBalanceOf = (st: any, companyId: any) => openInvoices(st).filter((i: any) => String(i.companyId) === String(companyId)).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
+export const arTotal = (st: any) => openInvoices(st).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
+
+export const AGING_BUCKETS = ['未到来', '1〜30日', '31〜60日', '61〜90日', '90日超']
+export function agingBucket(inv: any): string {
+  const d = inv.dueDate ? daysBetween(inv.dueDate, today()) : 0
+  if (d <= 0) return '未到来'
+  if (d <= 30) return '1〜30日'
+  if (d <= 60) return '31〜60日'
+  if (d <= 90) return '61〜90日'
+  return '90日超'
+}
+
+/* ───────── 債務（買掛金）— 売上原価・費用の支払 ───────── */
+export function paidOfBill(st: any, bill: any): number {
+  let s = 0
+  arr(st, 'payouts').forEach((p: any) => {
+    if (p.status === '取消') return
+    ;(p.allocations || []).forEach((a: any) => { if (String(a.billId) === String(bill.id)) s += num(a.amount) })
+  })
+  return s
+}
+export const balanceOfBill = (st: any, b: any) => docTotal(b) - paidOfBill(st, b)
+export function billStatus(st: any, b: any): string {
+  if (b.status === '取消' || b.status === '作成中') return b.status
+  const bal = balanceOfBill(st, b)
+  if (bal <= 0) return '支払済'
+  if (paidOfBill(st, b) > 0) return '一部支払'
+  if (b.dueDate && b.dueDate < today()) return '期日超過'
+  return '確定'
+}
+export const openBills = (st: any) => arr(st, 'bills').filter((b: any) => b.status !== '取消' && b.status !== '作成中' && balanceOfBill(st, b) > 0)
+export const apBalanceOf = (st: any, companyId: any) => openBills(st).filter((b: any) => String(b.companyId) === String(companyId)).reduce((s, b) => s + balanceOfBill(st, b), 0)
+export const apTotal = (st: any) => openBills(st).reduce((s, b) => s + balanceOfBill(st, b), 0)
+
+/* ───────── 予実 ───────── */
+export function actualSeries(st: any, fy: number, kind: string): number[] {
+  const months = fyMonths(fy)
+  const idx: Record<string, number> = {}; months.forEach((m, i) => { idx[m] = i })
+  const out = Array(12).fill(0)
+  const addTo = (ym: string, amount: number) => { const i = idx[ym]; if (i != null) out[i] += amount }
+
+  if (kind === 'revenue') {
+    arr(st, 'invoices').forEach((inv: any) => {
+      if (inv.status === '取消') return
+      const ym = ymOfDoc(inv); if (idx[ym] == null) return
+      ;(inv.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === 'revenue') addTo(ym, itemAmount(it)) })
+      if (!(inv.items || []).length) addTo(ym, docNet(inv))
+    })
+  } else {
+    arr(st, 'bills').forEach((b: any) => {
+      if (b.status === '取消') return
+      const ym = ymOfDoc(b); if (idx[ym] == null) return
+      ;(b.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === kind) addTo(ym, itemAmount(it)) })
+    })
+    arr(st, 'expenses').forEach((e: any) => {
+      const ym = String(e.bookMonth || e.date || '').slice(0, 7); if (idx[ym] == null) return
+      if (accountKind(st, e.accountCode) !== kind) return
+      const rate = TAX_RATE[e.taxCat || '課税10%'] || 0
+      addTo(ym, Math.round(num(e.amount) / (1 + rate)))
+    })
+    if (kind === 'nonop') {
+      arr(st, 'invoices').forEach((inv: any) => {
+        if (inv.status === '取消') return
+        const ym = ymOfDoc(inv); if (idx[ym] == null) return
+        ;(inv.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === 'nonop') addTo(ym, itemAmount(it)) })
+      })
+    }
+  }
+  arr(st, 'actualAdjust').forEach((a: any) => {
+    if (Number(a.fy) !== Number(fy)) return
+    if (accountKind(st, a.accountCode) !== kind) return
+    const i = Number(a.mIndex); if (i >= 0 && i < 12) out[i] += num(a.amount)
+  })
+  return out
+}
+export function planSeries(st: any, fy: number, kind: string, which: 'budget' | 'forecast'): number[] {
+  const src = arr(st, which === 'forecast' ? 'forecasts' : 'budgets')
+  const out = Array(12).fill(0)
+  src.forEach((b: any) => {
+    if (Number(b.fy) !== Number(fy)) return
+    if (accountKind(st, b.accountCode) !== kind) return
+    const i = Number(b.mIndex); if (i >= 0 && i < 12) out[i] += num(b.amount)
+  })
+  return out
+}
+export interface PlBook { revenue: number[]; cogs: number[]; gross: number[]; sga: number[]; operating: number[]; nonop: number[]; ordinary: number[] }
+export function plBook(st: any, fy: number, source: 'actual' | 'budget' | 'forecast'): PlBook {
+  const g = (k: string) => source === 'actual' ? actualSeries(st, fy, k) : planSeries(st, fy, k, source)
+  const revenue = g('revenue'), cogs = g('cogs'), sga = g('sga'), nonop = g('nonop')
+  const gross = revenue.map((v, i) => v - cogs[i])
+  const operating = gross.map((v, i) => v - sga[i])
+  const ordinary = operating.map((v, i) => v + nonop[i])
+  return { revenue, cogs, gross, sga, operating, nonop, ordinary }
+}
+export const sumRange = (a: number[], s: number, e: number) => { let t = 0; for (let i = s; i <= e && i < a.length; i++) t += a[i] || 0; return t }
+export const sum12 = (a: number[]) => sumRange(a, 0, 11)
+
+/** 直近で実績のある月（無ければ今月） */
+export function lastActualIdx(st: any, fy: number): number {
+  const rev = actualSeries(st, fy, 'revenue'), cost = actualSeries(st, fy, 'sga')
+  let last = -1
+  for (let i = 0; i < 12; i++) if ((rev[i] || 0) !== 0 || (cost[i] || 0) !== 0) last = i
+  if (last >= 0) return last
+  const t = thisMonth()
+  return fyOf(t) === fy ? fyIndexOf(t) : 0
+}
+/** 着地見込 = 実績累計 ＋ 残り月（見込があれば見込、無ければ予算） */
+export function landing(st: any, fy: number, key: keyof PlBook, uptoIdx: number): number {
+  const act = plBook(st, fy, 'actual')[key], bud = plBook(st, fy, 'budget')[key], fc = plBook(st, fy, 'forecast')[key]
+  let t = sumRange(act, 0, uptoIdx)
+  for (let i = uptoIdx + 1; i < 12; i++) t += (fc[i] || bud[i] || 0)
+  return t
+}
+
+/* ───────── 資金繰り: 入金予定 − 支払予定 ───────── */
+export function cashPlanByMonth(st: any, fromYm: string, months: number) {
+  const out: any[] = []
+  for (let k = 0; k < months; k++) {
+    const ym = addMonths(fromYm, k)
+    const inAmt = openInvoices(st).filter((i: any) => String(i.dueDate || '').slice(0, 7) === ym).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
+    const outAmt = openBills(st).filter((b: any) => String(b.dueDate || '').slice(0, 7) === ym).reduce((s, b) => s + balanceOfBill(st, b), 0)
+    out.push({ ym, in: inAmt, out: outAmt, net: inAmt - outAmt })
+  }
+  return out
+}
+export function cashPlanByWeek(st: any, weeks: number) {
+  const out: any[] = []
+  let start = today()
+  const dow = new Date(start + 'T00:00:00').getDay()
+  start = addDays(start, -((dow + 6) % 7))   // 月曜起点
+  for (let k = 0; k < weeks; k++) {
+    const s = addDays(start, k * 7), e = addDays(s, 6)
+    const inAmt = openInvoices(st).filter((i: any) => i.dueDate && i.dueDate >= s && i.dueDate <= e).reduce((t, i) => t + balanceOfInvoice(st, i), 0)
+    const outAmt = openBills(st).filter((b: any) => b.dueDate && b.dueDate >= s && b.dueDate <= e).reduce((t, b) => t + balanceOfBill(st, b), 0)
+    out.push({ s, e, in: inAmt, out: outAmt, net: inAmt - outAmt })
+  }
+  return out
+}

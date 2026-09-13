@@ -429,7 +429,7 @@ const ROLE_DEFAULT = {
   },
   Viewer: {},
 };
-const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink'];
+const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
@@ -730,6 +730,7 @@ const NAV_GROUPS = [
   ]},
   { gid:'sy', label:'システム', items:[
     {id:'users',    label:'ユーザー管理', icon:'users'},
+    {id:'apilink',  label:'API・AI連携',  icon:'link'},
     {id:'audit',    label:'操作履歴',     icon:'audit'},
     {id:'settings', label:'設定',         icon:'gear'},
   ]},
@@ -1127,6 +1128,7 @@ function renderPage(page){
       case 'crmlink':   el.innerHTML=viewCrmLink();   renderCrmStatus(); break;
       case 'users':     el.innerHTML=viewUsers();     loadUsers(); break;
       case 'audit':     el.innerHTML=viewAudit();     loadAudit(); break;
+      case 'apilink':   el.innerHTML=viewApiLink();   loadApiLink(); break;
       case 'settings':  el.innerHTML=viewSettings();  break;
       default: el.innerHTML='<div class="empty">画面がありません。</div>';
     }
@@ -3589,6 +3591,216 @@ function permReset(email){
   if(!confirm('この人の個別設定を消して、役割の既定に戻しますか？')) return;
   DB.userPerms=DB.userPerms||{}; delete DB.userPerms[email];
   PENDING.changed.userPerms=DB.userPerms; schedulePush(); closeModal(); toast('既定に戻しました。','ok');
+}
+
+/* ---------- API・AI連携（外部システム / ChatGPT などのAIに「読ませる」鍵） ----------
+   公式 §17.3。ここで発行した鍵ひとつで、2つの入口が開きます:
+     ・API v1（Power Automate など）  https://finance.biglight.jp/api/v1/…  ヘッダー X-API-Key
+     ・MCP（ChatGPT などのAI）        https://finance.biglight.jp/mcp       鍵は許可画面で1回貼るだけ
+   どちらも読むだけ。ここから金額を書き換える道はありません。
+   ★ 鍵は作った瞬間に1回しか表示されません（DBにはハッシュしか置かないため）。 */
+let API_META=null, API_KEYS=[], API_TAB='keys', API_FORM=null;
+function viewApiLink(){
+  return pageShell({ title:'API・AI連携', sub:'外部システムや AI に、この システムの数字を「読ませる」ための鍵を配ります。書き換えはできません。',
+    tools:`${isAdmin()?`<button class="btn" onclick="apiKeyForm()">＋ 鍵を発行</button>`:''}`,
+    body:`<div class="tabs">
+      <button class="${API_TAB==='keys'?'on':''}" onclick="setApiTab('keys')">鍵の一覧</button>
+      <button class="${API_TAB==='howto'?'on':''}" onclick="setApiTab('howto')">つなぎ方</button>
+      <button class="${API_TAB==='logs'?'on':''}" onclick="setApiTab('logs')">連携ログ</button>
+    </div><div id="apiBox"><div class="empty">読み込み中…</div></div>` });
+}
+function setApiTab(t){ API_TAB=t; renderPage('apilink'); }
+async function loadApiLink(){
+  const box=document.getElementById('apiBox'); if(!box) return;
+  try{
+    if(!API_META){ const m=await fetch(API_BASE+'/apimgmt/meta',{headers:headers()}); API_META=await m.json(); }
+    const st=await (await fetch(API_BASE+'/apimgmt/status',{headers:headers()})).json();
+    if(API_TAB==='howto'){ box.innerHTML=apiHowto(st); return; }
+    if(API_TAB==='logs'){
+      const d=await (await fetch(API_BASE+'/apimgmt/logs?limit=200',{headers:headers()})).json();
+      box.innerHTML=apiLogsHtml(d.items||[]); return;
+    }
+    if(!isAdmin()){ box.innerHTML='<div class="infobar">鍵の一覧と発行は管理者のみです。使い方は「つなぎ方」をご覧ください。</div>'; return; }
+    const d=await (await fetch(API_BASE+'/apimgmt/keys',{headers:headers()})).json();
+    API_KEYS=d.items||[];
+    box.innerHTML=apiKeysHtml(st);
+  }catch(e){ box.innerHTML='<div class="alertbar">連携の情報を取得できませんでした。API連携が無効（API_V1_ENABLED）の可能性があります。</div>'; }
+}
+/** 鍵に付いている範囲を、人が読める1行にする（スコープ名を覚えなくていいように） */
+function apiScopeSummary(scopes){
+  const cols=(API_META&&API_META.collections)||[];
+  const named=cols.filter(c=>scopes.includes(c.scope));
+  const pii=named.filter(c=>c.danger).length;
+  const agg=scopes.includes('yojitsu.read');
+  const parts=[];
+  if(agg) parts.push('合計の数字');
+  parts.push(`表 ${named.length}/${cols.length}`);
+  if(pii) parts.push(`<span class="badge b-red">個人情報あり</span>`);
+  return parts.join(' ・ ');
+}
+function apiKeysHtml(st){
+  const rows=API_KEYS.map(k=>{
+    const dead=k.status==='revoked';
+    return `<tr style="${dead?'opacity:.55;':''}">
+      <td><b>${esc(k.name)}</b>${k.note?`<br><span class="muted" style="font-size:11.5px;">${esc(k.note)}</span>`:''}</td>
+      <td><code style="font-size:11.5px;">${esc(k.maskedKey)}</code></td>
+      <td style="font-size:12px;">${apiScopeSummary(k.scopes||[])}</td>
+      <td>${statusBadge(k.status==='active'?'確定':(k.status==='rotating'?'一部入金':'取消'))}<span class="muted" style="font-size:11px;margin-left:4px;">${esc(k.status)}</span></td>
+      <td class="muted" style="font-size:12px;">${k.lastUsedAt? esc(String(k.lastUsedAt).slice(0,16).replace('T',' ')):'未使用'}</td>
+      <td>${dead?'':`<a class="pillbtn pill-save" onclick="apiKeyForm('${attr(k.id)}')">範囲を変える</a>
+        <a class="pillbtn" onclick="apiRotate('${attr(k.id)}')">鍵を作り直す</a>
+        <a class="pillbtn pill-del" onclick="apiRevoke('${attr(k.id)}')">失効</a>`}
+        <a class="pillbtn pill-del" onclick="apiDelete('${attr(k.id)}')">削除</a></td>
+    </tr>`;}).join('');
+  return `<div class="kpi-grid">
+      <div class="kpi"><div class="lbl">使える鍵</div><div class="num">${st.active_keys||0}</div><div class="sub">1人1鍵にしてください</div></div>
+      <div class="kpi"><div class="lbl">AI（MCP）</div><div class="num" style="font-size:18px;">${st.mcp_enabled?'有効':'停止中'}</div>
+        <div class="sub">${esc(st.mcp_url||'')}</div></div>
+      <div class="kpi"><div class="lbl">API（外部システム）</div><div class="num" style="font-size:18px;">読み取り専用</div>
+        <div class="sub">${esc(st.api_base||'')}</div></div>
+    </div>
+    <div class="panel"><div class="panel-hd"><b>鍵の一覧</b><span class="sub">鍵そのものは保存していません。無くしたら作り直してください</span></div>
+      <div class="panel-bd tight"><div class="table-wrap" style="border:0;"><table>
+        <thead><tr><th>名前（使う人）</th><th>鍵</th><th>読める範囲</th><th>状態</th><th>最終利用</th><th></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="6" class="empty" style="padding:18px;">まだ鍵がありません。「＋ 鍵を発行」から作ってください。</td></tr>'}</tbody>
+      </table></div></div></div>`;
+}
+function apiHowto(st){
+  const cols=(API_META&&API_META.collections)||[];
+  return `<div class="panel"><div class="panel-hd"><b>ChatGPT など AI につなぐ（MCP）</b></div><div class="panel-bd" style="font-size:13px;line-height:1.9;">
+      <ol style="margin:0;padding-left:20px;">
+        <li>管理者が この画面で <b>その人の名前の鍵</b>を発行する（1人1鍵。共有すると誰が見たか分からなくなります）</li>
+        <li>ChatGPT のコネクタに <code>${esc(st.mcp_url||'https://finance.biglight.jp/mcp')}</code> を登録し、認証は <b>OAuth</b> を選ぶ</li>
+        <li>許可画面が出たら <b>APIキーを貼る</b>。鍵は AI 側には渡りません（AIが受け取るのは1時間の別トークン）</li>
+        <li>「未回収はいくら？」「今月払うお金は？」「予実は？」と聞けば答えます</li>
+      </ol>
+      <div class="fhelp" style="margin-top:10px;">鍵を失効すると、その人のAIはその場で読めなくなります（トークンの期限を待ちません）。</div>
+    </div></div>
+    <div class="panel"><div class="panel-hd"><b>Power Automate など外部システムにつなぐ（API）</b></div><div class="panel-bd" style="font-size:13px;line-height:1.9;">
+      <div>入口： <code>${esc(st.api_base||'https://finance.biglight.jp/api/v1')}</code>　ヘッダー： <code>X-API-Key: bl_live_…</code></div>
+      <div style="margin-top:6px;">仕様書（OpenAPI）： <code>${esc((st.api_base||'')+'/openapi.json')}</code>（鍵なしで読めます）</div>
+      <div style="margin-top:6px;">よく使う口：
+        <code>/reports/receivables</code> 未回収　<code>/reports/payables</code> 未払　
+        <code>/reports/pl</code> 予実　<code>/reports/cashflow</code> 資金繰り　
+        <code>/records/{表}</code> 各画面の行</div>
+      <button class="btn secondary sm" style="margin-top:10px;" onclick="apiDownloadSpec()">${IC.doc} 仕様書をダウンロード</button>
+    </div></div>
+    <div class="panel"><div class="panel-hd"><b>読ませられる画面</b><span class="sub">鍵ごとにチェックした画面だけが見えます</span></div>
+      <div class="panel-bd tight"><div class="table-wrap" style="border:0;"><table>
+        <thead><tr><th>画面</th><th>外での名前</th><th>説明</th></tr></thead>
+        <tbody>${cols.map(c=>`<tr><td><b>${esc(c.label)}</b>${c.danger?' <span class="badge b-red">個人情報</span>':''}</td>
+          <td><code style="font-size:11.5px;">${esc(c.id)}</code></td><td class="muted" style="font-size:12px;">${esc(c.note||'')}</td></tr>`).join('')}</tbody>
+      </table></div></div></div>`;
+}
+function apiLogsHtml(items){
+  const A={'mcp-tool-called':'AIが読んだ','mcp-tool-denied':'AIを断った','mcp-tool-failed':'AIの呼び出しが失敗',
+    'mcp-authorized':'AI連携を許可','mcp-authorize-denied':'AI連携の許可を拒否','mcp-token-issued':'トークン発行','mcp-token-denied':'トークン拒否',
+    'mcp-auth-failed':'無効なトークン','mcp-client-registered':'AIクライアント登録',
+    'api-auth-failed':'APIキーが不正','api-scope-denied':'範囲外を要求','api-key-created':'鍵を発行','api-key-updated':'鍵の範囲を変更',
+    'api-key-revoked':'鍵を失効','api-key-deleted':'鍵を削除','api-key-rotated':'鍵を作り直し'};
+  return `<div class="table-wrap"><table>
+    <thead><tr><th style="width:150px;">日時</th><th>誰が</th><th>何を</th><th>対象</th><th>詳細</th></tr></thead>
+    <tbody>${items.map(x=>`<tr>
+      <td class="muted" style="font-size:12px;">${esc(String(x.at).slice(0,19).replace('T',' '))}</td>
+      <td style="font-size:12px;">${esc(x.actor_email||'')}</td>
+      <td style="font-size:12px;">${esc(A[x.action]||x.action)}</td>
+      <td style="font-size:12px;">${esc(x.entity_id||'')}</td>
+      <td class="muted" style="font-size:11.5px;">${esc(JSON.stringify(x.detail||{}).slice(0,160))}</td>
+    </tr>`).join('')||'<tr><td colspan="5" class="empty" style="padding:18px;">まだ記録がありません。</td></tr>'}</tbody></table></div>`;
+}
+function apiDownloadSpec(){
+  fetch(API_BASE+'/apimgmt/openapi.json',{headers:headers()}).then(r=>r.json()).then(j=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(j,null,2)],{type:'application/json'}));
+    a.download='biglight-yojitsu-api-v1.json'; a.click(); URL.revokeObjectURL(a.href);
+  }).catch(()=>toast('仕様書を取得できませんでした。','err'));
+}
+/** 発行・変更のフォーム。段（基本／全画面／全画面＋個人情報）で一気に決めてから、個別に足し引きできる。 */
+function apiKeyForm(id){
+  if(!isAdmin()){ toast('管理者のみです。','err'); return; }
+  const k=id? API_KEYS.find(x=>x.id===id):null;
+  API_FORM={ id:id||null, name:k?k.name:'', note:k?k.note:'', scopes:new Set(k?(k.scopes||[]):(API_META.levels[0].scopes||[])) };
+  drawApiKeyForm();
+}
+function apiLevel(lv){
+  const l=(API_META.levels||[]).find(x=>x.id===lv); if(!l) return;
+  API_FORM.scopes=new Set(l.scopes); drawApiKeyForm();
+}
+function apiScopeToggle(s,on){ if(on) API_FORM.scopes.add(s); else API_FORM.scopes.delete(s); }
+function drawApiKeyForm(){
+  const f=API_FORM, cols=API_META.collections||[];
+  const agg=(API_META.scopes||[]).filter(s=>!cols.some(c=>c.scope===s.id));
+  const row=(label,scope,danger,note)=>`<tr><td>${esc(label)}${danger?' <span class="badge b-red">個人情報</span>':''}
+      ${note?`<br><span class="muted" style="font-size:11px;">${esc(note)}</span>`:''}</td>
+    <td class="c"><input type="checkbox" ${f.scopes.has(scope)?'checked':''} onchange="apiScopeToggle('${attr(scope)}',this.checked)"></td>
+    <td><code style="font-size:11px;">${esc(scope)}</code></td></tr>`;
+  openModal(`<h3>${f.id?'鍵の範囲を変える':'APIキーを発行'}</h3>
+    <div class="mdsub">読むだけの鍵です。ここで選んだ画面しか見えません。1人1鍵（名前はその人の名前）にすると、連携ログで誰が見たか分かります。</div>
+    <div class="form-grid">
+      <div><label>名前（使う人・システム名）</label><input id="akName" value="${attr(f.name)}" placeholder="例: 田中（ChatGPT）" oninput="API_FORM.name=this.value"></div>
+      <div><label>メモ</label><input id="akNote" value="${attr(f.note)}" placeholder="例: 月次の回収状況の確認用" oninput="API_FORM.note=this.value"></div>
+    </div>
+    <div class="form-section" style="margin-top:12px;">${IC.check} まとめて選ぶ
+      <span style="margin-left:auto;display:flex;gap:6px;">
+        ${(API_META.levels||[]).map(l=>`<a class="pillbtn pill-new" title="${attr(l.note)}" onclick="apiLevel('${attr(l.id)}')">${esc(l.label)}</a>`).join('')}
+      </span></div>
+    <div class="table-wrap" style="max-height:320px;overflow:auto;"><table>
+      <thead><tr><th>読ませるもの</th><th class="c" style="width:60px;">許可</th><th style="width:170px;">範囲の名前</th></tr></thead>
+      <tbody>
+        ${agg.map(s=>row(s.label,s.id,s.danger,'画面の行ではなく、合計だけを返します')).join('')}
+        ${cols.map(c=>row(c.label+'（画面）',c.scope,c.danger,c.note)).join('')}
+      </tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;">どの範囲も <b>AI（MCP）と 外部API の両方</b>で使えます。書き換え・削除の範囲はありません。</div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="apiKeySave()">${f.id?'保存':'発行する'}</button></div>`,'lg');
+}
+async function apiKeySave(){
+  const f=API_FORM;
+  if(!f.name.trim()){ toast('名前を入れてください。','err'); return; }
+  if(!f.scopes.size){ toast('読ませるものを1つ以上選んでください。','err'); return; }
+  const body=JSON.stringify({ name:f.name.trim(), note:f.note||'', scopes:Array.from(f.scopes) });
+  try{
+    const r=await fetch(API_BASE+'/apimgmt/keys'+(f.id?('/'+encodeURIComponent(f.id)):''),
+      { method:f.id?'PATCH':'POST', headers:headers(), body });
+    const d=await r.json();
+    if(!r.ok){ toast(d.message||'保存できませんでした。','err'); return; }
+    closeModal();
+    if(d.api_key) apiShowKey(d.api_key, d.notice);
+    else toast('保存しました。','ok');
+    renderPage('apilink');
+  }catch(e){ toast('通信に失敗しました。','err'); }
+}
+/** 平文の鍵を出せるのはこの1回だけ。閉じたら二度と出せない。 */
+function apiShowKey(key, notice){
+  openModal(`<h3>APIキーができました</h3>
+    <div class="alertbar">${IC.warn} ${esc(notice||'この鍵はいま一度しか表示されません。')}</div>
+    <div style="margin:12px 0;padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);
+      font-family:ui-monospace,monospace;font-size:14px;word-break:break-all;">${esc(key)}</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn secondary" onclick="navigator.clipboard.writeText('${attr(key)}').then(()=>toast('コピーしました。','ok'))">コピー</button>
+    </div>
+    <div class="fhelp" style="margin-top:10px;">渡し方: 本人に直接。メールやチャットに残す場合は、読んだら消してもらってください。
+      無くしたら「鍵を作り直す」で新しい鍵を出せます（古い鍵は24時間後に止まります）。</div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じた（保存しました）</button></div>`);
+}
+async function apiRotate(id){
+  const k=API_KEYS.find(x=>x.id===id);
+  if(!confirm(`「${k?k.name:''}」の鍵を作り直します。\n新しい鍵が出ます。古い鍵は24時間後に使えなくなります。`)) return;
+  const r=await fetch(API_BASE+'/apimgmt/keys/'+encodeURIComponent(id)+'/rotate',{method:'POST',headers:headers(),body:JSON.stringify({grace_hours:24})});
+  const d=await r.json();
+  if(r.ok&&d.api_key){ apiShowKey(d.api_key,d.notice); renderPage('apilink'); } else toast('作り直せませんでした。','err');
+}
+async function apiRevoke(id){
+  const k=API_KEYS.find(x=>x.id===id);
+  if(!confirm(`「${k?k.name:''}」を失効します。\nこの鍵を使っている連携とAIは、その場で読めなくなります。`)) return;
+  const r=await fetch(API_BASE+'/apimgmt/keys/'+encodeURIComponent(id)+'/revoke',{method:'POST',headers:headers()});
+  if(r.ok){ toast('失効しました。','ok'); renderPage('apilink'); } else toast('失効できませんでした。','err');
+}
+async function apiDelete(id){
+  const k=API_KEYS.find(x=>x.id===id);
+  if(!confirm(`「${k?k.name:''}」を一覧から消します。\n記録（連携ログ）は残ります。よろしいですか？`)) return;
+  const r=await fetch(API_BASE+'/apimgmt/keys/'+encodeURIComponent(id),{method:'DELETE',headers:headers()});
+  if(r.ok){ toast('削除しました。','ok'); renderPage('apilink'); } else toast('削除できませんでした。','err');
 }
 
 /* ---------- 操作履歴 ---------- */

@@ -21,8 +21,12 @@ backend/            API（Express + TypeScript）
   src/authz.ts        権限（frontend と同じ表）
   src/merge.ts        レコード単位のマージ・安全装置
   src/crmsync.ts      CRMからの取り込み（API / CSV）
+  src/apiv1/          外部API v1（読み取り専用）＋ 鍵の管理     ← 既定は停止
+  src/mcp/            AI（ChatGPT など）向け MCP（読み取り専用） ← 既定は停止
 crm-integration/    CRM側に足す読み取り専用エンドポイント＋手順
-test/smoke.js       金額・在籍者数・会計年度の計算テスト（36件）
+docs/API-MCP.md     API・AI連携の手順書（開け方・鍵の配り方・止め方）
+test/smoke.js       金額・在籍者数・会計年度の計算テスト
+test/apiv1.js       画面と連携が同じ数字を出すかの突き合わせテスト
 nginx.conf          画面配信 ＋ /api 中継（同一オリジン＝CORSなし）
 docker-compose.yml  web / api / db
 _legacy/            旧 Next.js 版（参照用・削除して構いません）
@@ -46,6 +50,7 @@ docker compose up -d --build
 
 ```bash
 node test/smoke.js web/index.html
+node test/apiv1.js
 ```
 
 ---
@@ -123,6 +128,24 @@ bash vps/autodeploy.sh          # ← タイマー登録 ＋ 溜まっている�
 - **バージョン履歴** — 書き込みのたびに全体のスナップショット。操作履歴から数秒で戻せます。
 - **同期ログ** — ブロックされた書き込みも含め、誰が・どの端末から書いたかをDBに記録。
 - **監査ログ** — どの項目が「いくら → いくら」に変わったかを日本語の項目名で表示。
+
+---
+
+## 外部API・AI連携（既定は停止）
+
+外部システム（Power Automate など）と AI（ChatGPT）に、この システムの数字を**読ませる**ための口です。
+**書き込みの口はありません** — 鍵を持っていても、AI でも、ここから金額は動きません。
+
+| | |
+|---|---|
+| 開け方・止め方 | [`docs/API-MCP.md`](docs/API-MCP.md)（`.env` の `API_V1_ENABLED` / `MCP_ENABLED`） |
+| 鍵の発行・失効 | 画面の **設定 › API・AI連携**（管理者のみ）。1人1鍵・発行時に1回だけ表示 |
+| 外部API | `https://finance.biglight.jp/api/v1/…`（ヘッダー `X-API-Key`）・仕様書は `/api/v1/openapi.json` |
+| AI（MCP） | `https://finance.biglight.jp/mcp`（OAuth。許可画面で鍵を1回貼るだけ。鍵はAIに渡りません） |
+| よく使う答え | 未回収・債権年齢表・未払・予実・資金繰り・取引先ごとの残高 |
+| 記録 | 読んだ分も断った分も 連携ログ（＝操作履歴）に残ります |
+
+設計の根拠は [`CONG-THUC-XAY-DUNG-APP.md`](CONG-THUC-XAY-DUNG-APP.md) §17。
 
 ---
 

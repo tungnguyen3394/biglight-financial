@@ -15,6 +15,14 @@ import { verifyBearer, loginWithToken, profileOf, canWriteAtAll } from './auth'
 import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from './merge'
 import { checkCollections, checkMoneyRules } from './authz'
 import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY, CSV_MAP_WORKER, CSV_MAP_ASSIGN } from './crmsync'
+/* ───── 外部連携（読み取り専用）— 公式 §17 ─────
+   API_V1_ENABLED=true のときだけ /api/v1 と鍵の管理画面が生えます。
+   外す = この import と下の if(API_V1_ENABLED) の塊、src/apiv1・src/mcp を消すだけ。
+   業務のデータと画面は何も変わりません。 */
+import { apiV1Router, apiMgmtRouter, API_V1_ENABLED } from './apiv1/router'
+import { initApiKeys } from './apiv1/keys'
+import { mcpRouter } from './mcp/server'
+import { readConfig as readMcpConfig } from './mcp/oauth'
 
 const app = express()
 const PORT = Number(process.env.PORT || 4000)
@@ -426,6 +434,44 @@ app.post('/state-history/:id/restore', async (req, res) => {
   sseBroadcast(email)
 })
 
+/* ===================== 外部連携: API v1 ＋ MCP（読み取り専用） =====================
+   ★ 書き込みの口はありません。鍵を持っていても、AI でも、ここから金額は動きません
+     （公式 §17.7 — 直接書き込みは「確認待ち」を作ってからでないと開けない）。
+   ★ 鍵の失効はその場で効きます（リクエストのたびに DB から読み直すため）。 */
+if (API_V1_ENABLED) {
+  /** 連携の監査。audit_log の entity='api_v1' に入れる（画面の 操作履歴 と同じ表）。
+      鍵・トークンそのものは絶対に書かない。 */
+  const apiAudit = (actor: string, action: string, id: string, detail: any) => {
+    pool.query('INSERT INTO audit_log(actor_email,actor_name,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5,$6::jsonb)',
+      [String(actor || '').slice(0, 200), '', String(action || '').slice(0, 60), 'api_v1', String(id || '-').slice(0, 80), JSON.stringify(detail || {})])
+      .catch((e: any) => console.error('[api-v1] audit:', e?.message))
+  }
+  const apiDeps = {
+    pool,
+    verifyBearer: async (req: any) => await verifyBearer(req),
+    verifyAdmin: async (req: any) => {
+      const email = await verifyBearer(req)
+      if (!email) return null
+      const me = await profileOf(email)
+      return me.role === 'Admin' ? email : null
+    },
+    audit: apiAudit,
+  }
+  app.use(apiV1Router(apiDeps))
+  app.use(apiMgmtRouter(apiDeps))
+
+  const MCP_CFG = readMcpConfig()
+  if (MCP_CFG) {
+    app.use(mcpRouter({ pool, cfg: MCP_CFG, audit: apiAudit }))
+    console.log('[BOOT] MCP: 有効 ' + MCP_CFG.publicUrl)
+  } else if (String(process.env.MCP_ENABLED || '').toLowerCase() === 'true') {
+    console.warn('[BOOT] MCP: MCP_ENABLED=true ですが MCP_TOKEN_SECRET（32文字以上）か MCP_PUBLIC_URL が不正なため起動しません')
+  }
+  console.log('[BOOT] API v1: 有効（読み取り専用）')
+} else if (String(process.env.MCP_ENABLED || '').toLowerCase() === 'true') {
+  console.warn('[BOOT] MCP: API_V1_ENABLED=true が必要です（鍵と範囲は API v1 のもの）— 起動しません')
+}
+
 /* ===================== CRM連携 ===================== */
 app.get('/crm/status', async (req, res) => {
   const email = await verifyBearer(req)
@@ -493,6 +539,7 @@ app.post('/crm/import-csv', async (req, res) => {
 /* ===================== Khởi động ===================== */
 async function start() {
   await ensureTables()
+  if (API_V1_ENABLED) await initApiKeys(pool)
   stateEpoch = (await cfgGet('epoch')) || ('e' + Date.now().toString(36))
   await cfgSet('epoch', stateEpoch)
   const r = await pool.query('SELECT data FROM app_state WHERE id=1')
