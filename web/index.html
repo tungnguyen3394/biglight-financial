@@ -301,6 +301,17 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .cellin.under{background:var(--success-soft); color:var(--success); box-shadow:inset 3px 0 0 var(--success);}
   .grprow td{background:var(--surface-2); font-weight:700; font-size:11.5px; color:var(--muted); letter-spacing:.03em;}
   td.curcol{box-shadow:inset 0 0 0 1px var(--primary-soft);}
+
+  /* ===== 取引先台帳: 12か月の帯 =====
+     色は「その伝票の期日（取引先ごとに違う）」と比べて決める。計上からの日数では決めない。 */
+  .lgbar{display:block; height:13px; border-radius:3px; background:var(--gray);}
+  .lg-ok{background:#2ea34d;}  .lg-warn{background:#e0a80f;} .lg-bad{background:#e04b3d;}
+  .lg-wait{background:#cbd5e1;} .lg-over{background:#8b6ff0;} .lg-none{background:transparent;}
+  .lgcell{padding:6px 4px !important;}
+  .lgdue{outline:2px dashed var(--text-muted); outline-offset:1px;}
+  .lgdot{font-size:10px; line-height:1.3; text-align:center; color:var(--text-secondary);}
+  .lgkey{display:inline-block; width:14px; height:9px; border-radius:2px; margin-right:3px; vertical-align:middle;}
+  .printonly{display:none;}
   .plus{color:var(--plus);} .minus{color:var(--minus);} .zero{color:var(--zero);}
   .rate{font-size:11px; font-weight:700;}
   .bar{height:6px; border-radius:99px; background:var(--border); overflow:hidden; min-width:52px;}
@@ -324,6 +335,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   /* ===== In ấn: chỉ in dữ liệu, không in công cụ ===== */
   @media print{
     #topbar,#sidebar,#themeToggle,.toolbar,.tabs,.seg,.bulkbar,.more-tools,.modal-bg,#sidebarOverlay{display:none !important;}
+    .printonly{display:block !important;}
     main{padding:0;} body{background:#fff;}
     .panel,.table-wrap{box-shadow:none; border-color:#ccc; break-inside:avoid;}
     table{font-size:10.5px;} th,td{padding:4px 6px;}
@@ -692,6 +704,7 @@ const ICONS = {
   cash:      svgIc('<path d="M3 17V7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="12" cy="12" r="2.5"/>'),
   expense:   svgIc('<path d="M4 5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M15 3v5h5M9 14h6"/>'),
   flag:      svgIc('<path d="M5 21V4M5 4h11l-1.5 3.5L16 11H5"/>'),
+  ledger:    svgIc('<path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><path d="M4 17.5A2 2 0 0 1 6 16h12"/><path d="M8 7h6M8 11h6"/>'),
   company:   svgIc('<path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16M16 9h3a1 1 0 0 1 1 1v11M8 7h2M8 11h2M8 15h2"/>'),
   worker:    svgIc('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/>'),
   link:      svgIc('<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>'),
@@ -724,6 +737,7 @@ const NAV_GROUPS = [
   ]},
   { gid:'ms', label:'マスタ', items:[
     {id:'companies', label:'取引先管理',  icon:'company'},
+    {id:'ledger',    label:'取引先台帳',  icon:'ledger'},
     {id:'workers',   label:'特定技能者',  icon:'worker'},
     {id:'expenses',  label:'費用管理',    icon:'expense'},
     {id:'crmlink',   label:'CRM連携',     icon:'link'},
@@ -771,6 +785,13 @@ function uid(prefix){ return prefix+'-'+Date.now().toString(36)+Math.random().to
 function coll(k){ if(!DB[k]) DB[k]=[]; return DB[k]; }
 function findById(k,id){ return (DB[k]||[]).find(r=>r&&String(r.id)===String(id)) || null; }
 function companyName(id){ const c=findById('companies',id); return c? (c.name||'-') : '<span class="zero">-</span>'; }
+/** 一覧の取引先名は「その会社の台帳」への入口にする（どの画面からでも1社の全体が見える） */
+function coLink(companyId, side){
+  const n=String(companyName(companyId)).replace(/<[^>]+>/g,'');
+  if(!companyId || n==='-' || !n) return '<span class="zero">-</span>';
+  return `<a onclick="event.stopPropagation();openLedger('${companyId}','${side||'ar'}')" title="この取引先の台帳を開く"
+    style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(n)}</a>`;
+}
 function toast(msg, kind){
   const t=document.getElementById('toast');
   t.textContent=msg; t.style.background = kind==='err'?'#b42318':(kind==='ok'?'#166534':'#172033');
@@ -1123,6 +1144,7 @@ function renderPage(page){
       case 'cashflow':  el.innerHTML=viewCashflow();  break;
       case 'okr':       el.innerHTML=viewOkr();       break;
       case 'companies': el.innerHTML=viewCompanies(); break;
+      case 'ledger':    el.innerHTML=viewLedger();    break;
       case 'workers':   el.innerHTML=viewWorkers();   break;
       case 'expenses':  el.innerHTML=viewExpenses();  break;
       case 'crmlink':   el.innerHTML=viewCrmLink();   renderCrmStatus(); break;
@@ -2206,7 +2228,7 @@ function viewInvoices(){
   const cols=[
     {key:'no', label:'請求番号', val:r=>`<b>${esc(r.no||'-')}</b>`},
     {key:'issueDate', label:'発行日', date:true, val:r=>esc(r.issueDate||'')},
-    {key:'companyId', label:'請求先', raw:r=>companyName(r.companyId).replace(/<[^>]+>/g,''), val:r=>esc(companyName(r.companyId).replace(/<[^>]+>/g,''))},
+    {key:'companyId', label:'請求先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ar')},
     {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
     {key:'total', label:'請求額', cls:'r', noFilter:true, val:r=>`<b class="num">${moneyPlain(docTotal(r))}</b>`},
     {key:'paid', label:'入金済', cls:'r', noFilter:true, val:r=>money(paidOfInvoice(r))},
@@ -2331,7 +2353,7 @@ function viewReceipts(){
 
   const cols=[
     {key:'date', label:'入金日', date:true, val:r=>esc(r.date||'')},
-    {key:'companyId', label:'取引先', raw:r=>companyName(r.companyId).replace(/<[^>]+>/g,''), val:r=>esc(companyName(r.companyId).replace(/<[^>]+>/g,''))},
+    {key:'companyId', label:'取引先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ar')},
     {key:'amount', label:'入金額', cls:'r', noFilter:true, val:r=>`<b class="num plus">${moneyPlain(r.amount)}</b>`},
     {key:'fee', label:'振込手数料', cls:'r', noFilter:true, val:r=>money(r.fee)},
     {key:'alloc', label:'消込先', noFilter:true, val:r=>{
@@ -2484,7 +2506,7 @@ function viewAging(){
       ${AGING_BUCKETS.map(b=>`<th class="r">${esc(b)}</th>`).join('')}
       <th class="r">合計</th><th>最も古い期日</th><th></th></tr></thead>
     <tbody>${rows.length? rows.map(r=>`<tr>
-      <td><b>${esc(r.name)}</b></td>
+      <td>${coLink(r.id,'ar')}</td>
       ${AGING_BUCKETS.map(b=>`<td class="r num ${(b==='61〜90日'||b==='90日超')&&r.buckets[b]?'minus':''}">${r.buckets[b]?moneyPlain(r.buckets[b]):'<span class="zero">—</span>'}</td>`).join('')}
       <td class="r num"><b>${moneyPlain(r.total)}</b></td>
       <td>${r.oldest&&r.oldest<today()?`<span class="badge b-red">${esc(r.oldest)}</span>`:esc(r.oldest||'')}</td>
@@ -2538,7 +2560,7 @@ function viewBills(){
 
   const cols=[
     {key:'no', label:'管理番号', val:r=>`<b>${esc(r.no||'-')}</b>`},
-    {key:'companyId', label:'支払先', raw:r=>companyName(r.companyId).replace(/<[^>]+>/g,''), val:r=>esc(companyName(r.companyId).replace(/<[^>]+>/g,''))},
+    {key:'companyId', label:'支払先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ap')},
     {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
     {key:'items', label:'内容', noFilter:true, val:r=>{
       const its=(r.items||[]); if(!its.length) return '<span class="zero">-</span>';
@@ -2588,7 +2610,7 @@ function viewPayouts(){
   </div>`;
   const cols=[
     {key:'date', label:'支払日', date:true, val:r=>esc(r.date||'')},
-    {key:'companyId', label:'支払先', raw:r=>companyName(r.companyId).replace(/<[^>]+>/g,''), val:r=>esc(companyName(r.companyId).replace(/<[^>]+>/g,''))},
+    {key:'companyId', label:'支払先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ap')},
     {key:'amount', label:'支払額', cls:'r', noFilter:true, val:r=>`<b class="num minus">${moneyPlain(r.amount)}</b>`},
     {key:'alloc', label:'消込先', noFilter:true, val:r=>{
       const a=(r.allocations||[]); if(!a.length) return '<span class="badge b-amber">未消込</span>';
@@ -2736,6 +2758,355 @@ function cfSaveStart(){
   if(!PENDING.changed.settings) PENDING.changed.settings=DB.settings;
   PENDING.changed.settings=DB.settings; schedulePush();
   closeModal(); renderPage('cashflow'); toast('保存しました。','ok');
+}
+
+/* ============================================================================
+   ⑪' 取引先台帳 — 1社のお金の出入りを「通帳」と「12か月の帯」で見る
+   ----------------------------------------------------------------------------
+   なぜ要るのか（2026-09-13 利用者の指示）:
+     請求管理・入金消込は「伝票の一覧」なので、「この会社とは今どうなっているか」が
+     一目で分からない。会社を軸に、請求と入金を1本の時間順に並べ、
+     さらに12か月の帯で「期日どおり払う会社か」を色で見せる。
+
+   ★ 期日は会社ごとに違う（末日締・翌月末払い／20日締・翌々月25日払い…）。
+     だから「計上からの日数」では絶対に色を付けない。必ず その伝票の入金期日
+     （＝その会社の締日・サイト・支払日から計算された日）と比べる。
+     翌々月25日払いの会社は、85日かかっても「期日内」。
+   ★ 残高はどこで見ても同じ数字にする（売掛残高＝未回収の請求の合計）。
+     入ったが消し込んでいないお金は残高から引かず、別に注意として出す。
+   ========================================================================== */
+const LED_LATE_WARN = 30;          // これを超える遅れは赤（それ以下は黄）
+let LED_CO=null, LED_TAB='history', LED_SIDE='ar';
+
+/** 債権（売掛）と債務（買掛）で同じ画面を使うための言い換え表。ここだけ見れば違いが分かる。 */
+function ledS(side){
+  return side==='ap' ? {
+    side:'ap', title:'支払（買掛金）', docLabel:'支払請求', payLabel:'支払', balLabel:'買掛残高',
+    dueLabel:'支払期日', docAmtLabel:'請求された額', payAmtLabel:'支払額',
+    docs: id=>(DB.bills||[]).filter(b=>String(b.companyId)===String(id)),
+    pays: id=>(DB.payouts||[]).filter(p=>String(p.companyId)===String(id)),
+    docDate: b=> b.recvDate || (b.bookMonth? monthEnd(b.bookMonth):''),
+    total: docTotal, paid: b=>paidOfBill(b), bal: b=>balanceOfBill(b), status: b=>billStatus(b),
+    balOf: id=>apBalanceOf(id), payBtn: id=>`openPayoutFor('${id}')`, payPage:'payouts',
+    unapplied: id=>(DB.payouts||[]).filter(p=>p.status!=='取消'&&String(p.companyId)===String(id))
+      .reduce((s,p)=>s+Math.max(0,num(p.amount)-(p.allocations||[]).reduce((t,a)=>t+num(a.amount),0)),0),
+  } : {
+    side:'ar', title:'請求・入金（売掛金）', docLabel:'請求書', payLabel:'入金', balLabel:'売掛残高',
+    dueLabel:'入金期日', docAmtLabel:'請求額', payAmtLabel:'入金額',
+    docs: id=>(DB.invoices||[]).filter(i=>String(i.companyId)===String(id)),
+    pays: id=>(DB.payments||[]).filter(p=>String(p.companyId)===String(id)),
+    docDate: i=> i.issueDate || (i.bookMonth? monthEnd(i.bookMonth):''),
+    total: docTotal, paid: i=>paidOfInvoice(i), bal: i=>balanceOfInvoice(i), status: i=>invoiceStatus(i),
+    balOf: id=>arBalanceOf(id), payBtn: id=>`openPaymentFor('${id}')`, payPage:'receipts',
+    unapplied: id=>(DB.payments||[]).filter(p=>p.status!=='取消'&&String(p.companyId)===String(id))
+      .reduce((s,p)=>s+Math.max(0,num(p.amount)-(p.allocations||[]).reduce((t,a)=>t+num(a.amount),0)),0),
+  };
+}
+/** その伝票に充てられた入金（支払）を古い順に。1回の振込が複数の伝票に分かれることがある。 */
+function ledAllocs(side, docId){
+  const src = side==='ap' ? (DB.payouts||[]) : (DB.payments||[]);
+  const key = side==='ap' ? 'billId' : 'invoiceId';
+  const out=[];
+  src.forEach(p=>{ if(p.status==='取消') return;
+    (p.allocations||[]).forEach(a=>{ if(String(a[key])===String(docId)) out.push({date:p.date||'', amount:num(a.amount), pid:p.id, method:p.method||''}); }); });
+  return out.sort((x,y)=>String(x.date).localeCompare(String(y.date)));
+}
+/** 残高が0になった日＝「払い終わった日」。これと期日を比べて遅れを測る。 */
+function ledSettleDate(side, doc){
+  const S=ledS(side), total=S.total(doc);
+  if(total<=0) return null;
+  let s=0;
+  for(const a of ledAllocs(side, doc.id)){ s+=a.amount; if(s>=total) return a.date||null; }
+  return null;
+}
+/** 1枚の伝票の「払われ方」。days は期日から何日遅れたか（マイナスは前倒し）。 */
+function ledLate(side, doc){
+  const S=ledS(side), due=doc.dueDate||'', bal=S.bal(doc), settle=ledSettleDate(side,doc);
+  if(bal<0) return {state:'over', days:0, settle};                       // 過入金
+  if(settle) return {state:'paid', days: due? daysBetween(due,settle):0, settle};
+  if(!due)   return {state:'open', days:0, settle:null};
+  const d=daysBetween(due, today());
+  return {state: d>0?'late':'notyet', days: Math.max(0,d), settle:null};
+}
+function ledColor(x){
+  if(x.state==='over') return 'lg-over';
+  if(x.state==='notyet'||x.state==='open') return 'lg-wait';
+  if(x.days<=0) return 'lg-ok';
+  return x.days<=LED_LATE_WARN ? 'lg-warn' : 'lg-bad';
+}
+function ledLateText(x){
+  if(x.state==='over')   return '<span class="badge b-purple">過入金</span>';
+  if(x.state==='open')   return '<span class="badge b-gray">期日なし</span>';
+  if(x.state==='notyet') return '<span class="badge b-gray">未到来</span>';
+  if(x.state==='late')   return `<span class="badge ${x.days<=LED_LATE_WARN?'b-amber':'b-red'}">${x.days}日 超過中</span>`;
+  if(x.days<=0)          return `<span class="badge b-green">期日内${x.days<0?`（${-x.days}日前）`:''}</span>`;
+  return `<span class="badge ${x.days<=LED_LATE_WARN?'b-amber':'b-red'}">${x.days}日 遅れ</span>`;
+}
+
+/** 支払いぶり。閉じた（払い終わった）伝票だけで数える。fy を渡すとその年度だけ。 */
+function ledPerf(companyId, side, fy){
+  const S=ledS(side);
+  let n=0, onTime=0, late=0, lateSum=0, worst=0, openOver=0, openOverAmt=0;
+  S.docs(companyId).forEach(d=>{
+    if(d.status==='取消'||d.status==='作成中') return;
+    if(fy!=null && fyOf((d.bookMonth||'').slice(0,7))!==Number(fy)) return;
+    const x=ledLate(side,d);
+    if(x.state==='paid'||x.state==='over'){
+      n++;
+      if(x.days<=0) onTime++; else { late++; lateSum+=x.days; worst=Math.max(worst,x.days); }
+    }else if(x.state==='late'){ openOver++; openOverAmt+=S.bal(d); worst=Math.max(worst,x.days); }
+  });
+  return { n, onTime, late, rate: n? Math.round(onTime/n*1000)/10 : null,
+    avgLate: late? Math.round(lateSum/late) : 0, worst, openOver, openOverAmt };
+}
+/** 一覧に出す小さな札。「この会社は期日を守るか」を1目盛りで。 */
+function ledPerfBadge(companyId, side){
+  const p=ledPerf(companyId, side==='ap'?'ap':'ar', null);
+  if(!p.n && !p.openOver) return '<span class="zero">—</span>';
+  if(!p.n) return `<span class="badge b-red">${p.openOver}件 超過中</span>`;
+  const cls = p.rate>=95?'b-green' : (p.rate>=80?'b-amber':'b-red');
+  return `<span class="badge ${cls}">期日内 ${p.rate}%</span>`
+    + (p.avgLate? `<div class="muted" style="font-size:10.5px;">平均 ${p.avgLate}日遅れ</div>`:'')
+    + (p.openOver? `<div style="font-size:10.5px;color:var(--danger);">超過中 ${p.openOver}件</div>`:'');
+}
+
+/* ---------- 画面 ---------- */
+function openLedger(companyId, side){
+  if(companyId) LED_CO=String(companyId);
+  if(side) LED_SIDE=side;
+  goto('ledger');
+}
+function setLedCo(v){ LED_CO=v||null; renderPage('ledger'); }
+function setLedTab(t){ LED_TAB=t; renderPage('ledger'); }
+function setLedSide(s){ LED_SIDE=s; renderPage('ledger'); }
+
+function viewLedger(){
+  const list=(DB.companies||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  if(!LED_CO && list.length){
+    /* 最初に出す会社は「いま一番気になる会社」＝未回収がいちばん多いところ */
+    const top=list.slice().sort((a,b)=>arBalanceOf(b.id)-arBalanceOf(a.id))[0];
+    LED_CO = top? String(top.id) : null;
+  }
+  const c = LED_CO? findById('companies',LED_CO) : null;
+  const S = ledS(LED_SIDE);
+
+  const picker=`<select onchange="setLedCo(this.value)" style="min-width:230px;">
+      <option value="">取引先を選ぶ…</option>
+      ${list.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(LED_CO)?'selected':''}>${esc(x.name||x.id)}${x._gone?'（CRM消失）':''}</option>`).join('')}
+    </select>
+    <div class="seg" style="margin-left:8px;">
+      <button class="${LED_SIDE==='ar'?'on':''}" onclick="setLedSide('ar')">請求・入金（売掛）</button>
+      <button class="${LED_SIDE==='ap'?'on':''}" onclick="setLedSide('ap')">支払（買掛）</button>
+    </div>`;
+
+  if(!c) return pageShell({ title:'取引先台帳', sub:'1社ごとに、請求と入金（支払）の履歴と12か月の帯を見ます。',
+    tools:picker, body:'<div class="empty">上の欄から取引先を選んでください。</div>' });
+
+  const terms = (c.paySite!=null&&c.paySite!=='')
+    ? `${c.closingDay||31}日締 → ${c.paySite}か月後の${c.payDay||31}日払い`
+    : '<span style="color:var(--warning);">支払条件が未設定（期日が自動計算できません）</span>';
+  const perf = ledPerf(c.id, LED_SIDE, null);
+  const unap = S.unapplied(c.id);
+
+  const head=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">${esc(S.balLabel)}</div><div class="num ${S.balOf(c.id)?'minus':''}">${moneyPlain(S.balOf(c.id))}</div>
+      <div class="sub">${S.docs(c.id).filter(d=>S.bal(d)>0&&d.status!=='取消'&&d.status!=='作成中').length}件が未${LED_SIDE==='ap'?'払':'回収'}</div></div>
+    <div class="kpi"><div class="lbl">支払条件（この会社の期日）</div><div class="num" style="font-size:15px;line-height:1.5;">${terms}</div>
+      <div class="sub">色はこの期日と比べて付けています</div></div>
+    <div class="kpi"><div class="lbl">期日内に${LED_SIDE==='ap'?'払えた':'入金された'}割合</div>
+      <div class="num ${perf.rate==null?'':(perf.rate>=95?'plus':(perf.rate<80?'minus':''))}">${perf.rate==null?'—':perf.rate+'%'}</div>
+      <div class="sub">${perf.n?`${perf.onTime}/${perf.n}件${perf.avgLate?` ・ 遅れた分は平均${perf.avgLate}日`:''}`:'完了した伝票がまだありません'}</div></div>
+    <div class="kpi ${perf.openOver?'clickable':''}"><div class="lbl">いま期日を過ぎている</div>
+      <div class="num ${perf.openOver?'minus':''}">${perf.openOver?moneyPlain(perf.openOverAmt):'0'}</div>
+      <div class="sub">${perf.openOver?`${perf.openOver}件 ・ 最長 ${perf.worst}日`:'ありません'}</div></div>
+  </div>`;
+
+  const warn = unap? `<div class="warnbar">${IC.warn} この取引先の${S.payLabel}のうち <b class="num">${moneyPlain(unap)}</b> 円が、まだどの${S.docLabel}にも結び付いていません（未消込）。
+      残高には反映されていません。<button class="btn sm" style="margin-left:auto;" onclick="goto('${S.payPage}')">${esc(S.payLabel)}の画面へ</button></div>`:'';
+
+  const body = LED_TAB==='timeline' ? ledTimelineHtml(c, LED_SIDE, CUR_FY) : ledHistoryHtml(c, LED_SIDE, CUR_FY);
+
+  return pageShell({ title:'取引先台帳', sub:`${c.name||''} — ${S.title}`,
+    tools: picker + toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（残高確認書）</button>
+      <button class="btn secondary" onclick="exportCsvLedger()">${IC.doc} 履歴をCSV</button>
+      <hr><button class="btn secondary" onclick="openDetail('companies','${c.id}')">取引先の情報</button>`),
+    body: `<div class="printonly" style="margin-bottom:10px;">
+        <div style="font-size:17px;font-weight:700;">取引明細書・残高確認書</div>
+        <div style="font-size:12px;">${esc(c.name||'')} 御中　／　${fyLabel(CUR_FY)}　／　発行日 ${today()}　／　BIGLIGHT株式会社</div>
+      </div>
+      ${head}${warn}
+      <div class="tabs">
+        <button class="${LED_TAB==='history'?'on':''}" onclick="setLedTab('history')">履歴（通帳）</button>
+        <button class="${LED_TAB==='timeline'?'on':''}" onclick="setLedTab('timeline')">タイムライン（12か月）</button>
+      </div>${body}` });
+}
+
+/** 出来事を時間順に1本へ。伝票＝残高が増える、入金＝消し込んだぶん減る。 */
+function ledEvents(companyId, side){
+  const S=ledS(side), ev=[];
+  S.docs(companyId).forEach(d=>{
+    if(d.status==='取消'||d.status==='作成中') return;
+    ev.push({ kind:'doc', date:S.docDate(d)||'', doc:d, amount:S.total(d) });
+  });
+  S.pays(companyId).forEach(p=>{
+    if(p.status==='取消') return;
+    const alloc=(p.allocations||[]).reduce((s,a)=>s+num(a.amount),0);
+    ev.push({ kind:'pay', date:p.date||'', pay:p, amount:num(p.amount), alloc, fee:num(p.fee) });
+  });
+  /* 同じ日なら 伝票 → 入金 の順（その日の残高の動きが読める順） */
+  ev.sort((a,b)=> String(a.date).localeCompare(String(b.date)) || (a.kind==='doc'?-1:1));
+  let bal=0;
+  ev.forEach(e=>{ bal += e.kind==='doc' ? e.amount : -e.alloc; e.bal=bal; });
+  return ev;
+}
+
+function ledHistoryHtml(c, side, fy){
+  const S=ledS(side);
+  const all=ledEvents(c.id, side);
+  const months=fyMonths(fy), from=months[0]+'-01', to=monthEnd(months[11]);
+  const inFy=all.filter(e=>e.date>=from && e.date<=to);
+  const before=all.filter(e=>e.date<from);
+  const carry = before.length? before[before.length-1].bal : 0;
+
+  const rows = inFy.slice().reverse().map(e=>{
+    if(e.kind==='doc'){
+      const d=e.doc, x=ledLate(side,d), bal=S.bal(d);
+      return `<tr onclick="openDetail('${side==='ap'?'bills':'invoices'}','${d.id}')" style="cursor:pointer;">
+        <td>${esc(e.date)}</td>
+        <td><span class="badge b-blue">${esc(S.docLabel)}</span></td>
+        <td><b>${esc(d.no||'')}</b>${d.bookMonth?`<div class="muted" style="font-size:10.5px;">計上 ${esc(d.bookMonth)}</div>`:''}</td>
+        <td class="r num"><b>${moneyPlain(e.amount)}</b></td>
+        <td class="r"><span class="zero">—</span></td>
+        <td class="r num">${moneyPlain(e.bal)}</td>
+        <td>${esc(d.dueDate||'—')}</td>
+        <td>${ledLateText(x)}</td>
+        <td>${bal>0&&canEdit(S.payPage)?`<a class="pillbtn pill-save" onclick="event.stopPropagation();${S.payBtn(d.id)}">${esc(S.payLabel)}</a>`:''}</td></tr>`;
+    }
+    const p=e.pay, rest=e.amount-e.alloc;
+    const to2=(p.allocations||[]).map(a=>{
+      const d=findById(side==='ap'?'bills':'invoices', side==='ap'?a.billId:a.invoiceId);
+      return d? esc(d.no||'') : '—'; }).join('、');
+    return `<tr onclick="${side==='ap'?`openPayout('${p.id}')`:`openPayment('${p.id}')`}" style="cursor:pointer;">
+      <td>${esc(e.date)}</td>
+      <td><span class="badge b-green">${esc(S.payLabel)}</span></td>
+      <td class="muted" style="font-size:11.5px;">${to2||'<span class="badge b-amber">未消込</span>'}${e.fee?`<div class="muted" style="font-size:10.5px;">手数料 ${moneyPlain(e.fee)}</div>`:''}</td>
+      <td class="r"><span class="zero">—</span></td>
+      <td class="r num plus"><b>${moneyPlain(e.amount)}</b>${rest?`<div style="font-size:10.5px;color:var(--warning);">うち未消込 ${moneyPlain(rest)}</div>`:''}</td>
+      <td class="r num">${moneyPlain(e.bal)}</td>
+      <td>${esc(p.method||'')}</td><td></td><td></td></tr>`;
+  }).join('');
+
+  const sumDoc=inFy.filter(e=>e.kind==='doc').reduce((s,e)=>s+e.amount,0);
+  const sumPay=inFy.filter(e=>e.kind==='pay').reduce((s,e)=>s+e.amount,0);
+
+  return `<div class="table-wrap"><table>
+      <thead><tr><th style="min-width:96px;">日付</th><th style="min-width:80px;">種類</th><th style="min-width:150px;">番号・内容</th>
+        <th class="r" style="min-width:104px;">${esc(S.docAmtLabel)}</th><th class="r" style="min-width:104px;">${esc(S.payAmtLabel)}</th>
+        <th class="r" style="min-width:104px;">残高</th><th style="min-width:96px;">${esc(S.dueLabel)}</th><th style="min-width:110px;">期日との差</th><th></th></tr></thead>
+      <tbody>
+        ${rows || `<tr><td colspan="9" class="empty" style="padding:20px;">${fyLabel(fy)}には動きがありません。年度を切り替えてみてください。</td></tr>`}
+        <tr class="totrow"><td>${esc(months[0])} 時点の繰越</td><td></td><td></td><td></td><td></td>
+          <td class="r num">${moneyPlain(carry)}</td><td></td><td></td><td></td></tr>
+        <tr class="totrow"><td><b>${fyLabel(fy)} 合計</b></td><td></td><td></td>
+          <td class="r num">${moneyPlain(sumDoc)}</td><td class="r num plus">${moneyPlain(sumPay)}</td>
+          <td class="r num"><b>${moneyPlain(inFy.length? inFy[inFy.length-1].bal : carry)}</b></td><td></td><td></td><td></td></tr>
+      </tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;">残高は「まだ${side==='ap'?'払っていない':'回収できていない'}${esc(S.docLabel)}の合計」です。${esc(S.payLabel)}のうち、まだどの${esc(S.docLabel)}にも結び付けていないぶんは引いていません（上に注意が出ます）。</div>`;
+}
+
+function ledTimelineHtml(c, side, fy){
+  const S=ledS(side), months=fyMonths(fy), idx={}; months.forEach((m,i)=>{ idx[m]=i; });
+  const curYm=thisMonth(), curIdx = fyOf(curYm)===fy ? fyIndexOf(curYm) : -1;
+
+  /* ---- 上の3行: 月ごとの合計 ---- */
+  const docSum=Array(12).fill(0), paySum=Array(12).fill(0);
+  S.docs(c.id).forEach(d=>{
+    if(d.status==='取消'||d.status==='作成中') return;
+    const i=idx[(d.bookMonth||'').slice(0,7)]; if(i!=null) docSum[i]+=S.total(d);
+  });
+  S.pays(c.id).forEach(p=>{
+    if(p.status==='取消') return;
+    const i=idx[String(p.date||'').slice(0,7)]; if(i!=null) paySum[i]+=num(p.amount);
+  });
+  /* 月末残高は「その月末までの出来事」を積んだもの（通帳と同じ数え方） */
+  const ev=ledEvents(c.id, side), balEnd=Array(12).fill(0);
+  months.forEach((m,i)=>{
+    const end=monthEnd(m);
+    const upto=ev.filter(e=>e.date<=end);
+    balEnd[i] = upto.length? upto[upto.length-1].bal : (i>0? balEnd[i-1] : 0);
+  });
+
+  /* ---- 帯: 伝票1枚 = 1行 ---- */
+  const docs=S.docs(c.id).filter(d=>d.status!=='取消'&&d.status!=='作成中'&&idx[(d.bookMonth||'').slice(0,7)]!=null)
+    .sort((a,b)=>String(a.bookMonth||'').localeCompare(String(b.bookMonth||'')));
+
+  const barRow = d => {
+    const s=idx[(d.bookMonth||'').slice(0,7)];
+    const x=ledLate(side,d), cls=ledColor(x);
+    const settleIdx = x.settle!=null && idx[String(x.settle).slice(0,7)]!=null ? idx[String(x.settle).slice(0,7)] : null;
+    const dueIdx = d.dueDate && idx[String(d.dueDate).slice(0,7)]!=null ? idx[String(d.dueDate).slice(0,7)] : null;
+    /* 終わり: 払い終わった月。まだなら 今月（過去年度なら12月目）まで伸ばす */
+    let e = settleIdx!=null ? settleIdx : (curIdx>=0? curIdx : 11);
+    if(x.settle && settleIdx==null) e=11;                 // 翌年度に払い終わった → 端まで
+    if(e<s) e=s;
+    const cells=months.map((m,i)=>{
+      const on = i>=s && i<=e;
+      const isDue = dueIdx===i, isEnd = settleIdx===i;
+      return `<td class="r lgcell ${i===curIdx?'curcol':''}">${on?`<span class="lgbar ${cls} ${isDue?'lgdue':''}"></span>`:(isDue?'<span class="lgbar lg-none lgdue"></span>':'')}
+        ${isEnd?'<div class="lgdot">●</div>':''}${isDue&&!isEnd?'<div class="lgdot muted">期日</div>':''}</td>`;
+    }).join('');
+    return `<tr onclick="openDetail('${side==='ap'?'bills':'invoices'}','${d.id}')" style="cursor:pointer;">
+      <td><b>${esc(d.no||'')}</b><div class="muted" style="font-size:10.5px;">計上 ${esc(d.bookMonth||'')} ／ 期日 ${esc(d.dueDate||'—')}</div></td>
+      ${cells}
+      <td class="r num">${moneyPlain(S.total(d))}</td>
+      <td class="r num">${S.bal(d)>0?`<b class="minus">${moneyPlain(S.bal(d))}</b>`:'<span class="zero">0</span>'}</td>
+      <td>${ledLateText(x)}</td></tr>`;
+  };
+
+  const sumRow=(label,arr,cls)=>`<tr class="totrow"><td>${esc(label)}</td>
+    ${arr.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''} ${cls||''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
+    <td class="r num">${moneyPlain(arr.reduce((s,v)=>s+v,0))}</td><td></td><td></td></tr>`;
+
+  const perf=ledPerf(c.id, side, fy);
+  return `<div class="infobar" style="margin-bottom:10px;">
+      ${fyLabel(fy)}：${esc(S.docLabel)} ${docs.length}件 ／ 期日内 ${perf.rate==null?'—':perf.rate+'%'}${perf.avgLate?` ／ 遅れた分は平均 ${perf.avgLate}日`:''}
+      <span style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11.5px;">
+        <span><span class="lgkey lg-ok"></span>期日内</span>
+        <span><span class="lgkey lg-warn"></span>${LED_LATE_WARN}日までの遅れ</span>
+        <span><span class="lgkey lg-bad"></span>${LED_LATE_WARN}日超</span>
+        <span><span class="lgkey lg-wait"></span>期日前</span>
+        <span><span class="lgkey lg-over"></span>過${side==='ap'?'払':'入金'}</span>
+      </span></div>
+    <div class="table-wrap"><table class="stick1">
+      <thead><tr><th style="min-width:190px;">${esc(S.docLabel)}</th>
+        ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:92px;">${m}</th>`).join('')}
+        <th class="r" style="min-width:104px;">金額</th><th class="r" style="min-width:100px;">残</th><th style="min-width:110px;">期日との差</th></tr></thead>
+      <tbody>
+        ${sumRow(S.docAmtLabel+' 計', docSum)}
+        ${sumRow(S.payAmtLabel+' 計', paySum, 'plus')}
+        ${sumRow('月末の'+S.balLabel, balEnd)}
+        ${docs.length? `<tr class="grprow"><td colspan="${1+12+3}">${esc(S.docLabel)}ごとの動き（帯の色 ＝ その会社の期日を守れたか）</td></tr>`+docs.map(barRow).join('')
+          : `<tr><td colspan="${1+12+3}" class="empty" style="padding:20px;">${fyLabel(fy)}に計上された${esc(S.docLabel)}はありません。</td></tr>`}
+      </tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;">帯は「計上した月 → 払い終わった月」。● が払い終わった月、「期日」の印がその伝票の入金期日です。
+      期日は取引先ごとに違います（この会社は ${esc((c.closingDay||31)+'日締 / '+(c.paySite==null||c.paySite===''?'未設定':(c.paySite+'か月後 '+(c.payDay||31)+'日'))) }）。</div>`;
+}
+
+/** 履歴をCSVに（いま見えている年度・いまの側） */
+function exportCsvLedger(){
+  const c=LED_CO?findById('companies',LED_CO):null; if(!c) return;
+  const S=ledS(LED_SIDE), months=fyMonths(CUR_FY), from=months[0]+'-01', to=monthEnd(months[11]);
+  const rows=[['日付','種類','番号・内容',S.docAmtLabel,S.payAmtLabel,'残高',S.dueLabel,'期日との差']];
+  ledEvents(c.id, LED_SIDE).filter(e=>e.date>=from&&e.date<=to).forEach(e=>{
+    if(e.kind==='doc'){
+      const x=ledLate(LED_SIDE,e.doc);
+      rows.push([e.date, S.docLabel, e.doc.no||'', e.amount, '', e.bal, e.doc.dueDate||'',
+        x.state==='paid'? (x.days<=0?'期日内':x.days+'日遅れ') : (x.state==='late'? x.days+'日超過中':'')]);
+    }else{
+      rows.push([e.date, S.payLabel, (e.pay.allocations||[]).length?'消込あり':'未消込', '', e.amount, e.bal, '', '']);
+    }
+  });
+  downloadCsv(`${(c.name||'取引先').replace(/[\\/:*?"<>|]/g,'')}_${CUR_FY}年度_${LED_SIDE==='ap'?'支払':'請求入金'}`, rows);
 }
 
 /* ============================================================================
@@ -3038,7 +3409,7 @@ function viewCompanies(){
   const noRule=all.filter(c=>c.kind!=='仕入先'&&!c._gone&&!rulesOfCompany(c.id).length).length;
 
   const cols=[
-    {key:'name', label:'取引先名', val:r=>`<div style="font-weight:700;">${esc(r.name||'')} ${sourceTag(r)}</div>
+    {key:'name', label:'取引先名', val:r=>`<div style="font-weight:700;">${coLink(r.id, r.kind==='仕入先'?'ap':'ar')} ${sourceTag(r)}</div>
       ${r.address?`<div class="muted" style="font-size:10.5px;">${esc(r.address)}</div>`:''}`,
       raw:r=>r.name||''},
     {key:'kind', label:'区分', val:r=>statusBadge(r.kind||'得意先')},
@@ -3052,6 +3423,7 @@ function viewCompanies(){
       return n? `<b class="num">${n}名</b>` : '<span class="zero">—</span>'; }},
     {key:'paySite', label:'支払条件', noFilter:true, val:r=>
       r.paySite!=null&&r.paySite!==''? esc(`${r.closingDay||31}日締 / ${r.paySite}か月後 ${r.payDay||31}日`) : '<span class="zero">未設定</span>'},
+    {key:'perf', label:'支払いぶり', noFilter:true, val:r=>ledPerfBadge(r.id, r.kind==='仕入先'?'ap':'ar')},
     {key:'ar', label:'売掛残', cls:'r', noFilter:true, val:r=>{const v=arBalanceOf(r.id); return v?`<b class="num minus">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
     {key:'ap', label:'買掛残', cls:'r', noFilter:true, val:r=>{const v=apBalanceOf(r.id); return v?`<b class="num">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
   ];
@@ -3069,9 +3441,10 @@ function viewCompanies(){
 function companyExtraDetail(c){
   const rules=rulesOfCompany(c.id);
   const n=workersInMonth(c.id, thisMonth(), 'month_end').length;
-  return `<div class="form-section" style="margin-top:14px;">${IC.yen} 取引状況</div>
-    ${kv('売掛残高', `<b class="num">${moneyPlain(arBalanceOf(c.id))}</b> 円`)}
-    ${kv('買掛残高', `<b class="num">${moneyPlain(apBalanceOf(c.id))}</b> 円`)}
+  return `<div class="form-section" style="margin-top:14px;">${IC.yen} 取引状況
+      <a class="pillbtn pill-manage" style="margin-left:auto;" onclick="closeModal();openLedger('${c.id}','ar')">台帳（履歴・タイムライン）を見る</a></div>
+    ${kv('売掛残高', `<b class="num">${moneyPlain(arBalanceOf(c.id))}</b> 円 ${ledPerfBadge(c.id,'ar')}`)}
+    ${kv('買掛残高', `<b class="num">${moneyPlain(apBalanceOf(c.id))}</b> 円 ${ledPerfBadge(c.id,'ap')}`)}
     ${kv('今月の在籍者', n?`${n}名`:'—')}
     ${kv('請求ルール', rules.length? rules.map(r=>esc(ruleText(r))).join('<br>')+
       `<div style="margin-top:6px;"><a class="pillbtn pill-manage" onclick="closeModal();openRules('${c.id}')">ルールを編集</a></div>`

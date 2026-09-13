@@ -169,6 +169,44 @@ ctx.setCostCell('CI1','2025-10',0);
 eq('0にするとマスごと消える', ctx.costCellAmount('CI1','2025-10'), 0);
 eq('消したら予実からも消える', ctx.actualSeries(2025,'sga')[2], 0);
 
+console.log('\n― 取引先台帳（履歴・タイムライン）―');
+/* ★ 期日は会社ごとに違う。C2 は「20日締・翌々月25日払い」なので、
+   計上から85日かかっても期日内。ここを「計上からの日数」で色付けしていないことを確かめる。 */
+_db.invoices.push({ id:'I3', no:'INV-202508-002', companyId:'C2', bookMonth:'2025-08',
+  dueDate: ctx.dueDateOf('2025-08', 20, 2, 25), status:'確定',
+  items:[{ accountCode:'4900', name:'顧問料', amount:50000, taxCat:'課税10%' }] });
+_db.payments.push({ id:'P2', companyId:'C2', date:'2025-10-25', amount:55000, status:'確定',
+  allocations:[{ invoiceId:'I3', amount:55000 }] });
+
+eq('C2 の期日は会社の条件から', _db.invoices[2].dueDate, '2025-10-25');
+eq('払い終わった日', ctx.ledSettleDate('ar', _db.invoices[2]), '2025-10-25');
+eq('85日かかっても期日内（会社ごとの期日で判定）', ctx.ledLate('ar', _db.invoices[2]).days, 0);
+eq('期日内は緑', ctx.ledColor(ctx.ledLate('ar', _db.invoices[2])), 'lg-ok');
+eq('1日遅れ（I2: 9/30期日を10/1入金）', ctx.ledLate('ar', _db.invoices[1]).days, 1);
+eq('30日までの遅れは黄', ctx.ledColor(ctx.ledLate('ar', _db.invoices[1])), 'lg-warn');
+eq('未回収で期日超過は赤', ctx.ledColor(ctx.ledLate('ar', _db.invoices[0])), 'lg-bad');
+
+const evC1 = ctx.ledEvents('C1','ar');
+eq('C1 の出来事は 請求2 + 入金1', evC1.length, 3);
+eq('古い順に並ぶ', evC1.map(e=>e.date), ['2025-08-31','2025-09-30','2025-10-01']);
+eq('通帳の残高の動き', evC1.map(e=>e.bal), [66000,132000,32000]);
+/* いちばん大事: 台帳の残高は、どの画面で見ても同じ数字（売掛残高）でなければならない */
+eq('台帳の最後の残高＝売掛残高', evC1[evC1.length-1].bal, ctx.arBalanceOf('C1'));
+
+const pf = ctx.ledPerf('C1','ar');
+eq('完了した伝票の数', pf.n, 1);
+eq('期日内率（1件中0件）', pf.rate, 0);
+eq('遅れた分の平均日数', pf.avgLate, 1);
+eq('いま期日を過ぎている件数', pf.openOver, 1);
+eq('C2 は期日内100%', ctx.ledPerf('C2','ar').rate, 100);
+
+/* 買掛側も同じ道具で動く */
+_db.payouts = [{ id:'O1', companyId:'C3', date:'2025-10-31', amount:220000, status:'確定',
+  allocations:[{ billId:'BL1', amount:220000 }] }];
+eq('支払側: 払い終わった日', ctx.ledSettleDate('ap', _db.bills[0]), '2025-10-31');
+eq('支払側: 期日内に払えた', ctx.ledColor(ctx.ledLate('ap', _db.bills[0])), 'lg-ok');
+eq('支払側の台帳も残高が合う', ctx.ledEvents('C3','ap').pop().bal, ctx.apBalanceOf('C3'));
+
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',
@@ -179,6 +217,16 @@ console.log('\n― 画面が落ちずに描けるか ―');
     console.log((ok?'  ok  ':'  NG  ') + fn + '  →  ' + (ok ? h.length + ' 文字' : '空'));
     ok ? pass++ : fail++;
   } catch (e) { console.log('  NG  ' + fn + '  →  ' + e.message); fail++; }
+});
+
+[['ar','history'],['ar','timeline'],['ap','history'],['ap','timeline']].forEach(([side,tab])=>{
+  try{
+    ctx.setLedSide(side); ctx.setLedTab(tab); ctx.setLedCo(side==='ap'?'C3':'C1');
+    const h = ctx.viewLedger();
+    const ok = typeof h==='string' && h.length>200;
+    console.log((ok?'  ok  ':'  NG  ')+`viewLedger(${side}/${tab})  →  `+(ok? h.length+' 文字':'空'));
+    ok?pass++:fail++;
+  }catch(e){ console.log(`  NG  viewLedger(${side}/${tab})  →  `+e.message); fail++; }
 });
 
 console.log(`\n結果: ${pass} 件成功 / ${fail} 件失敗\n`);
