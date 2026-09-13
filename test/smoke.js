@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -223,6 +223,60 @@ console.log('\n― 営業日（期日が土日祝のとき） ―');
   _db.payments.push({ id:'PH', companyId:'C1', date:'2025-10-27', amount:11000, status:'確定', allocations:[{ invoiceId:'IH', amount:11000 }] });
   eq('土曜期日を月曜に入金しても期日内', ctx.ledColor(ctx.ledLate('ar', _db.invoices.find(i=>i.id==='IH'))), 'lg-ok');
   _db.invoices=_db.invoices.filter(i=>i.id!=='IH'); _db.payments=_db.payments.filter(p=>p.id!=='PH');
+}
+
+console.log('\n― 督促（段階・約束・今日やること）―');
+{
+  const keepInv=_db.invoices.slice(), keepPay=_db.payments.slice(), keepCo=_db.companies.slice();
+  _db.collectionLogs=[];
+  const dd=n=>ctx.addDays(ctx.today(), n);
+  /* 期日が必ず平日になるよう「そのまま」の会社で作る（曜日で結果が揺れないように） */
+  _db.companies.push({ id:'DK', name:'督促テスト工業', kind:'得意先', dueAdjust:'そのまま', creditLimit:50000, owner:'test@biglight.jp' });
+  const inv=(id,due,amt)=>({ id, no:id, companyId:'DK', bookMonth:'2026-06', dueDate:due, status:'確定', items:[{accountCode:'4100', amount:amt, taxCat:'課税10%'}] });
+  _db.invoices.push(inv('D1', dd(-3), 10000));
+  let s1=ctx.dunStatus('DK');
+  eq('3日遅れ → 督促1', s1.stage, 1);
+  eq('まだ何もしていない → 今日やる', !!s1.todo, true);
+  eq('今日やることは 督促1のメール', s1.todo.method, 'メール');
+
+  _db.invoices.find(i=>i.id==='D1').dueDate=dd(-10);
+  eq('10日遅れ → 督促2', ctx.dunStatus('DK').stage, 2);
+  _db.invoices.find(i=>i.id==='D1').dueDate=dd(-40);
+  eq('40日遅れ → 督促3（電話）', ctx.dunStatus('DK').todo.method, '電話');
+
+  /* 対応を記録すると、その段階の「今日やる」は消える */
+  ctx.dunLogSave('DK', { date:ctx.today(), method:'電話', content:'経理と話した', promiseDate:dd(5), promiseAmount:11000, nextDate:dd(6) });
+  let s2=ctx.dunStatus('DK');
+  eq('記録したら 今日やることは消える', s2.todo, null);
+  eq('約束は「待ち」', s2.promise.state, 'waiting');
+  eq('記録に その時点の段階が残る', ctx.__x.DB().collectionLogs[0].stage, 3);
+
+  /* 約束日を過ぎても入金なし → いちばん急ぐ */
+  ctx.__x.DB().collectionLogs[0].date=dd(-10); ctx.__x.DB().collectionLogs[0].promiseDate=dd(-2);
+  let s3=ctx.dunStatus('DK');
+  eq('約束を過ぎた', s3.promise.state, 'broken');
+  eq('約束切れは いちばん急ぐ（rank 5）', s3.todo.rank, 5);
+  /* 約束どおり入った → 守られた */
+  _db.payments.push({ id:'DKP', companyId:'DK', date:dd(-3), amount:11000, status:'確定', allocations:[{invoiceId:'D1', amount:11000}] });
+  eq('約束の日までに入金 → 守られた', ctx.dunStatus('DK').promise.state, 'kept');
+  eq('払い終わったら 督促キューから消える', ctx.dunRows().some(r=>r.companyId==='DK'), false);
+  _db.payments=_db.payments.filter(p=>p.id!=='DKP');
+
+  /* 与信限度額 */
+  eq('限度額 50,000 に対し 11,000 → 超えていない', ctx.creditOver('DK'), false);
+  _db.invoices.push(inv('D2', dd(20), 60000));
+  eq('未回収が限度額を超えた', ctx.creditOver('DK'), true);
+  eq('ベルが限度超過を知らせる', ctx.notifItems().some(x=>x.key==='credit'), true);
+  /* 土日祝の調整後で判断する（期日が土曜、今日がその翌日曜でも 遅れではない） */
+  eq('限度額を入れていない会社は超過にならない', ctx.creditOver('C1'), false);
+
+  try{ ctx.setDunFilter('all'); const h=ctx.viewDunning(); const ok=h.includes('督促テスト工業') && h.includes('限度超過');
+    console.log((ok?'  ok  ':'  NG  ')+'督促キューに 会社・限度超過 が出る  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ console.log('  NG  viewDunning → '+e.message); fail++; }
+  try{ const h=ctx.dunPanel('DK'); const ok=h.includes('経理と話した');
+    console.log((ok?'  ok  ':'  NG  ')+'取引先の詳細に 対応の記録  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ console.log('  NG  dunPanel → '+e.message); fail++; }
+
+  _db.invoices=keepInv; _db.payments=keepPay; _db.companies=keepCo; _db.collectionLogs=[];
+  ctx.__x.setDB(_db); ctx.DB=_db;
 }
 
 console.log('\n― 取引先台帳（履歴・タイムライン）―');
@@ -570,11 +624,22 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     ctx.coOpen('ar', null);
   }
 
+  /* ── 督促（デモの量で） ── */
+  console.log('\n― 督促（デモ） ―');
+  {
+    const kita4=_db.companies.find(c=>c.name.includes('北関東物流'));
+    const s=ctx.dunStatus(kita4.id);
+    eq('デモの北関東は 約束を過ぎた', s.promise && s.promise.state, 'broken');
+    eq('デモの北関東は いちばん上', ctx.dunRows()[0].companyId, kita4.id);
+    eq('デモの北関東は 限度超過', ctx.creditOver(kita4.id), true);
+    eq('ベルに 今日やる督促', ctx.notifItems().some(x=>x.key==='dunning'), true);
+  }
+
   /* ── メール（CRMと同じ GAS） ── */
   console.log('\n― メール ―');
   {
     const kita3=_db.companies.find(c=>c.name.includes('北関東物流'));
-    eq('回収のテンプレは4つ', ctx.mailTemplates('ar').length, 4);
+    eq('回収のテンプレは6つ（督促1〜3を含む）', ctx.mailTemplates('ar').length, 6);
     eq('支払のテンプレは2つ', ctx.mailTemplates('ap').length, 2);
     const v=ctx.mailVars('ar', kita3.id);
     eq('差し込みの次回請求額は 取引先別 と同じ数字', v['次回請求額'], ctx.__x.moneyPlain(ctx.coNextBilling(kita3.id).total));
@@ -598,6 +663,7 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     eq('CRM の GAS と同じ形（to/subject/body/attachments）', ['to','cc','subject','body','senderName','attachments'].every(k=>k in body), true);
     eq('件名に差し込みが入っている', body.subject.includes('【'), true);
     eq('送信履歴が1件増える', (_db.mailLog||[]).length, logBefore+1);
+    eq('回収のメールは そのまま対応記録にもなる', ctx.dunLogs(kita3.id)[0].method, 'メール');
     eq('履歴に宛先と会社', _db.mailLog[_db.mailLog.length-1].to==='keiri@example.co.jp' && _db.mailLog[_db.mailLog.length-1].companyId===kita3.id, true);
     try{ const h=ctx.viewCoDetail('ar', kita3.id); eq('取引先別の詳細に送信履歴が出る', h.includes('keiri@example.co.jp'), true); }catch(e){ console.log('  NG  '+e.message); fail++; }
     ctx.fetch=origFetch;

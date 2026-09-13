@@ -503,7 +503,7 @@ const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
 /* 同じ台帳を別の入口から見る画面は、権限も同じにする（二重に設定させない） */
-const PAGE_PERM_ALIAS = { vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', kbunrui:'expenses', properties:'properties', accounts:'settings' };
+const PAGE_PERM_ALIAS = { vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
 function permOf(page){
   page = PAGE_PERM_ALIAS[page] || page;
   const role = myRole();
@@ -902,6 +902,7 @@ const SECTIONS = [
   { id:'sec-ar', label:'回収（売掛金）', icon:'invoice', tabs:[
     {id:'invoices', label:'請求管理'},
     {id:'receipts', label:'入金・消込'},
+    {id:'dunning',  label:'督促（今日やること）'},
     {id:'aging',    label:'未回収（年齢表）'},
     {id:'arco',     label:'取引先別'} ]},
   { id:'sec-ap', label:'支払（買掛金）', icon:'bill', tabs:[
@@ -1079,7 +1080,7 @@ function showPending(msg){
 function ensureShape(){
   ['companies','workers','assignments','billingRules','invoices','payments','bills','payouts',
    'expenses','costItems','budgets','forecasts','actualAdjust','objectives','keyResults','checkins',
-   'accounts','departments','mailLog','mailTemplates'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
+   'accounts','departments','mailLog','mailTemplates','collectionLogs'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
   if(!DB.userPerms) DB.userPerms={};
   if(!DB.settings)  DB.settings={};
   if(!DB.accounts.length) DB.accounts = DEFAULT_ACCOUNTS.map(a=>({id:uid('AC'),...a}));
@@ -1240,7 +1241,12 @@ function logout(msg){
   if(msg) document.getElementById('loginErr').textContent=msg;
   initGoogle();
 }
+/** 担当者の候補にするため、ユーザー一覧を1回だけ取っておく（取れなくても困らない） */
+async function loadUserCache(){
+  try{ const r=await fetch(API_BASE+'/users',{headers:headers()}); if(r.ok){ const d=await r.json(); _USERS=d.items||[]; } }catch(e){}
+}
 async function afterLogin(){
+  loadUserCache();
   if(SESSION.status!=='active'){
     document.getElementById('loginErr').innerHTML =
       'このアカウントはまだ承認されていません。<br>管理者（'+esc('n-tung@biglight.jp')+'）にご連絡ください。';
@@ -1358,6 +1364,7 @@ function renderPage(page){
       case 'companies': html=viewCompanies('');       break;
       case 'vendors':   html=viewCompanies('vendor'); break;
       case 'ledger':    html=viewLedger();    break;
+      case 'dunning':   html=viewDunning();   break;
       case 'arco':      html=viewCoList('ar'); break;
       case 'apco':      html=viewCoList('ap'); break;
       case 'workers':   html=viewWorkers();   break;
@@ -1868,6 +1875,8 @@ function openForm(entKey, id, preset){
     else if(f.type==='month') input=`<input name="${f.name}" type="month" value="${attr(String(v).slice(0,7))}" ${locked?'readonly':''}>`;
     else if(f.type==='date') input=`<input name="${f.name}" type="date" value="${attr(String(v).slice(0,10))}" ${locked?'readonly':''}>`;
     else if(f.type==='number') input=`<input name="${f.name}" type="number" value="${attr(v)}" ${locked?'readonly':''}>`;
+    else if(f.name==='owner') input=`<input name="${f.name}" type="text" value="${attr(v)}" placeholder="${attr(f.ph||'')}" list="ownerList" autocomplete="off">
+      <datalist id="ownerList">${(_USERS||[]).filter(u=>u.status==='active').map(u=>`<option value="${attr(u.email)}">${esc(u.name||'')}</option>`).join('')}</datalist>`;
     else input=`<input name="${f.name}" type="text" value="${attr(v)}" placeholder="${attr(f.ph||'')}" ${locked?'readonly':''}>`;
     return hd+`<div class="${f.full?'full':''}">
       <label>${esc(f.label)}${f.req?' <span style="color:var(--danger)">*</span>':''}${locked?' <span class="tag crm">CRM</span>':''}</label>
@@ -1956,6 +1965,10 @@ function saveForm(ev){
   const rec=readForm(entKey);
   const miss=E.fields.filter(f=>f.req && (rec[f.name]===''||rec[f.name]==null)).map(f=>f.label);
   if(miss.length){ toast('必須項目が未入力です：'+miss.join('・'),'err'); return false; }
+  if(entKey==='invoices' && !FORM_CTX.id && rec.companyId && (payGrade(rec.companyId,'ar').g==='D' || creditOver(rec.companyId))){
+    const s=dunStatus(rec.companyId);
+    if(!confirm(`この取引先は ${payGrade(rec.companyId,'ar').g==='D'?`延滞 ${moneyPlain(s.amount)}円（最長${s.maxDays}日）`:''}${creditOver(rec.companyId)?' 与信限度額超過':''} があります。\nそれでも請求書を作りますか？`)) return false;
+  }
   // 伝票は保存前に自動計算（番号・期日・合計）
   if(entKey==='invoices'||entKey==='bills') prepareDoc(entKey, rec, FORM_CTX.id);
   const old = FORM_CTX.id ? findById(E.key, FORM_CTX.id) : null;
@@ -2596,7 +2609,7 @@ function genPreview(){
   GEN_CTX={ ym, targets };
   const rows=targets.map((t,i)=>`<tr>
     <td><input type="checkbox" class="genck" data-i="${i}" checked></td>
-    <td><b>${esc(t.company.name)}</b></td>
+    <td><b>${esc(t.company.name)}</b>${genRisk(t.company.id)}</td>
     <td style="white-space:normal;font-size:11.5px;" class="muted">${t.items.map(x=>esc(x.name)+(x.qty>1?` ${x.qty}名×${moneyPlain(x.price)}`:'')).join('<br>')}</td>
     <td class="r num"><b>${moneyPlain(t.total)}</b></td>
     <td>${esc(dueDateOf(t.ym||GEN_CTX.ym, t.company.closingDay, t.company.paySite, t.company.payDay))}</td></tr>`).join('');
@@ -2611,10 +2624,21 @@ function genPreview(){
     ${noRule.length? `<div class="warnbar">請求ルールが未設定の取引先：${noRule.map(c=>`<a onclick="closeModal();openRules('${c.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(c.name)}</a>`).join('、')}
       <div style="margin-top:4px;font-weight:400;">ルールを作ると翌月から自動で請求に入ります。単発の請求は「＋ 個別に請求を作成」から。</div></div>`:''}`;
 }
+/** 請求を作る前に知らせる危険: 長い延滞（評価D）・与信限度額超過 */
+function genRisk(companyId){
+  const g=payGrade(companyId,'ar'), over=creditOver(companyId);
+  if(g.g!=='D' && !over) return '';
+  const s=dunStatus(companyId);
+  return `<div style="font-size:11px;color:var(--danger);margin-top:2px;">${IC.warn}
+    ${g.g==='D'?`延滞 ${moneyPlain(s.amount)}円（最長${s.maxDays}日）`:''}${g.g==='D'&&over?' ・ ':''}${over?'与信限度額を超えています':''}</div>`;
+}
 function genGo(){
   if(!GEN_CTX||!GEN_CTX.targets.length){ toast('作成する対象がありません。','err'); return; }
   const picked=[...document.querySelectorAll('.genck:checked')].map(c=>GEN_CTX.targets[Number(c.dataset.i)]);
   if(!picked.length){ toast('対象を選んでください。','err'); return; }
+  /* 止めはしない（請求するかは人が決める）。ただし、分かったうえで作ってもらう */
+  const risky=picked.filter(t=>payGrade(t.company.id,'ar').g==='D' || creditOver(t.company.id));
+  if(risky.length && !confirm(`次の取引先は 長い延滞 か 与信限度額超過 があります：\n\n${risky.map(t=>'・'+t.company.name).join('\n')}\n\nそれでも請求書を作りますか？`)) return;
   let n=0;
   picked.forEach(t=>{
     const rec={ companyId:t.company.id, bookMonth:GEN_CTX.ym, issueDate:'', status:'作成中',
@@ -4098,6 +4122,230 @@ ${'<scr'+'ipt>'}window.onload=function(){ setTimeout(function(){ window.print();
 }
 
 /* ============================================================================
+   督促 — 「今日、誰に、何をするか」と「やったことの記録」
+   ----------------------------------------------------------------------------
+   利用者の指示（2026-09-14）: 支払いが遅い会社への警告の仕組みを作る。
+
+   いままで足りなかったもの（相談の結果）:
+     ① やったことが残らない → 同じ会社に2人が電話する／誰も電話しない
+     ② いつ何をするかの決まりが無い → 各自の記憶まかせ
+     ③ 「払います」と言われた日を過ぎても 誰も気づかない
+   そこで:
+   ・対応記録（collectionLogs）… いつ・どうやって（電話・メール・訪問）・何を話したか・
+     入金の約束日と額・次に対応する日
+   ・段階（期日からの日数。基本設定で変えられる）
+       督促1 期日＋1日  やさしいお知らせ（メール）
+       督促2 期日＋7日  再度のお願い・入金予定日を聞く（メール）
+       督促3 期日＋30日 電話・責任者へ（最終のお願い）
+   ・督促キュー … 今日やるべき会社を、急ぐ順に。1押しで記録、1押しで その段階のメール
+   ・メールを送ったら、それ自体を対応記録に自動で残す（記録の手間を増やさない）
+   ★ お客様へ自動では送りません。送るのは人（確認画面つき）。
+   ★ 遅れの判断は 調整後の期日（effDue）。土日祝で払いが翌営業日になる会社を責めない。
+   ========================================================================== */
+const DUN_METHODS = ['電話','メール','訪問','郵送','その他'];
+function dunDays(){
+  const d=(DB.settings && DB.settings.dunning) || {};
+  return { d1: num(d.d1)||1, d2: num(d.d2)||7, d3: num(d.d3)||30 };
+}
+const DUN_STAGE = [
+  { n:0, label:'—', cls:'b-gray' },
+  { n:1, label:'督促1', cls:'b-amber', note:'やさしいお知らせ', tpl:'d-ar-remind',  method:'メール' },
+  { n:2, label:'督促2', cls:'b-amber', note:'再度のお願い・入金予定日を聞く', tpl:'d-ar-remind2', method:'メール' },
+  { n:3, label:'督促3', cls:'b-red',   note:'電話・責任者へ（最終のお願い）', tpl:'d-ar-remind3', method:'電話' },
+];
+function dunLogs(companyId){
+  return (DB.collectionLogs||[]).filter(x=>x && String(x.companyId)===String(companyId))
+    .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+}
+/** 1社の督促の状態。「今日やること（todo）」まで決める。 */
+function dunStatus(companyId){
+  const t=today(), D=dunDays();
+  const overdue=openInvoices().filter(i=>String(i.companyId)===String(companyId) && isOverdue(i));
+  const amount=overdue.reduce((s,i)=>s+balanceOfInvoice(i),0);
+  const maxDays=overdue.reduce((m,i)=>Math.max(m, daysOverdue(i)),0);
+  const oldestDue=overdue.map(effDue).sort()[0]||'';
+  const stage = !overdue.length ? 0 : (maxDays>=D.d3 ? 3 : (maxDays>=D.d2 ? 2 : (maxDays>=D.d1 ? 1 : 0)));
+  const logs=dunLogs(companyId), last=logs[0]||null;
+  const c=findById('companies',companyId)||{};
+
+  /* 約束: いちばん新しい「約束日つき」の記録。約束した日以降の入金で 守られたかを見る */
+  const pl=logs.find(x=>x.promiseDate);
+  let promise=null;
+  if(pl){
+    const paid=(DB.payments||[]).filter(p=>p.status!=='取消' && String(p.companyId)===String(companyId)
+      && p.date && p.date>=(pl.date||'') && p.date<=pl.promiseDate).reduce((s,p)=>s+num(p.amount)+num(p.fee),0);
+    const want=num(pl.promiseAmount);
+    const kept = (want? paid>=want : paid>0) || !overdue.length;
+    promise={ date:pl.promiseDate, amount:want, paid, state: kept? 'kept' : (pl.promiseDate<t ? 'broken' : 'waiting'), log:pl };
+  }
+  /* その段階に入った日（最も古い延滞の期日＋段階の日数） */
+  const stageStart = stage && oldestDue ? addDays(oldestDue, [0,D.d1,D.d2,D.d3][stage]) : '';
+  const actedSinceStage = !!(stageStart && logs.some(x=>(x.date||'')>=stageStart));
+
+  let todo=null;
+  if(promise && promise.state==='broken' && overdue.length)
+    todo={ rank:5, cls:'b-red', text:`約束日（${promise.date}）を過ぎても入金がありません → 電話`, method:'電話', stage:Math.max(stage,2) };
+  else if(last && last.nextDate && last.nextDate<=t && overdue.length && !(promise && promise.state==='waiting'))
+    todo={ rank:4, cls:'b-amber', text:`対応予定日（${last.nextDate}）です`, method:(last.method||'電話'), stage };
+  else if(stage && !actedSinceStage && !(promise && promise.state==='waiting'))
+    todo={ rank:stage, cls:DUN_STAGE[stage].cls, text:`${DUN_STAGE[stage].label}：${DUN_STAGE[stage].note}`, method:DUN_STAGE[stage].method, stage };
+
+  return { companyId, company:c, overdue, amount, maxDays, oldestDue, stage, logs, last, promise, todo,
+    owner:c.owner||'', grade:payGrade(companyId,'ar'), creditOver: creditOver(companyId) };
+}
+/** 与信限度額を超えているか（限度額を入れていない会社は false） */
+function creditOver(companyId){
+  const c=findById('companies',companyId);
+  const lim=num(c && c.creditLimit);
+  return lim>0 && arBalanceOf(companyId) > lim;
+}
+/** 督促キューに出す会社（延滞がある or 約束待ち）。今日やる会社が先。 */
+function dunRows(){
+  const ids=new Set();
+  openInvoices().forEach(i=>{ if(isOverdue(i)) ids.add(String(i.companyId)); });
+  (DB.collectionLogs||[]).forEach(x=>{ if(x && x.promiseDate && x.promiseDate>=addDays(today(),-60)) ids.add(String(x.companyId)); });
+  return [...ids].map(dunStatus).filter(r=>r.overdue.length || (r.promise && r.promise.state==='waiting'))
+    .sort((a,b)=> ((b.todo?b.todo.rank:0)-(a.todo?a.todo.rank:0)) || (b.maxDays-a.maxDays) || (b.amount-a.amount));
+}
+
+let DUN_FILTER='today', DUN_MINE=false;
+function setDunFilter(f){ DUN_FILTER=f; renderPage('dunning'); }
+function toggleDunMine(){ DUN_MINE=!DUN_MINE; renderPage('dunning'); }
+
+function viewDunning(){
+  const all=dunRows(), me=String((SESSION&&SESSION.email)||'').toLowerCase();
+  let rows=all;
+  if(DUN_FILTER==='today') rows=rows.filter(r=>r.todo);
+  if(DUN_MINE) rows=rows.filter(r=>String(r.owner).toLowerCase()===me);
+  const todoN=all.filter(r=>r.todo).length;
+  const broken=all.filter(r=>r.promise&&r.promise.state==='broken'&&r.overdue.length);
+  const waiting=all.filter(r=>r.promise&&r.promise.state==='waiting');
+  const canLog=canCreate('invoices')||canEdit('invoices');
+
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi ${todoN?'clickable':''}" onclick="setDunFilter('today')"><div class="lbl">今日やる</div>
+      <div class="num ${todoN?'minus':''}">${todoN}社</div><div class="sub">督促・約束切れ・予定日</div></div>
+    <div class="kpi"><div class="lbl">延滞（調整後の期日で）</div>
+      <div class="num ${all.some(r=>r.amount)?'minus':''}">${moneyPlain(all.reduce((s,r)=>s+r.amount,0))}</div>
+      <div class="sub">${all.filter(r=>r.overdue.length).length}社</div></div>
+    <div class="kpi"><div class="lbl">約束を過ぎた</div><div class="num ${broken.length?'minus':''}">${broken.length}社</div>
+      <div class="sub">払うと言われた日を過ぎて入金なし</div></div>
+    <div class="kpi"><div class="lbl">約束待ち</div><div class="num">${moneyPlain(waiting.reduce((s,r)=>s+(r.promise.amount||r.amount),0))}</div>
+      <div class="sub">${waiting.length}社</div></div>
+  </div>`;
+
+  const body=rows.map(r=>{
+    const st=DUN_STAGE[r.stage];
+    const pr=r.promise? `${esc(r.promise.date)}${r.promise.amount?`<div class="muted" style="font-size:10.5px;">${moneyPlain(r.promise.amount)}円</div>`:''}
+      <span class="badge ${r.promise.state==='broken'?'b-red':(r.promise.state==='kept'?'b-green':'b-blue')}">${r.promise.state==='broken'?'過ぎた':(r.promise.state==='kept'?'守られた':'待ち')}</span>` : '<span class="zero">—</span>';
+    const stageTpl = r.todo && r.todo.stage ? DUN_STAGE[r.todo.stage].tpl : (r.stage? DUN_STAGE[r.stage].tpl : 'd-ar-remind');
+    return `<tr onclick="coOpen('ar','${attr(r.companyId)}');goto('arco')" style="cursor:pointer;">
+      <td><b>${esc(r.company.name||'')}</b> <span class="badge ${r.grade.cls}">${esc(r.grade.g)}</span>
+        ${r.creditOver?'<span class="badge b-red" title="与信限度額を超えています">限度超過</span>':''}
+        <div class="muted" style="font-size:10.5px;">${r.owner?'担当 '+esc(String(r.owner).split('@')[0]):'<span style="color:var(--warning);">担当未設定</span>'}</div></td>
+      <td class="r num">${r.amount?`<b class="minus">${moneyPlain(r.amount)}</b><div class="muted" style="font-size:10.5px;">${r.overdue.length}件</div>`:'<span class="zero">0</span>'}</td>
+      <td class="r">${r.maxDays?`<b>${r.maxDays}日</b>`:'<span class="zero">—</span>'}</td>
+      <td><span class="badge ${st.cls}">${esc(st.label)}</span></td>
+      <td style="font-size:12px;">${r.last?`${esc(r.last.date||'')} ${esc(r.last.method||'')}<div class="muted" style="font-size:10.5px;">${esc(String(r.last.by||'').split('@')[0])}：${esc(String(r.last.content||'').slice(0,24))}</div>`:'<span style="color:var(--warning);">未対応</span>'}</td>
+      <td style="font-size:12px;">${pr}</td>
+      <td style="font-size:12px;">${r.todo?`<span class="badge ${r.todo.cls}">${esc(r.todo.text)}</span>`
+        : (r.promise&&r.promise.state==='waiting'?`<span class="muted">約束日まで待つ</span>`
+        : (r.last&&r.last.nextDate?`<span class="muted">${esc(r.last.nextDate)} に予定</span>`:'<span class="muted">対応済み</span>'))}</td>
+      <td class="r" style="white-space:nowrap;">${canLog?`<a class="pillbtn pill-new" onclick="event.stopPropagation();dunLogForm('${attr(r.companyId)}','${attr(r.todo?r.todo.method:'電話')}')">記録</a>`:''}
+        <a class="pillbtn pill-save" onclick="event.stopPropagation();mailCompose('ar','${attr(r.companyId)}','${attr(stageTpl)}')" title="${attr((DUN_STAGE[r.todo&&r.todo.stage||r.stage]||{}).label||'')}のメール">${IC.mail}</a></td></tr>`;
+  }).join('');
+
+  const D=dunDays();
+  return pageShell({ title:'督促（今日やること）', count:all.length, shown:rows.length,
+    sub:`延滞のある会社と、入金の約束を待っている会社。段階は 期日＋${D.d1}日／＋${D.d2}日／＋${D.d3}日（基本設定で変更）。期日は土日祝を調整した日で判断します。`,
+    tools:`<div class="seg">
+        <button class="${DUN_FILTER==='today'?'on':''}" onclick="setDunFilter('today')">今日やる（${todoN}）</button>
+        <button class="${DUN_FILTER==='all'?'on':''}" onclick="setDunFilter('all')">すべて（${all.length}）</button></div>
+      <div class="seg" style="margin-left:6px;"><button class="${DUN_MINE?'on':''}" onclick="toggleDunMine()">自分の担当だけ</button></div>`,
+    body: kpis + `<div class="table-wrap"><table class="stick1">
+      <thead><tr><th style="min-width:190px;">取引先</th><th class="r">延滞額</th><th class="r">最長</th><th>段階</th>
+        <th style="min-width:150px;">最後の対応</th><th style="min-width:110px;">入金の約束</th><th style="min-width:210px;">今日やること</th><th></th></tr></thead>
+      <tbody>${body || `<tr><td colspan="8" class="empty" style="padding:22px;">${DUN_FILTER==='today'?'今日やる督促はありません。':'延滞している会社はありません。'}</td></tr>`}</tbody></table></div>
+      <div class="fhelp" style="margin-top:8px;">「記録」＝電話や訪問の内容・入金の約束日を残す。「✉」＝その段階のメールを開く（送るとそのまま対応記録になります）。<br>
+        約束日を過ぎても入金が無い会社は、いちばん上に来ます。</div>` });
+}
+
+/* ---------- 対応を記録する ---------- */
+function dunLogForm(companyId, method){
+  const s=dunStatus(companyId), t=today();
+  openModal2(`<h3>対応を記録　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(s.company.name||'')}</span></h3>
+    <div class="mdsub">延滞 ${moneyPlain(s.amount)}円（${s.overdue.length}件・最長${s.maxDays}日）${s.stage?` ／ いまの段階 ${esc(DUN_STAGE[s.stage].label)}`:''}</div>
+    <div class="form-grid">
+      <div><label>日付</label><input type="date" id="dlDate" value="${attr(t)}"></div>
+      <div><label>方法</label><select id="dlMethod">${DUN_METHODS.map(m=>`<option ${m===(method||'電話')?'selected':''}>${esc(m)}</option>`).join('')}</select></div>
+      <div class="full"><label>内容 <span style="color:var(--danger)">*</span></label>
+        <textarea id="dlContent" rows="3" placeholder="例: 経理の佐藤様と話した。社内の承認待ちで今月末に払うとのこと"></textarea></div>
+      <div><label>入金の約束日</label><input type="date" id="dlPromise" onchange="dunDefaultNext()"></div>
+      <div><label>約束の額</label><input id="dlAmount" class="num" style="text-align:right;" value="${attr(moneyPlain(s.amount))}" oninput="fmtMoneyInput(this)"></div>
+      <div><label>次に対応する日</label><input type="date" id="dlNext" value="${attr(addDays(t,7))}">
+        <div class="fhelp">この日になると督促キューの「今日やる」に出ます。</div></div>
+    </div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal2()">キャンセル</button>
+      <button class="btn" onclick="dunLogSave('${attr(companyId)}')">記録する</button></div>`);
+}
+function dunDefaultNext(){
+  const p=document.getElementById('dlPromise').value, n=document.getElementById('dlNext');
+  if(p && n) n.value=addDays(p,1);        // 約束日の翌日に「入ったか」を確かめる
+}
+function dunLogSave(companyId, preset){
+  const g=id=>{ const el=document.getElementById(id); return el? el.value : ''; };
+  const rec = preset || { companyId, date:g('dlDate')||today(), method:g('dlMethod')||'電話', content:(g('dlContent')||'').trim(),
+    promiseDate:g('dlPromise')||'', promiseAmount:num(g('dlAmount')), nextDate:g('dlNext')||'' };
+  if(!preset && !rec.content){ toast('内容を入れてください（何を話したか・誰と）。','err'); return; }
+  const s=dunStatus(companyId);
+  rec.companyId=companyId;
+  rec.stage=s.stage;
+  rec.invoiceIds=s.overdue.map(i=>i.id);
+  rec.by=(SESSION&&SESSION.email)||'';
+  if(!rec.promiseDate) rec.promiseAmount=0;
+  commitRecord('collectionLogs', rec, {});
+  if(!preset){ closeModal2(); toast('記録しました。','ok'); }
+  renderPage(CURRENT_PAGE);
+}
+/** 取引先別の詳細に出す「督促・対応の記録」 */
+function dunPanel(companyId){
+  const s=dunStatus(companyId);
+  const canLog=canCreate('invoices')||canEdit('invoices');
+  return `<div class="panel"><div class="panel-hd"><b>督促・対応の記録</b>
+      ${s.stage?`<span class="badge ${DUN_STAGE[s.stage].cls}" style="margin-left:8px;">${esc(DUN_STAGE[s.stage].label)}</span>`:''}
+      ${s.todo?`<span class="badge ${s.todo.cls}" style="margin-left:6px;">${esc(s.todo.text)}</span>`:''}
+      ${canLog?`<button class="btn sm" style="margin-left:auto;" onclick="dunLogForm('${attr(companyId)}','${attr(s.todo?s.todo.method:'電話')}')">＋ 対応を記録</button>`:''}</div>
+    <div class="panel-bd" style="font-size:12.5px;line-height:1.8;">
+      ${s.promise?`<div style="margin-bottom:6px;">入金の約束：<b>${esc(s.promise.date)}</b>${s.promise.amount?` ／ ${moneyPlain(s.promise.amount)}円`:''}
+        <span class="badge ${s.promise.state==='broken'?'b-red':(s.promise.state==='kept'?'b-green':'b-blue')}">${s.promise.state==='broken'?'過ぎた（入金なし）':(s.promise.state==='kept'?'守られた':'待ち')}</span></div>`:''}
+      ${s.logs.length? s.logs.slice(0,10).map(x=>`<div style="border-top:1px dashed var(--border);padding:4px 0;">
+          <b>${esc(x.date||'')}</b> <span class="badge b-gray">${esc(x.method||'')}</span>
+          <span class="muted">${esc(String(x.by||'').split('@')[0])}${x.stage?' ・'+esc(DUN_STAGE[x.stage].label):''}</span><br>
+          ${esc(x.content||'')}${x.promiseDate?`<br><span class="muted">約束 ${esc(x.promiseDate)}${x.promiseAmount?' ／ '+moneyPlain(x.promiseAmount)+'円':''}</span>`:''}
+          ${x.nextDate?`<span class="muted">　次の対応 ${esc(x.nextDate)}</span>`:''}</div>`).join('')
+        : '<span class="muted">まだ記録がありません。</span>'}
+    </div></div>`;
+}
+/* ---------- 基本設定: 督促の段階 ---------- */
+function dunSettingsPanel(){
+  const D=dunDays(), ad=isAdmin();
+  return `<div class="panel"><div class="panel-hd"><b>督促の段階</b><span class="sub">期日（土日祝を調整した日）から何日で次の段階にするか</span>
+      ${ad?`<button class="btn sm" style="margin-left:auto;" onclick="dunSettingsSave()">保存</button>`:''}</div>
+    <div class="panel-bd"><div class="form-grid">
+      <div><label>督促1（やさしいお知らせ）</label><input id="dnD1" type="number" value="${D.d1}" ${ad?'':'disabled'}> 日後</div>
+      <div><label>督促2（再度のお願い）</label><input id="dnD2" type="number" value="${D.d2}" ${ad?'':'disabled'}> 日後</div>
+      <div><label>督促3（電話・責任者へ）</label><input id="dnD3" type="number" value="${D.d3}" ${ad?'':'disabled'}> 日後</div>
+    </div></div></div>`;
+}
+function dunSettingsSave(){
+  const d1=num(document.getElementById('dnD1').value), d2=num(document.getElementById('dnD2').value), d3=num(document.getElementById('dnD3').value);
+  if(!(d1>=1 && d2>d1 && d3>d2)){ toast('日数は 督促1 < 督促2 < 督促3 の順に、1日以上で入れてください。','err'); return; }
+  DB.settings=DB.settings||{}; DB.settings.dunning={d1,d2,d3};
+  PENDING.changed.settings=DB.settings; schedulePush();
+  toast('保存しました。','ok'); renderPage(CURRENT_PAGE);
+}
+
+/* ============================================================================
    メール（CRM と同じ作り: 各自の Gmail ＋ Google Apps Script）
    ----------------------------------------------------------------------------
    利用者の指示（2026-09-14）: 取引先別の画面から、CRM と同じようにメールを送れるように。
@@ -4118,9 +4366,15 @@ const MAIL_TPL_DEFAULT = [
   { id:'d-ar-send', side:'ar', name:'請求書送付のご案内',
     subject:'【{{自社名}}】{{次回請求月}}分 ご請求書送付のご案内',
     body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{次回請求月}}分のご請求書をお送りいたします。\n\n　今回ご請求額：{{次回請求額}}円（繰越額 {{繰越額}}円を含みます）\n　お支払期限：各ご請求書に記載のとおり\n\nお振込先：{{振込先}}\n\nご確認のほど、よろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
-  { id:'d-ar-remind', side:'ar', name:'ご入金のお願い（期日超過）',
+  { id:'d-ar-remind', side:'ar', name:'督促1　ご入金のお知らせ（期日超過）',
     subject:'【{{自社名}}】ご入金のご確認のお願い',
     body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n下記のご請求につきまして、本日（{{本日}}）時点でご入金の確認ができておりません。\n\n{{未回収明細}}\n　合計：{{未回収額}}円\n\nお手数ですがご確認のうえ、お手続きをお願いいたします。\n行き違いでお支払い済みの場合は、ご容赦ください。\n\nお振込先：{{振込先}}\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ar-remind2', side:'ar', name:'督促2　再度のお願い（入金予定日のご連絡）',
+    subject:'【{{自社名}}】【再送】ご入金のお願い',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n先日ご連絡いたしました下記のご請求につきまして、本日（{{本日}}）時点でもご入金の確認ができておりません。\n\n{{未回収明細}}\n　合計：{{未回収額}}円\n\nお手数ですが、ご入金の予定日をご返信いただけますでしょうか。\n行き違いでお支払い済みの場合は、ご容赦ください。\n\nお振込先：{{振込先}}\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ar-remind3', side:'ar', name:'督促3　最終のお願い',
+    subject:'【{{自社名}}】【重要】お支払いについてのお願い',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\nこれまで複数回ご連絡いたしましたが、下記のご請求についてご入金の確認ができておりません。\n\n{{未回収明細}}\n　合計：{{未回収額}}円\n\n大変恐れ入りますが、至急お手続きをお願いいたします。\nご事情がおありの場合は、お支払いの方法や時期についてご相談させていただきたく、ご連絡をお待ちしております。\n\nお振込先：{{振込先}}\n\n{{自社名}}\n{{差出人}}' },
   { id:'d-ar-thanks', side:'ar', name:'ご入金確認のお礼',
     subject:'【{{自社名}}】ご入金確認のご連絡',
     body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{最終入金日}}に {{最終入金額}}円 のご入金を確認いたしました。\n誠にありがとうございます。\n\n引き続きよろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
@@ -4175,11 +4429,11 @@ function mailHistory(side, companyId){
 }
 
 let MAIL_CTX=null, _mailFocus='mailBody';
-function mailCompose(side, companyId){
+function mailCompose(side, companyId, tplId){
   const c=findById('companies',companyId); if(!c) return;
   const tpls=mailTemplates(side);
   const pin=mailPinned(side);
-  const tpl=tpls.find(t=>t.id===pin) || tpls[0];
+  const tpl=(tplId && tpls.find(t=>t.id===tplId)) || tpls.find(t=>t.id===pin) || tpls[0];
   const vars=mailVars(side, companyId);
   MAIL_CTX={ side, companyId, tplId: tpl? tpl.id:'', to: c.billEmail||c.email||'', cc:(SESSION&&SESSION.email)||'',
     subject: tpl? mailFill(tpl.subject,vars):'', body: tpl? mailFill(tpl.body,vars):'', files:null };
@@ -4334,6 +4588,9 @@ async function mailSend(){
     await fetch(gas,{ method:'POST', mode:'no-cors', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     commitRecord('mailLog', { side:m.side, companyId:m.companyId, to:m.to, cc:m.cc, subject:m.subject,
       files:chosen.length, template:m.tplId||'', by:(SESSION&&SESSION.email)||'', at:new Date().toISOString() }, {});
+    /* 回収のメールは、送ったこと自体が「対応」。記録の手間を増やさないよう自動で残す */
+    if(m.side==='ar') dunLogSave(m.companyId, { date:today(), method:'メール', content:'メール送信：'+m.subject+(chosen.length?`（添付${chosen.length}）`:''),
+      promiseDate:'', promiseAmount:0, nextDate:addDays(today(),7) });
     closeModal();
     toast('送信を依頼しました。届いたかどうかは、あなたの Gmail の「送信済み」で確かめられます。','ok');
     renderPage(CURRENT_PAGE);
@@ -4540,7 +4797,8 @@ function viewCoList(side){
       <td class="r num plus">${r.paid?moneyPlain(r.paid):'<span class="zero">—</span>'}</td>
       <td class="r num">${r.bal>0?`<b class="minus">${moneyPlain(r.bal)}</b>`:'<span class="zero">0</span>'}</td>
       <td class="r num">${r.over>0?`<b style="color:var(--purple);">${moneyPlain(r.over)}</b>`:'<span class="zero">—</span>'}</td>
-      <td><span class="badge ${r.grade.cls}" title="${attr(r.grade.why)}" style="min-width:26px;text-align:center;">${esc(r.grade.g)}</span></td>
+      <td><span class="badge ${r.grade.cls}" title="${attr(r.grade.why)}" style="min-width:26px;text-align:center;">${esc(r.grade.g)}</span>
+        ${side==='ar'&&creditOver(r.c.id)?'<span class="badge b-red" title="与信限度額を超えています">限度超過</span>':''}</td>
       <td class="r">${r.perf.rate==null?'<span class="zero">—</span>':r.perf.rate+'%'}</td>
       <td class="r">${r.perf.avgLate?r.perf.avgLate+'日':'<span class="zero">—</span>'}</td>
       ${side==='ar'?`<td class="r num"><b>${moneyPlain(r.next.total)}</b><div class="muted" style="font-size:10px;">${esc(r.next.ym)}分</div></td>`:''}
@@ -4626,7 +4884,7 @@ function viewCoDetail(side, companyId){
     body:`<div class="printonly" style="margin-bottom:10px;">
         <div style="font-size:17px;font-weight:700;">取引明細書・残高確認書</div>
         <div style="font-size:12px;">${esc(c.name||'')} 御中　／　${fyLabel(CUR_FY)}　／　発行日 ${today()}　／　BIGLIGHT株式会社</div></div>
-      ${head}${warn}${next}${mailHistoryPanel(side, c.id)}${tabs}${body}` });
+      ${head}${warn}${side==='ar'?dunPanel(c.id):''}${next}${mailHistoryPanel(side, c.id)}${tabs}${body}` });
 }
 function exportCsvCo(side){
   const R=coRange();
@@ -5759,6 +6017,20 @@ function notifItems(){
   if(soonAr.length) out.push({ sev:'info', key:'ar-soon', label:'7日以内が入金期日の請求',
     n:soonAr.length, amount:soonAr.reduce((s,i)=>s+balanceOfInvoice(i),0), go:"goto('invoices')" });
 
+  /* ── 督促: 今日やること（約束切れ・予定日・次の段階） ── */
+  const dr=dunRows().filter(r=>r.todo);
+  if(dr.length){
+    const me=String((SESSION&&SESSION.email)||'').toLowerCase();
+    const mine=dr.filter(r=>String(r.owner).toLowerCase()===me).length;
+    const brk=dr.filter(r=>r.todo.rank===5).length;
+    out.push({ sev: brk?'danger':'warn', key:'dunning', label:'今日やる督促', n:dr.length, go:"goto('dunning')",
+      sub:(brk?`入金の約束を過ぎた会社 ${brk}社`:'')+(mine?`${brk?' ・ ':''}あなたの担当 ${mine}社`:'') || dr.slice(0,3).map(r=>r.company.name).join('、') });
+  }
+  /* ── 与信限度額を超えた取引先 ── */
+  const cov=(DB.companies||[]).filter(c=>!c._gone && creditOver(c.id));
+  if(cov.length) out.push({ sev:'warn', key:'credit', label:'与信限度額を超えた取引先', n:cov.length, go:"goto('arco')",
+    sub:cov.slice(0,3).map(c=>`${c.name}（${moneyPlain(arBalanceOf(c.id))}／限度${moneyPlain(c.creditLimit)}）`).join('、') });
+
   /* ── 入金したが、どの請求にも結び付けていないお金 ── */
   const un=unAllocated();
   if(un>0) out.push({ sev:'warn', key:'unalloc', label:'未消込の入金',
@@ -5909,6 +6181,8 @@ const PAGE_GUIDE = {
                 effect:'入金期日・年齢表・資金繰り・台帳の色、すべてのもとになります' },
   vendors:    { step:'①', what:'BIGLIGHTが<b>サービスを受けている会社</b>（大家・電力・水道・通信・清掃・外注）と、その締日・支払サイト・支払日',
                 effect:'費目や物件の「支払先」で選べるようになり、支払期日が自動で決まります' },
+  dunning:    { step:'⑤', what:'今日やる督促を上から。電話・訪問は「記録」で <b>内容と入金の約束日</b>を残す。メールは「✉」でその段階の文面が開く（送ると自動で記録）',
+                effect:'約束日を過ぎた会社・予定日の会社・次の段階に入った会社が、毎日ここに出ます' },
   arco:       { step:'⑥', what:'（入力なし）期間に動いた会社の一覧 → 押すと その会社の 評価・未回収・過入金・<b>次回請求額（繰越式）</b>・履歴・タイムライン。メールもここから',
                 effect:'「どこから、いくら回収すべきか」がこの1枚で分かります' },
   apco:       { step:'⑦', what:'（入力なし）期間に動いた支払先の一覧 → 押すと その会社の 未払・過払・評価・履歴・タイムライン',
@@ -6010,7 +6284,7 @@ const dint = (lo,hi)=>lo+Math.floor(drnd()*(hi-lo+1));
 const dvar = (base,pct)=>Math.round(base*(1+(drnd()*2-1)*pct)/100)*100;
 
 function demoCount(){
-  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','accounts','workers','assignments'];
+  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','accounts','workers','assignments','collectionLogs'];
   return keys.reduce((n,k)=>n+((DB[k]||[]).filter(x=>x&&x.demo).length),0);
 }
 function demoPanel(){
@@ -6060,6 +6334,18 @@ async function demoSeed(){
     clean:put('companies',{name:DEMO_TAG+'クリーンサポート', kind:'仕入先', closingDay:31, paySite:1, payDay:25, taxCat:'課税10%', note:'寮の共用部清掃'}),
     tsu:  put('companies',{name:DEMO_TAG+'グローバル通訳サービス', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'通訳・翻訳（売上原価）'}),
   };
+
+  /* ── 督促の見本: 担当者・与信限度額・対応の記録（約束を過ぎた会社／守った会社） ── */
+  const me=(SESSION&&SESSION.email)||'';
+  [cust[0],cust[1],cust[2]].forEach(c=>{ c.owner=me; markDirty('companies',c); });
+  cust[2].creditLimit=250000; markDirty('companies',cust[2]);
+  const DEMO_LOGS=[
+    { companyId:cust[2].id, date:addDays(t,-25), method:'メール', content:'督促1のメールを送信', nextDate:addDays(t,-18) },
+    { companyId:cust[2].id, date:addDays(t,-12), method:'電話', content:'経理の高橋様。社内の承認が遅れている、今月10日までに払うとのこと',
+      promiseDate:addDays(t,-4), promiseAmount:150000, nextDate:addDays(t,-3) },
+    { companyId:cust[1].id, date:addDays(t,-6), method:'電話', content:'鈴木様。振込を忘れていた、今週中に払うとのこと',
+      promiseDate:addDays(t,2), promiseAmount:181500, nextDate:addDays(t,3) },
+  ];
 
   /* ── 請求ルール（月額固定。人数×単価は使わなくなりました） ── */
   put('billingRules',{companyId:cust[0].id, kind:'fixed', name:'支援委託料', unitPrice:120000, accountCode:'4100', taxCat:'課税10%', active:true});
@@ -6213,6 +6499,7 @@ async function demoSeed(){
       put('budgets',{fy, mIndex:i, accountCode:'6210', amount: 95000});
     });
   });
+  DEMO_LOGS.forEach(l=>put('collectionLogs', Object.assign({ by:me, stage:0, invoiceIds:[] }, l)));
   if(!DB.settings) DB.settings={};
   if(!num(DB.settings.cashStart)){ DB.settings.cashStart=3500000; PENDING.changed.settings=DB.settings; }
 
@@ -6227,7 +6514,7 @@ async function demoSeed(){
 async function demoRemove(quiet){
   if(!isAdmin()){ toast('管理者だけが消せます。','err'); return; }
   /* 消す順番: 使っている側から先に。科目は最後（費目・伝票が参照しているため） */
-  const keys=['payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies','accounts'];
+  const keys=['collectionLogs','payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies','accounts'];
   const total=demoCount();
   if(!total){ toast('デモデータはありません。','ok'); return; }
   if(!quiet && !confirm(`デモデータ ${total}件 を全部消します。\n【デモ】の印が付いた行だけを消すので、本物のデータは残ります。\n\nよろしいですか？`)) return;
@@ -6868,6 +7155,8 @@ function viewSettings(){
         <span class="muted" style="font-size:12px;">四半期：Q1=8〜10月／Q2=11〜1月／Q3=2〜4月／Q4=5〜7月</span></div></div></div>
 
     ${selfInfoPanel()}
+
+    ${dunSettingsPanel()}
 
     ${isAdmin()? demoPanel() : ''}
 

@@ -101,7 +101,8 @@ export const COLLECTIONS: CollectionDef[] = [
 /* 外に出さない表（意図して台帳に載せていない）。test/apiv1.js の足し忘れ検出はこれを除く。
    mailLog … 送った相手のメールアドレスと件名。AI や外部システムに渡す理由が無い
    mailTemplates … 社内の文面のひな形 */
-export const NOT_EXPOSED = ['mailLog', 'mailTemplates']
+/* collectionLogs … 督促で誰と何を話したか（相手の事情・約束）。社外に出す理由が無い */
+export const NOT_EXPOSED = ['mailLog', 'mailTemplates', 'collectionLogs']
 
 export const COLLECTION_IDS = COLLECTIONS.map(c => c.id)
 export const collectionById = (id: any) => COLLECTIONS.find(c => c.id === String(id || '')) || null
