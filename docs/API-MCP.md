@@ -29,43 +29,34 @@
 
 ---
 
-## 2. 開ける手順（VPS で1回だけ）
+## 2. 開ける手順（VPS で1行）
 
-Termius などで VPS に入り、**そのまま貼り付け**てください。置き場所は動いているコンテナ自身に聞くので、
-ディレクトリ名を覚えていなくて大丈夫です。
+Termius などで **VPS に入ってから**、次の1行だけです。
+（手元のMacで実行しても、スクリプトが自分で気づいて止まります）
 
 ```bash
-# ① 予実のリポジトリへ移動（パスを覚えなくていい）
-DIR=$(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
-cd "$DIR" && pwd
-
-# ② .env を控えてから書き換える（秘密はこの中で作る。画面にも GitHub にも出ません）
-cp -a .env ".env.bak-$(date +%Y%m%d-%H%M%S)"
-SECRET=$(openssl rand -hex 32)
-grep -vE '^(API_V1_ENABLED|API_V1_PUBLIC_BASE|MCP_ENABLED|MCP_PUBLIC_URL|MCP_TOKEN_SECRET|MCP_OAUTH_)' .env > .env.new
-cat >> .env.new <<EOF
-API_V1_ENABLED=true
-API_V1_PUBLIC_BASE=https://finance.biglight.jp
-MCP_ENABLED=true
-MCP_PUBLIC_URL=https://finance.biglight.jp/mcp
-MCP_TOKEN_SECRET=$SECRET
-MCP_OAUTH_REDIRECT_URIS=https://chatgpt.com/connector_platform_oauth_redirect
-MCP_OAUTH_REDIRECT_PREFIXES=https://chatgpt.com/connector/oauth/
-MCP_OAUTH_ALLOW_DCR=true
-EOF
-mv .env.new .env && chmod 600 .env && unset SECRET
-
-# ③ api だけ作り直す（env_file はコンテナを作るときにしか読まれません。再起動では効きません）
-docker compose up -d --force-recreate api
-docker compose logs api --tail 20 | grep BOOT
-#   [BOOT] API v1: 有効（読み取り専用）
-#   [BOOT] MCP: 有効 https://finance.biglight.jp/mcp
+cd "$(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')" \
+  && bash vps/enable-api-mcp.sh
 ```
 
-> nginx の設定（`/mcp` と `/.well-known/oauth-*`）は `deploy.sh` が毎回読み直させます。
-> 手で触る必要はありません。
+スクリプトがやること（何度実行しても同じ結果になります）:
 
-**外から見て確かめる（4本とも通ること）**
+1. ここが本番の 予実 のディレクトリか確かめる（違えば何もせず終了）
+2. `.env` を控える → `API_V1_*` と `MCP_*` を書き換える
+   `MCP_TOKEN_SECRET` は**この中で作り**、画面にもログにも GitHub にも出しません
+3. `api` コンテナだけ作り直す（`env_file` はコンテナを「作るとき」にしか読まれません。
+   `restart` では変わりません）
+4. **外から4本叩いて確かめる**。トークン無しの `tools/call` が 401 でなければ失敗にして、
+   元に戻し方を表示します
+
+| したいこと | 実行するもの |
+|---|---|
+| 有効にする | `bash vps/enable-api-mcp.sh` |
+| 止める（404 に戻す） | `bash vps/enable-api-mcp.sh off` |
+| 全員のAIを今すぐ切る | `bash vps/enable-api-mcp.sh rotate` |
+| 1人だけ切る | 画面で その人の鍵を「失効」 |
+
+**スクリプトがやる確認（手で確かめたいとき用）**
 
 ```bash
 curl -s https://finance.biglight.jp/api/v1/health                       # {"status":"ok"...}
@@ -76,11 +67,9 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://finance.biglight.jp/mcp
 # → 401（トークン無しで tools/call は必ず断られる。ここが 200 なら止めて調べること）
 ```
 
-**閉じ方**
-- 全部止める: `.env` の2行を `false` にして `docker compose up -d --force-recreate api`。
-  ルートが 404 に戻るだけで、データも鍵も記録も何も変わりません。
-- 1人だけ止める: 画面で その人の鍵を **失効**。
-- 全員のAIを今すぐ切る: `MCP_TOKEN_SECRET` を作り直す（発行済みトークンが全部無効になります）。
+**止めたときに何が起きるか**
+ルートが 404 に戻るだけです。データも、発行済みの鍵も、範囲も、連携ログも、何も変わりません。
+また `on` にすれば、そのまま元どおり使えます。
 
 ---
 
