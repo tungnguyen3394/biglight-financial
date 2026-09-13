@@ -259,13 +259,15 @@ ctx.__x.SECTIONS.forEach(sec=>{
 eq('ガイドは全画面を載せる（書き忘れ検出）',
   ctx.__x.SECTIONS.flatMap(s=>s.tabs.map(t=>t.id)).filter(id=>!ctx.__x.PAGE_GUIDE[id]), []);
 eq('メニューは7項目（特定技能者を外した）', ctx.__x.SECTIONS.length, 7);
+/* 支払先は「BIGLIGHTがサービスを受けている会社」＝得意先とは別の入口 */
+eq('支払先のタブがある', ctx.__x.SECTIONS.find(x=>x.id==='sec-co').tabs.some(t=>t.id==='vendors'), true);
 try{ const h=ctx.guidePromise(); const ok=h.length>200;
   console.log((ok?'  ok  ':'  NG  ')+'数字の約束  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
 
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',
- 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging','viewProperties'].forEach(fn => {
+ 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging','viewProperties','viewAccounts','viewKbunrui'].forEach(fn => {
   try {
     const h = ctx[fn]();
     const ok = typeof h === 'string' && h.length > 80;
@@ -283,6 +285,21 @@ console.log('\n― 画面が落ちずに描けるか ―');
     ok?pass++:fail++;
   }catch(e){ console.log(`  NG  viewLedger(${side}/${tab})  →  `+e.message); fail++; }
 });
+
+console.log('\n― 見せる画面（権限） ―');
+/* ★ 費用の情報を扱う画面なので、「見せない」が本当に効くことを確かめる */
+_db.userPerms = { 'staff@biglight.jp': { expenses:{v:0}, properties:{v:0}, kbunrui:{v:0} } };
+ctx.__x.setSession({ email:'staff@biglight.jp', role:'Staff', status:'active' });
+eq('表示を外した画面は見えない', ctx.canSee('expenses'), false);
+eq('物件も見えない', ctx.canSee('properties'), false);
+eq('外していない画面は見える', ctx.canSee('invoices'), true);
+eq('メニューにも出ない', ctx.__x.SECTIONS.find(x=>x.id==='sec-cost').tabs.filter(t=>ctx.canSee(t.id)).length, 0);
+/* 同じ台帳を別の入口から見る画面は、権限も同じ（支払先＝取引先の権限） */
+eq('支払先は取引先の権限に従う', ctx.canSee('vendors'), ctx.canSee('companies'));
+eq('権限の表は全画面を並べる', ctx.permPages().length>=14, true);
+_db.userPerms = {};
+ctx.__x.setSession({ email:'test@biglight.jp', role:'Admin', status:'active' });
+eq('管理者は全部見える', ctx.__x.SECTIONS.every(sec=>sec.tabs.every(t=>ctx.canSee(t.id))), true);
 
 console.log('\n― 勘定科目の階層（大・中・小） ―');
 eq('初期セット前は階層なし', ctx.__x.accTreeReady(), false);
@@ -354,6 +371,8 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   eq('デモで販管費が立つ（家賃・光熱費）', ctx.actualSeries(2025,'sga').some(v=>v>0), true);
 
   /* 画面がデモの量でも落ちないか（少量の作り物より、こちらが本番に近い） */
+  eq('支払先の一覧は仕入先だけ', ctx.viewCompanies('vendor').includes('丸山不動産'), true);
+  eq('支払先の一覧に得意先は出ない', ctx.viewCompanies('vendor').includes('さくら製作所'), false);
   ['viewDashboard','viewInvoices','viewReceipts','viewAging','viewBills','viewPayouts','viewApAging',
    'viewCashflow','viewExpenses','viewProperties','viewCompanies','viewYojitsu','viewMikomi'].forEach(fn=>{
     try{ const h=ctx[fn](); const ok=typeof h==='string'&&h.length>80;

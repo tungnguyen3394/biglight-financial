@@ -132,6 +132,22 @@ async function writeAudit(email: string, name: string, base: any, changed: any, 
   } catch (e: any) { console.error('writeAudit:', e?.message) }
 }
 
+/** 読むのも「承認された人」だけ。
+    ★ 2026-09-13: 以前は @biglight.jp なら誰でも /state を読めました。この画面には
+      取引先ごとの金額・家賃・給与が入っているので、承認前の人には1行も渡しません。
+      /me だけは通します（本人に「承認待ちです」と伝えるため）。 */
+async function requireActive(req: any, res: any): Promise<{ email: string; role: string } | null> {
+  const email = await verifyBearer(req)
+  if (!email) { res.status(401).json({ error: 'unauthorized' }); return null }
+  const p = await profileOf(email)
+  if (p.status !== 'active') {
+    res.status(403).json({ error: 'account-' + (p.status || 'unknown'), status: p.status,
+      message: 'このアカウントはまだ承認されていません。管理者（システム › ユーザー）にご連絡ください。' })
+    return null
+  }
+  return { email, role: p.role }
+}
+
 /* ===================== Sức khoẻ ===================== */
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 app.get('/version', (_req, res) => res.json({ apiContract: API_CONTRACT, minClientContract: MIN_CLIENT_CONTRACT, rev: globalRev, epoch: stateEpoch }))
@@ -174,8 +190,7 @@ app.get('/me', async (req, res) => {
 })
 
 app.get('/users', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const r = await pool.query(
     `SELECT email,name,picture,role,status,created_at,last_login,last_seen FROM profiles ORDER BY created_at`)
   res.json({ items: r.rows })
@@ -201,23 +216,20 @@ app.put('/users', async (req, res) => {
 })
 
 app.get('/login-log', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const r = await pool.query('SELECT at,email,ip,user_agent FROM login_log ORDER BY at DESC LIMIT 200')
   res.json({ items: r.rows })
 })
 
 /* ===================== ĐỌC dữ liệu ===================== */
 app.get('/state', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const r = await pool.query('SELECT data FROM app_state WHERE id=1')
   res.json({ data: r.rows[0]?.data || {}, rev: globalRev, epoch: stateEpoch, apiContract: API_CONTRACT })
 })
 
 app.get('/state-diff', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const since = Number(req.query.since || 0)
   if (since >= globalRev) return res.json({ changed: {}, rev: globalRev, epoch: stateEpoch })
   const r = await pool.query('SELECT data FROM app_state WHERE id=1')
@@ -373,6 +385,8 @@ app.put('/state', async (_req, res) => {
 app.get('/events', async (req, res) => {
   const email = await verifyBearer(req) || (req.query.token ? await verifyBearer({ headers: { authorization: 'Bearer ' + req.query.token } }) : null)
   if (!email) return res.status(401).end()
+  /* 承認前の人には通知も流さない（何が動いたかも情報のうち） */
+  if ((await profileOf(email)).status !== 'active') return res.status(403).end()
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders?.()
   res.write(`event: hello\ndata: ${JSON.stringify({ rev: globalRev, epoch: stateEpoch })}\n\n`)
@@ -383,10 +397,9 @@ app.get('/events', async (req, res) => {
 
 /* ===================== Nhật ký & khôi phục ===================== */
 app.get('/audit', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
-  const me = await profileOf(email)
-  const isAdmin = me.role === 'Admin'
+  const who = await requireActive(req, res); if (!who) return
+  const email = who.email
+  const isAdmin = who.role === 'Admin'
   const { entity, action, actor, from, to } = req.query as any
   const w: string[] = [], p: any[] = []
   if (!isAdmin) { p.push(email); w.push(`actor_email=$${p.length}`) }         // ai không phải Admin chỉ thấy của mình
@@ -402,15 +415,13 @@ app.get('/audit', async (req, res) => {
 })
 
 app.get('/sync-log', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const r = await pool.query('SELECT at,actor_email,result,reason,ip,contract,detail FROM sync_log ORDER BY at DESC LIMIT 200')
   res.json({ items: r.rows })
 })
 
 app.get('/state-history', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const r = await pool.query('SELECT id,at,actor_email,reason,counts FROM app_state_history ORDER BY at DESC LIMIT 100')
   res.json({ items: r.rows })
 })
@@ -476,8 +487,7 @@ if (API_V1_ENABLED) {
 
 /* ===================== CRM連携 ===================== */
 app.get('/crm/status', async (req, res) => {
-  const email = await verifyBearer(req)
-  if (!email) return res.status(401).json({ error: 'unauthorized' })
+  const me = await requireActive(req, res); if (!me) return
   const r = await pool.query('SELECT at,source,actor,ok,stats,message FROM crm_sync_log ORDER BY at DESC LIMIT 30')
   res.json({
     configured: !!(process.env.CRM_API_BASE && process.env.CRM_EXPORT_KEY),

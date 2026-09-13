@@ -66,13 +66,17 @@ export async function loginWithToken(token: string, ip: string, ua: string) {
   }
   const info = v.info
   const isAdmin = ADMIN_EMAILS.includes(info.email)
-  // Người trong domain được duyệt sẵn (active). Ngoài domain đã bị chặn ở trên.
+  /* ★ 2026-09-13: 新しい人は「閲覧のみ・承認待ち」から始めます（以前は Staff・有効でした）。
+     @biglight.jp なら誰でも入れる状態だと、入社したばかりの人でも
+     取引先の金額・家賃・給与の行まで最初から全部見えてしまいます。
+     ここは費用の情報を扱う画面なので、管理者が「見せる画面」を決めてから開けます。
+     ※ すでにある人は変わりません（ON CONFLICT は名前と最終ログインしか更新しない）。 */
   await pool.query(
     `INSERT INTO profiles (email, name, picture, role, status, last_login)
      VALUES ($1,$2,$3,$4,$5, now())
      ON CONFLICT (email) DO UPDATE
        SET name=EXCLUDED.name, picture=EXCLUDED.picture, last_login=now()`,
-    [info.email, info.name || '', info.picture || '', isAdmin ? 'Admin' : 'Staff', 'active'])
+    [info.email, info.name || '', info.picture || '', isAdmin ? 'Admin' : 'Viewer', isAdmin ? 'active' : 'pending'])
   // Admin cấu hình trong env LUÔN được nâng lên Admin/active (khoá nhầm thì vẫn vào lại được)
   if (isAdmin) await pool.query(`UPDATE profiles SET role='Admin', status='active' WHERE email=$1`, [info.email])
   await pool.query('INSERT INTO login_log(email, ip, user_agent) VALUES($1,$2,$3)', [info.email, ip, ua])
