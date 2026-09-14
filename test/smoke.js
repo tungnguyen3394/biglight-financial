@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -447,6 +447,89 @@ console.log('\n― 添付ファイル（画面側） ―');
   ctx.__x.setAttCounts({});
 }
 
+console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月末残高 ―');
+/* ★ 2026-09-14: 請求書の状態・消込に頼らず、請求と入金の「月の合計」だけで残高を出す。
+   日付はすべて過去（2025年）なので、今日がいつでも結果は変わらない。 */
+{
+  const keep={ inv:_db.invoices.slice(), pay:_db.payments.slice(), co:_db.companies.slice() };
+  _db.invoices=[]; _db.payments=[];          // このブロックの伝票だけで数える
+  const co=id=>_db.companies.push({ id, name:'売掛テスト'+id, kind:'得意先', dueAdjust:'そのまま' });
+  const bill=(id,cid,ym,total,extra)=>_db.invoices.push(Object.assign({ id, companyId:cid, bookMonth:ym, issueDate:ym+'-25', status:'確定', total, items:[] }, extra||{}));
+  const pay=(id,cid,date,amount,extra)=>_db.payments.push(Object.assign({ id, companyId:cid, date, amount, allocations:[] }, extra||{}));
+  const M=(cid,ym)=>{ const r=ctx.arMonthly(cid,[ym])[0]; return [r.opening,r.billed,r.payment,r.closing]; };
+  ['K1','K2','K3','K4','K5','K6','K7','K8'].forEach(co);
+
+  bill('KI1','K1','2025-04',100000); pay('KP1','K1','2025-04-20',100000);
+  eq('Case1 前月0 ＋請求10万 −入金10万 → 残高0', M('K1','2025-04'), [0,100000,100000,0]);
+
+  bill('KI2','K2','2025-04',100000); pay('KP2','K2','2025-04-20',50000);
+  eq('Case2 前月0 ＋請求10万 −入金5万 → 残高5万', M('K2','2025-04'), [0,100000,50000,50000]);
+
+  bill('KI3a','K3','2025-03',50000); bill('KI3b','K3','2025-04',100000); pay('KP3','K3','2025-04-20',80000);
+  eq('Case3 前月5万 ＋請求10万 −入金8万 → 残高7万', M('K3','2025-04'), [50000,100000,80000,70000]);
+  eq('Case3 前月の月末残高 ＝ 当月の前月残高', ctx.arMonthly('K3',['2025-03'])[0].closing, 50000);
+
+  bill('KI4','K4','2025-03',100000); pay('KP4','K4','2025-04-10',60000);
+  eq('Case4 請求なし・前月分の入金だけ → 残高が減る', M('K4','2025-04'), [100000,0,60000,40000]);
+
+  bill('KI5','K5','2025-03',100000,{ dueDate:'2025-04-30' }); pay('KP5','K5','2025-05-10',30000);
+  eq('Case5 期日当日の月末はまだ超過ではない', ctx.arMonthly('K5',['2025-04'])[0].overdue, 0);
+  eq('Case5 期日を過ぎて残った分が 期限超過額', ctx.arMonthly('K5',['2025-05'])[0].overdue, 70000);
+  const now5=ctx.arMonthly('K5',[ctx.thisMonth()])[0];
+  eq('Case5 今の状態は 期限超過', [now5.closing, now5.overdue, ctx.arStatus(now5.closing, now5.overdue)], [70000,70000,'期限超過']);
+
+  bill('KI6a','K6','2025-04',60000); bill('KI6b','K6','2025-04',40000,{ issueDate:'2025-04-28' });
+  eq('Case6 同じ月の複数の請求 → 1つの当月請求額', ctx.arMonthly('K6',['2025-04'])[0].billed, 100000);
+
+  bill('KI7','K7','2025-03',100000); pay('KP7a','K7','2025-04-05',30000); pay('KP7b','K7','2025-04-25',20000);
+  eq('Case7 同じ月の複数の入金 → 1つの当月入金額', ctx.arMonthly('K7',['2025-04'])[0].payment, 50000);
+
+  /* 入れないもの・数え方の細部 */
+  bill('KI8a','K8','2025-04',100000); bill('KI8b','K8','2025-04',999,{ status:'作成中' }); bill('KI8c','K8','2025-04',888,{ status:'取消' });
+  pay('KP8a','K8','2025-04-20',99340,{ fee:660 }); pay('KP8b','K8','2025-04-21',5000,{ status:'取消' });
+  eq('作成中・取消の請求 と 取消の入金 は数えない／先方負担の手数料は入金に含む', M('K8','2025-04'), [0,100000,100000,0]);
+  _db.invoices.find(i=>i.id==='KI2').status='入金済';
+  eq('請求書の状態（入金済など）には頼らない', ctx.arMonthly('K2',['2025-04'])[0].closing, 50000);
+  eq('期日が無い請求は 期限超過にしない', ctx.arMonthly('K2',[ctx.thisMonth()])[0].overdue, 0);
+  eq('未来の月は 空欄扱い', ctx.arMonthly('K1',[ctx.addMonths(ctx.thisMonth(),1)])[0].future, true);
+  eq('状態: 残高0は 正常／残高ありは 未回収あり', [ctx.arStatus(0,0), ctx.arStatus(5,0)], ['正常','未回収あり']);
+  const T=ctx.arTotals();
+  eq('KPI 売掛金残高 は全社の現在残高の合計', T.balance, 0+50000+70000+40000+70000+100000+50000+0);
+  eq('KPI 期限超過額', T.overdue, 70000);
+
+  /* 画面 */
+  ctx.__x.setFY(2024);
+  const h=ctx.viewArBook();
+  eq('売掛金の表: 現在残高の列と 8社×12か月のマス', [h.includes('現在残高'), (h.match(/ar-c[ "]/g)||[]).length], [true, 8*12]);
+  eq('売掛金の表: KPI 4つ', ['今月請求額','今月入金額','売掛金残高','期限超過額'].every(x=>h.includes(x)), true);
+  eq('売掛金の表: 請求番号・数量・単価・PDF は出さない', ['請求番号','数量','単価','PDF'].some(x=>h.includes(x)), false);
+  el.innerHTML=''; ctx.openArLedger('K3'); const lh=String(el.innerHTML);
+  eq('売掛元帳: 年月・前月残高・請求額・入金額・月末残高', ['年月','前月残高','請求額','入金額','月末残高','2025/04'].every(x=>lh.includes(x)), true);
+  eq('メニューの先頭は 売掛金、古いリンクは 売掛金 に案内', [ctx.__x.SECTIONS.find(x=>x.id==='sec-ar').tabs[0].id, ctx.__x.PAGE_REDIRECT.invoices, ctx.__x.PAGE_REDIRECT.aging, ctx.__x.PAGE_REDIRECT.arco], ['arbook','arbook','arbook','arbook']);
+  eq('売掛金の権限は 請求の権限と同じ', ctx.canSee('arbook'), ctx.canSee('invoices'));
+  ctx.__x.setFY(2025);
+
+  /* 入金の充て先は 古い請求から自動（督促・資金繰り・API と食い違わないため） */
+  eq('入金は古い請求から充てる', ctx.arFifoAlloc('K3', 60000, null).map(a=>[a.invoiceId,a.amount]), [['KI3a',50000],['KI3b',10000]]);
+
+  /* 税抜は subtotal を使う（MF の小計） */
+  eq('予実の税抜: subtotal があればそれ', ctx.docNet({ total:110000, subtotal:100001 }), 100001);
+  eq('予実の税抜: 無ければ今までどおり ÷1.1', ctx.docNet({ total:110000 }), 100000);
+
+  /* Money Forward CSV */
+  const csv='﻿請求書番号,取引先名,件名,請求日,売上計上日,お支払期限,小計,消費税,合計金額\n'
+    +'"INV-1","株式会社 売掛テストK1","9月分","2025/09/30","2025/09/30","2025/10/31","100,000","10,000","110,000"\n'
+    +'"INV-2","㈱売掛テストK1","10月分","2025/10/31","2025/10/31","2025/11/30","200000","20000","220000"\n';
+  const pr=ctx.mfParseCsv(csv);
+  eq('MF CSV: 見出しで列を見つける', pr.items&&pr.items.map(x=>[x.number,x.billingDate,x.dueDate,x.subtotal,x.total]),
+    [['INV-1','2025-09-30','2025-10-31',100000,110000],['INV-2','2025-10-31','2025-11-30',200000,220000]]);
+  eq('MF CSV: 必要な列が無ければ理由を返す', !!ctx.mfParseCsv('a,b\n1,2\n').error, true);
+  eq('MF: 計上月は 売上計上日の月', ctx.mfToInvoice({ mfId:'X', salesDate:'2025-09-01', billingDate:'2025-10-05', total:1, number:'' },'K1').bookMonth, '2025-09');
+  eq('MF: 取引先名の表記ゆれ（株式会社・㈱・空白）を同じとみなす', ctx.__x.arNormName('株式会社 売掛テストK1')===ctx.__x.arNormName('㈱売掛テストK1'), true);
+
+  _db.invoices=keep.inv; _db.payments=keep.pay; _db.companies=keep.co;
+}
+
 console.log('\n― 取引先モーダル（得意先／支払先・横3列） ―');
 /* ★ 2026-09-14: 新規登録・編集・詳細 を同じ3列にした。
    見た目を変えても、フォームから項目が1つでも落ちると 保存でその値が消える。だから全項目を数える。 */
@@ -509,7 +592,7 @@ console.log('\n― 画面の入れ替えは1回だけ ―');
     querySelector:()=>null, querySelectorAll:()=>[], addEventListener:noop, appendChild:noop };
   const orig=ctx.document.getElementById;
   ctx.document.getElementById=(id)=> id==='main'? mainEl : orig(id);
-  ['users','audit','apilink','crmlink','invoices','expenses','ledger'].forEach(pg=>{
+  ['users','audit','apilink','crmlink','arbook','receipts','invoices','expenses','ledger'].forEach(pg=>{
     writes=0;
     try{ ctx.renderPage(pg); }catch(e){ console.log('  NG  renderPage('+pg+') → '+e.message); fail++; return; }
     eq('renderPage('+pg+') は1回だけ書く', writes, 1);
@@ -667,9 +750,10 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     });
     try{ const h=ctx.viewCoDetail('ar', kita2.id); const ok=h.includes('今回ご請求額') && h.includes('評価');
       console.log((ok?'  ok  ':'  NG  ')+'詳細（回収）に 評価 と 繰越式の次回請求額  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ console.log('  NG  詳細 → '+e.message); fail++; }
-    /* 会社名を押す（どの画面からでも）→ 取引先別の詳細で開く */
+    /* ★ 2026-09-14: 売掛側の会社名を押す → 売掛元帳（モーダル）。画面は移らない */
+    const pgBefore=ctx.__x.CURRENT_PAGE; el.innerHTML='';
     ctx.openLedger(kita2.id,'ar');
-    eq('会社名から 取引先別 の詳細へ', ctx.__x.CURRENT_PAGE, 'arco');
+    eq('会社名から 売掛元帳 を開く（画面は移らない）', [ctx.__x.CURRENT_PAGE===pgBefore, String(el.innerHTML).includes('売掛元帳')], [true,true]);
     ctx.coOpen('ar', null);
   }
 

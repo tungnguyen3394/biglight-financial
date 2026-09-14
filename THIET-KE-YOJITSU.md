@@ -147,6 +147,31 @@ Số chính thức để quyết toán vẫn là 試算表 của 会計事務所
 - 1 lần chuyển khoản trả nhiều hoá đơn → `allocations[]` nhiều-nhiều. Bắt buộc, vì khách Nhật
   hay gộp thanh toán và trừ phí chuyển khoản (`fee`).
 
+### 4.2b 回収（売掛金）= bảng 取引先 × tháng (quyết định 2026-09-14)
+
+Hoá đơn (tạo · 明細 · thuế · PDF · gửi · trạng thái) do **Money Forward クラウド請求書** giữ. Hệ này chỉ trả lời:
+đã 請求 bao nhiêu · đã 入金 bao nhiêu · còn nợ bao nhiêu · quá hạn bao nhiêu — theo từng tháng.
+
+```
+当月末残高 = 前月末残高 + 当月請求額 − 当月入金額          (web: arMonthly — nơi DUY NHẤT tính)
+前月末残高 = Σ 請求(計上月 < 当月) − Σ 入金(入金日 < 当月)
+当月請求額 = Σ invoices.total 税込 (bookMonth = 当月, trừ 作成中/取消)
+当月入金額 = Σ payments.amount + fee (tháng của date, trừ 取消)
+期限超過額(D) = max(0, min(残高, Σ 請求 có effDue < D − Σ 入金 date ≤ D))   ← nhận tiền trả hoá đơn cũ trước
+```
+
+- **Không lưu bảng tháng** (`accounts_receivable_monthly` = kết quả của `arMonthly`, luôn tính lại) — cùng luật "実績 không lưu".
+- **Không dựa vào status hay allocations** để tính nợ. `allocations` vẫn được điền tự động (cũ → mới, `arFifoAlloc`)
+  để 督促・資金繰り・API v1 (vẫn tính theo từng hoá đơn) không lệch với bảng mới.
+- **請求 từ MF**: `invoices` với `source:'mf' · mfId · no(billing_number) · bookMonth(=sales_date, không có thì billing_date)
+  · issueDate(billing_date) · dueDate(due_date) · total(total_price) · subtotal(subtotal_price) · items:[]`.
+  Trùng thì nhận ra bằng `mfId` (CSV không có ID → `no`). 予実 dùng `subtotal` làm 税抜 khi không có `items`.
+- **Mapping 取引先**: `companies.mfPartnerId / mfPartnerName` → không có thì so tên (bỏ 株式会社/㈱/khoảng trắng) → không có thì người chọn.
+- **Đường lấy MF**: ① API (backend `mfinvoice.ts`, chỉ đọc, OAuth scope `mfc/invoice/data.read`, token ở `server_config`;
+  tắt khi không có `MF_CLIENT_ID/SECRET`) ② CSV xuất từ MF. Cả hai chỉ **đọc** — ghi vào DB qua `/state-delta` như mọi thao tác (có audit, có phân quyền).
+- **入金**: `payments.source` = `manual` hiện tại; sau này ngân hàng/MF → `source:'bank'|'mf'` + `extId`. Công thức không nhìn `source`.
+- Menu: 回収 = 売掛金 · 入金 · 督促. 請求管理 / 年齢表 / 取引先別 **gỡ khỏi menu** (code còn, `PAGE_REDIRECT` dẫn về 売掛金).
+
 ### 4.3 予実
 
 | Key | Khoá | Ý nghĩa |

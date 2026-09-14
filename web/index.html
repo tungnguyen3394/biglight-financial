@@ -390,6 +390,67 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
     .co-att{flex-wrap:wrap;}
   }
   @media(max-width:520px){ .form-grid.co-sub{grid-template-columns:minmax(0,1fr);} }
+
+  /* ===== 回収（売掛金）: 取引先 × 月 の残高表 ===== */
+  .ar-kpis .num{font-size:21px;}
+  .ar-filters{display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin:0 0 10px;}
+  .ar-chk{display:inline-flex; align-items:center; gap:5px; font-size:13px; cursor:pointer; user-select:none;}
+  .ar-note{font-size:11.5px; margin-left:auto;}
+  .ar-wrap{max-height:calc(100vh - 300px); overflow:auto;}
+  .ar-tbl{border-collapse:separate; border-spacing:0; width:100%;}
+  .ar-tbl th,.ar-tbl td{padding:6px 8px; font-size:12.5px;}
+  .ar-tbl th{font-size:11.5px; line-height:1.2; vertical-align:bottom;}
+  .ar-tbl .ar-y{display:block; font-size:9.5px; font-weight:500; color:var(--text-muted);}
+  .ar-tbl .ar-co{position:sticky; left:0; z-index:1; background:var(--card); min-width:190px; white-space:nowrap; border-right:1px solid var(--border);}
+  .ar-tbl th.ar-co{z-index:4; background:var(--thead);}
+  .ar-tbl tr:hover td.ar-co{background:var(--row-hover);}
+  .ar-tbl .totrow td.ar-co{background:var(--surface-2);}
+  .ar-tbl td.ar-c{min-width:78px; cursor:pointer;}
+  .ar-tbl td.ar-c:hover{box-shadow:inset 0 0 0 1.5px var(--primary); border-radius:4px;}
+  .ar-tbl th.ar-cur,.ar-tbl td.ar-cur{background:var(--bg-selected);}
+  .ar-tbl .ar-now{position:sticky; right:0; z-index:1; background:var(--card); border-left:1px solid var(--border); min-width:96px; font-weight:700; cursor:pointer;}
+  .ar-tbl th.ar-now{z-index:4; background:var(--thead);}
+  .ar-tbl .totrow td.ar-now{background:var(--surface-2);}
+  .ar-name{cursor:pointer; color:var(--text); font-weight:600; margin-right:6px;}
+  .ar-name:hover{color:var(--primary); text-decoration:underline;}
+  .ar-fut{color:var(--border-strong);}
+  .ar-pos{color:var(--text); font-weight:600;}
+  .ar-neg{color:var(--text-muted);}
+  .ar-over{color:var(--danger); font-weight:700;}
+  .ar-st{display:inline-block; font-size:10px; font-weight:600; padding:0 6px; border-radius:5px; line-height:1.7; white-space:nowrap; vertical-align:1px;}
+  .ar-st.s-ok{color:var(--text-muted); background:var(--surface-2);}
+  .ar-st.s-open{color:var(--text-secondary); background:var(--surface-2); border:1px solid var(--border);}
+  .ar-st.s-over{color:var(--danger); background:var(--danger-soft);}
+  .ar-pop{position:absolute; z-index:40; width:290px; background:var(--card); color:var(--text); border:1px solid var(--border-strong);
+    border-radius:10px; box-shadow:0 12px 32px rgba(16,24,40,.18); padding:10px 12px; font-size:12.5px;}
+  .ar-pop-h{display:flex; justify-content:space-between; gap:8px; margin-bottom:6px;}
+  .ar-pop-h .muted{font-size:11.5px;}
+  .ar-x{cursor:pointer; color:var(--muted); display:inline-flex;}
+  .ar-pop-t{width:100%; border-collapse:collapse;}
+  .ar-pop-t td{padding:3px 0; border:none; font-size:12.5px;}
+  .ar-pop-t tr.sum td{border-top:1px solid var(--border); font-weight:700; padding-top:5px;}
+  .ar-pop-t tr:hover td{background:none;}
+  .ar-pop-l{margin-top:8px; border-top:1px dashed var(--border); padding-top:6px; font-size:11.5px;}
+  .ar-pop-i{display:flex; justify-content:space-between; gap:6px; padding:1px 0;}
+  .ar-pop-i a,.ar-pop-f a{color:var(--primary); cursor:pointer;}
+  .ar-pop-f{margin-top:8px; text-align:right; font-size:12px;}
+  .ar-src{font-size:9.5px; font-weight:700; padding:0 4px; border-radius:4px; background:var(--primary-soft); color:var(--primary);}
+  .ar-src.man{background:var(--surface-2); color:var(--text-secondary);}
+  .ar-src.old{background:var(--surface-2); color:var(--text-muted);}
+  .ar-led-h{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+  .ar-led-h h3{display:flex; align-items:center; gap:8px;}
+  .ar-led-k{display:flex; gap:26px; margin:4px 0 10px;}
+  .ar-led-k > div{display:flex; flex-direction:column;}
+  .ar-led-k .muted{font-size:11.5px;} .ar-led-k b{font-size:20px;}
+  .ar-led{max-height:58vh; overflow:auto;}
+  .ar-led td,.ar-led th{padding:6px 12px;}
+  .ar-mf-src{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .ar-mf-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px;}
+  .ar-mf-row input{padding:5px 8px; border:1px solid var(--border-strong); border-radius:7px;}
+  .ar-mf-sum{display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; margin-bottom:8px;}
+  @media(max-width:980px){ .ar-mf-src{grid-template-columns:1fr;} .ar-note{margin-left:0;} .ar-wrap{max-height:none;} }
+  @media(max-width:560px){ .ar-tbl .ar-co{min-width:130px;} .ar-tbl .ar-now{position:static;} }
+  @media print{ .ar-wrap{max-height:none; overflow:visible;} .ar-pop{display:none;} }
   .ac-wrap{position:relative;}
   .ac-list{position:absolute; top:calc(100% + 3px); left:0; right:0; background:var(--card); border:1px solid var(--border);
     border-radius:10px; box-shadow:0 10px 26px rgba(16,24,40,.14); z-index:70; max-height:250px; overflow-y:auto; display:none;}
@@ -570,7 +631,7 @@ const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
 /* 同じ台帳を別の入口から見る画面は、権限も同じにする（二重に設定させない） */
-const PAGE_PERM_ALIAS = { vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
+const PAGE_PERM_ALIAS = { arbook:'invoices', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
 function permOf(page){
   page = PAGE_PERM_ALIAS[page] || page;
   const role = myRole();
@@ -966,12 +1027,14 @@ const ICONS = {
 const SECTIONS = [
   { id:'dashboard', label:'ダッシュボード', icon:'dashboard', tabs:[
     {id:'dashboard', label:'ダッシュボード'} ]},
+  /* ★ 2026-09-14 利用者の指示: 請求書の管理は Money Forward 請求書 が持つ。ここは「取引先×月の残高」が中心。
+       請求管理・未回収（年齢表）・取引先別 はメニューから外しました（コードとデータは残してあります。
+       古いリンクは PAGE_REDIRECT で 売掛金 に案内します）。戻すときは下の行を tabs に足すだけ:
+         {id:'invoices', label:'請求管理'}, {id:'aging', label:'未回収（年齢表）'}, {id:'arco', label:'取引先別'} */
   { id:'sec-ar', label:'回収（売掛金）', icon:'invoice', tabs:[
-    {id:'invoices', label:'請求管理'},
-    {id:'receipts', label:'入金・消込'},
-    {id:'dunning',  label:'督促（今日やること）'},
-    {id:'aging',    label:'未回収（年齢表）'},
-    {id:'arco',     label:'取引先別'} ]},
+    {id:'arbook',   label:'売掛金'},
+    {id:'receipts', label:'入金'},
+    {id:'dunning',  label:'督促（今日やること）'} ]},
   { id:'sec-ap', label:'支払（買掛金）', icon:'bill', tabs:[
     {id:'bills',    label:'支払管理'},
     {id:'payouts',  label:'支払実行'},
@@ -1005,6 +1068,8 @@ const SECTIONS = [
     {id:'audit',    label:'操作履歴'} ]},
 ];
 const ALL_PAGES  = SECTIONS.flatMap(s=>s.tabs.map(t=>t.id));
+/* メニューから外した画面への古いリンク（ベル・ダッシュボード・ブックマーク）は ここで案内し直す */
+const PAGE_REDIRECT = { invoices:'arbook', aging:'arbook', arco:'arbook' };
 const SECTION_OF = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ SECTION_OF[t.id]=sec; }));
 const PAGE_LABEL = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ PAGE_LABEL[t.id]=t.label; }));
 
@@ -1335,7 +1400,11 @@ async function afterLogin(){
       '<div class="alertbar">サーバーに接続できません。ネットワークをご確認のうえ、再読み込みしてください。</div>'; return; } }
   connectSSE();
   const start = (location.hash||'').replace('#','') || 'dashboard';
-  goto(ALL_PAGES.includes(start)? start : 'dashboard');
+  goto(ALL_PAGES.includes(PAGE_REDIRECT[start]||start)? start : 'dashboard');
+  /* Money Forward の接続から戻ってきたとき（/api/mf/callback → /?mf=connected#arbook） */
+  try{ const qs=new URLSearchParams(location.search); const mf=qs.get('mf');
+    if(mf){ toast(mf==='connected'? 'Money Forward と接続しました。「Money Forward から取り込む」で請求を取得できます。' : 'Money Forward と接続できませんでした：'+(qs.get('msg')||''), mf==='connected'?'ok':'err');
+      history.replaceState(null,'',location.pathname+location.hash); } }catch(e){}
 }
 function toggleAcct(e){ if(e) e.stopPropagation(); document.getElementById('acctMenu').classList.toggle('open'); }
 document.addEventListener('click', e=>{
@@ -1391,11 +1460,14 @@ function navBadges(){
   const t=today(); const b={};
   const overdueInv = (DB.invoices||[]).filter(i=>INVOICE_OPEN.includes(i.status) && isOverdue(i) && balanceOfInvoice(i)>0).length;
   if(overdueInv) b.invoices = overdueInv;
+  const overCo = arCompanyIds().filter(id=>arMonthly(id,[thisMonth()])[0].overdue>0).length;
+  if(overCo) b.arbook = overCo;
   const dueBills = (DB.bills||[]).filter(x=>BILL_OPEN.includes(x.status) && effDue(x) && effDue(x)<=addDays(t,7) && balanceOfBill(x)>0).length;
   if(dueBills) b.bills = dueBills;
   return b;
 }
 function goto(page){
+  if(PAGE_REDIRECT[page]) page=PAGE_REDIRECT[page];
   if(!ALL_PAGES.includes(page)) page='dashboard';
   if(!canSee(page)){ toast('この画面を見る権限がありません。','err'); page='dashboard'; }
   CURRENT_PAGE=page;
@@ -1420,6 +1492,7 @@ function renderPage(page){
       case 'yojitsu':   html=viewYojitsu();   break;
       case 'compare':   html=viewCompare();   break;
       case 'mikomi':    html=viewMikomi();    break;
+      case 'arbook':    html=viewArBook();    break;
       case 'invoices':  html=viewInvoices();  break;
       case 'receipts':  html=viewReceipts();  break;
       case 'aging':     html=viewAging();     break;
@@ -1486,6 +1559,8 @@ function docTotal(doc){
 function docNet(doc){
   if(!doc) return 0;
   if(Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items);
+  /* Money Forward から取り込んだ請求・手入力の請求額は 税抜（subtotal）を持っている → それを使う（backend finance.ts と同じ式） */
+  if(doc.subtotal!=null && doc.subtotal!=='') return num(doc.subtotal);
   return Math.round(num(doc.total)/1.1);
 }
 
@@ -2582,6 +2657,524 @@ function viewMikomi(){
 /* ============================================================================
    ⑩ 債権（売掛金）— 目的②
    ========================================================================== */
+/* ============================================================================
+   ⑩ 回収（売掛金）— 取引先 × 月 の残高で見る（Money Forward 会計の「売掛金」の考え方）
+   ----------------------------------------------------------------------------
+   ★ 2026-09-14 利用者の指示:
+     請求書そのもの（作成・明細・税・PDF・送付・状態）は Money Forward 請求書 が持つ。
+     このシステムは「いくら請求し・いくら入り・いくら残っているか」を月ごとに見るだけ。
+     → 画面の中心は請求書ではなく、取引先ごとの月末残高。
+   ★ 式（ここ1か所だけ。表・元帳・ポップ・KPI はすべて arMonthly を通す）:
+       当月末残高 ＝ 前月末残高 ＋ 当月請求額 − 当月入金額
+       前月末残高 ＝ それより前の 請求額の累計 − 入金額の累計
+     ・請求額 ＝ 計上月（bookMonth）がその月の請求の 税込合計。作成中・取消 は入れない。
+     ・入金額 ＝ 入金日がその月の入金（＋先方負担の振込手数料）。取消 は入れない。
+     ・請求書の「状態」や 消込（allocations）には頼らない。
+   ★ 期限超過額（その時点）＝ 入金期日（休業日の調整後）を過ぎた請求の累計 − その日までの入金の累計
+     （入金は古い請求から充てる考え方）。0 未満は 0、残高を超えたら残高。
+   ★ 月次の表は保存しない（実績は保存しない約束 §0.10）。accounts_receivable_monthly に
+     当たるものは arMonthly() の戻り値 {opening, billed, payment, closing, overdue}。
+     請求は invoices（MF から取り込んだものは source:'mf'）、入金は payments（source で出どころを持つ）。
+   ========================================================================== */
+const AR_LIVE = inv => !!inv && inv.status!=='取消' && inv.status!=='作成中';
+const arYmOfInv = inv => ymOfDoc(inv) || String(inv.issueDate||'').slice(0,7);
+const arCoName = id => String(companyName(id)).replace(/<[^>]+>/g,'') || '-';
+let AR_FILT = { open:false, over:false };
+
+/** 1社ぶんの材料 — 請求と入金を月に振り分けたもの */
+function arFacts(companyId){
+  const id=String(companyId), bills=[], pays=[];
+  (DB.invoices||[]).forEach(i=>{
+    if(String(i.companyId)!==id || !AR_LIVE(i)) return;
+    const ym=arYmOfInv(i); if(!ym) return;
+    bills.push({ ym, amount:docTotal(i), due:effDue(i), doc:i });
+  });
+  (DB.payments||[]).forEach(p=>{
+    if(String(p.companyId)!==id || p.status==='取消' || !p.date) return;
+    pays.push({ ym:String(p.date).slice(0,7), date:String(p.date).slice(0,10), amount:received(p), doc:p });
+  });
+  return { bills, pays };
+}
+/** 期限超過額（asOf の時点）。ym までに計上した請求だけを見る。 */
+function arOverdueAt(f, asOf, ym, closing){
+  const dueBilled=f.bills.reduce((s,b)=>(b.ym<=ym && b.due && b.due<asOf)? s+b.amount : s, 0);
+  const paid=f.pays.reduce((s,p)=>p.date<=asOf? s+p.amount : s, 0);
+  return Math.max(0, Math.min(closing, dueBilled-paid));
+}
+/** months（YYYY-MM の並び）ごとの 前月残高・請求額・入金額・月末残高・期限超過額 */
+function arMonthly(companyId, months, facts){
+  const f=facts||arFacts(companyId), tm=thisMonth(), t=today();
+  return months.map(ym=>{
+    let opening=0, billed=0, payment=0;
+    f.bills.forEach(b=>{ if(b.ym<ym) opening+=b.amount; else if(b.ym===ym) billed+=b.amount; });
+    f.pays.forEach(p=>{ if(p.ym<ym) opening-=p.amount; else if(p.ym===ym) payment+=p.amount; });
+    const closing=opening+billed-payment, future=ym>tm;
+    const overdue=future? 0 : arOverdueAt(f, ym<tm? monthEnd(ym) : t, ym, closing);
+    return { companyId:String(companyId), ym, opening, billed, payment, closing, overdue, future };
+  });
+}
+function arStatus(bal, over){ return over>0? '期限超過' : (bal>0? '未回収あり' : '正常'); }
+const arStatusBadge = s => `<span class="ar-st ${s==='期限超過'?'s-over':(s==='未回収あり'?'s-open':'s-ok')}">${s}</span>`;
+/** 売掛金の動きがある取引先（請求か入金が1件でもある会社） */
+function arCompanyIds(){
+  const ids=new Set();
+  (DB.invoices||[]).forEach(i=>{ if(AR_LIVE(i) && i.companyId) ids.add(String(i.companyId)); });
+  (DB.payments||[]).forEach(p=>{ if(p.status!=='取消' && p.companyId) ids.add(String(p.companyId)); });
+  return [...ids];
+}
+/** 今月の全社合計（KPI） */
+function arTotals(){
+  const tm=thisMonth(); const o={ billed:0, payment:0, balance:0, overdue:0, openN:0, overN:0 };
+  arCompanyIds().forEach(id=>{
+    const r=arMonthly(id,[tm])[0];
+    o.billed+=r.billed; o.payment+=r.payment; o.balance+=r.closing; o.overdue+=r.overdue;
+    if(r.closing>0) o.openN++; if(r.overdue>0) o.overN++;
+  });
+  return o;
+}
+const arYmLabel = ym => `${Number(ym.slice(0,4))}年${Number(ym.slice(5))}月`;
+const arAmt = v => v<0? '−'+moneyPlain(-v) : moneyPlain(v);
+
+function viewArBook(){
+  const p='arbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth();
+  const all=arCompanyIds().map(id=>{
+    const f=arFacts(id), m=arMonthly(id, months, f), now=arMonthly(id,[tm],f)[0];
+    return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:arStatus(now.closing, now.overdue) };
+  });
+  const q=(SEARCH[p]||'').trim().toLowerCase();
+  let rows=all.filter(r=>{
+    if(q){ const c=findById('companies',r.id)||{}; if(!((r.name||'')+(c.kana||'')).toLowerCase().includes(q)) return false; }
+    if(AR_FILT.open && !(r.bal>0)) return false;
+    if(AR_FILT.over && !(r.over>0)) return false;
+    return true;
+  }).sort((a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja'));
+
+  const T=arTotals();
+  const kpis=`<div class="kpi-grid ar-kpis">
+    <div class="kpi"><div class="lbl">今月請求額（${Number(tm.slice(5))}月）</div><div class="num">¥${moneyPlain(T.billed)}</div></div>
+    <div class="kpi"><div class="lbl">今月入金額</div><div class="num">¥${moneyPlain(T.payment)}</div></div>
+    <div class="kpi"><div class="lbl">売掛金残高</div><div class="num">¥${arAmt(T.balance)}</div><div class="sub">${T.openN}社が未回収</div></div>
+    <div class="kpi ${T.overdue>0?'clickable':''}" ${T.overdue>0?`onclick="arFilt('over',true)"`:''}><div class="lbl">期限超過額</div>
+      <div class="num ${T.overdue>0?'minus':''}">¥${moneyPlain(T.overdue)}</div><div class="sub">${T.overN? `${T.overN}社`:'なし'}</div></div>
+  </div>`;
+
+  const filters=`<div class="ar-filters">
+    ${searchBox(p,'取引先で検索')}
+    <label class="ar-chk"><input type="checkbox" ${AR_FILT.open?'checked':''} onchange="arFilt('open',this.checked)"> 未回収のみ</label>
+    <label class="ar-chk"><input type="checkbox" ${AR_FILT.over?'checked':''} onchange="arFilt('over',this.checked)"> 期限超過のみ</label>
+    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の売掛金残高 ・ マスを押すと内訳</span>
+  </div>`;
+
+  const head=`<tr><th class="ar-co">取引先</th>${months.map((ym,i)=>`<th class="r ${ym===tm?'ar-cur':''}" title="${ym}">${
+      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">現在残高</th></tr>`;
+  const cell=(r,x)=>{
+    if(x.future) return `<td class="r ar-c ar-fut">—</td>`;
+    const cls = x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
+    return `<td class="r num ar-c ${cls}${x.ym===tm?' ar-cur':''}" onclick="arCellPop(event,'${attr(r.id)}','${x.ym}')">${arAmt(x.closing)}</td>`;
+  };
+  const body=rows.map(r=>`<tr>
+      <td class="ar-co"><a class="ar-name" onclick="openArLedger('${attr(r.id)}')" title="売掛元帳を開く">${esc(r.name)}</a>${arStatusBadge(r.st)}</td>
+      ${r.m.map(x=>cell(r,x)).join('')}
+      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="openArLedger('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`).join('');
+  const foot = rows.length? `<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${months.map((ym,i)=>{
+      if(ym>tm) return '<td class="r ar-fut">—</td>';
+      const s=rows.reduce((t,r)=>t+r.m[i].closing,0); return `<td class="r num">${arAmt(s)}</td>`; }).join('')}
+      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>` : '';
+  const table = all.length
+    ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${head}</thead><tbody>${body||`<tr><td colspan="${months.length+2}" class="empty">条件に合う取引先はありません。</td></tr>`}${foot}</tbody></table></div>`
+    : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「Money Forward から取り込む」で請求を取り込むか、入金を記録してください。</div></div>`;
+
+  const mgr = myRole()==='Admin' || myRole()==='Manager';
+  const tools=`${canCreate('receipts')?`<button class="btn" onclick="openPayment()">＋ 入金を記録</button>`:''}
+    ${mgr&&canCreate('invoices')?`<button class="btn secondary" onclick="openMfImport()">Money Forward から取り込む</button>`:''}
+    ${toolsMenu(`${canCreate('invoices')?`<button class="btn secondary" onclick="openArBillForm()">＋ 請求額を手入力（MF にない分）</button><hr>`:''}
+      <button class="btn secondary" onclick="exportArBookCsv()">${IC.doc} CSV出力（この表）</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
+  return pageShell({ title:'回収（売掛金）', count:all.length, shown:rows.length,
+    sub:'前月残高 ＋ 当月請求 − 当月入金 ＝ 月末残高。請求書の作成・明細は Money Forward 請求書で行います。',
+    tools, body: kpis+filters+table });
+}
+function arFilt(k, v){ AR_FILT[k]=!!v; renderPage('arbook'); }
+function exportArBookCsv(){
+  const months=fyMonths(CUR_FY), tm=thisMonth();
+  const out=[['取引先','状態',...months.map(m=>m),'現在残高','期限超過額']];
+  arCompanyIds().forEach(id=>{
+    const f=arFacts(id), m=arMonthly(id,months,f), now=arMonthly(id,[tm],f)[0];
+    out.push([arCoName(id), arStatus(now.closing,now.overdue), ...m.map(x=>x.future?'':x.closing), now.closing, now.overdue]);
+  });
+  downloadCsv(`売掛金_${CUR_FY}年度`, out);
+}
+
+/* ---------- マスの内訳（小さなポップ） ---------- */
+function arPopClose(){ const el=document.getElementById('arPop'); if(el) el.remove(); }
+function arCellPop(ev, companyId, ym){
+  if(ev) ev.stopPropagation();
+  arPopClose();
+  const f=arFacts(companyId), r=arMonthly(companyId,[ym],f)[0];
+  const bills=f.bills.filter(b=>b.ym===ym), pays=f.pays.filter(x=>x.ym===ym);
+  const srcTag = d => d.source==='mf'? '<span class="ar-src">MF</span>' : ((d.items||[]).length? '<span class="ar-src old">旧</span>' : '<span class="ar-src man">手入力</span>');
+  const list=(arr, label, fn)=>arr.length? `<div class="ar-pop-l"><div class="muted">${label}</div>${arr.slice(0,6).map(fn).join('')}${arr.length>6?`<div class="muted">他 ${arr.length-6}件</div>`:''}</div>` : '';
+  const pop=document.createElement('div');
+  pop.id='arPop'; pop.className='ar-pop';
+  pop.onclick=e=>e.stopPropagation();
+  pop.innerHTML=`<div class="ar-pop-h"><div><b>${esc(arCoName(companyId))}</b><div class="muted">${arYmLabel(ym)}</div></div>
+      <a class="ar-x" onclick="arPopClose()" aria-label="閉じる">${IC.close}</a></div>
+    <table class="ar-pop-t">
+      <tr><td>前月残高</td><td class="r num">¥${arAmt(r.opening)}</td></tr>
+      <tr><td>請求額</td><td class="r num">＋ ¥${moneyPlain(r.billed)}</td></tr>
+      <tr><td>入金額</td><td class="r num">− ¥${moneyPlain(r.payment)}</td></tr>
+      <tr class="sum"><td>月末残高</td><td class="r num ${r.overdue>0?'minus':''}">¥${arAmt(r.closing)}</td></tr>
+      ${r.overdue>0?`<tr><td class="minus">うち期限超過</td><td class="r num minus">¥${moneyPlain(r.overdue)}</td></tr>`:''}
+    </table>
+    ${list(bills,'請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.issueDate||b.doc.bookMonth||'')} ${srcTag(b.doc)}${b.doc.no?` <span class="muted">${esc(b.doc.no)}</span>`:''}</span>
+      <span class="num">${moneyPlain(b.amount)}${(b.doc.source!=='mf'&&!(b.doc.items||[]).length&&canEdit('invoices'))?` <a onclick="arPopClose();openArBillForm('${attr(b.doc.id)}')">修正</a>`:''}</span></div>`)}
+    ${list(pays,'入金', x=>`<div class="ar-pop-i"><span>${esc(x.date)}${x.doc.method?` <span class="muted">${esc(x.doc.method)}</span>`:''}</span>
+      <span class="num">${moneyPlain(x.amount)}${canEdit('receipts')?` <a onclick="arPopClose();openPayment('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
+    <div class="ar-pop-f"><a onclick="arPopClose();openArLedger('${attr(companyId)}')">売掛元帳を見る ›</a></div>`;
+  document.body.appendChild(pop);
+  const rc=ev&&ev.currentTarget&&ev.currentTarget.getBoundingClientRect? ev.currentTarget.getBoundingClientRect() : {left:40,bottom:120,top:100};
+  const w=pop.offsetWidth||280, h=pop.offsetHeight||260, vw=window.innerWidth, vh=window.innerHeight;
+  const left=Math.max(8, Math.min(rc.left, vw-w-8));
+  const top = (rc.bottom+h+8<vh)? rc.bottom+4 : Math.max(8, rc.top-h-4);
+  pop.style.left=(left+window.scrollX)+'px'; pop.style.top=(top+window.scrollY)+'px';
+}
+document.addEventListener('click', ()=>arPopClose());
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') arPopClose(); });
+
+/* ---------- 売掛元帳（1社・月ごと） ---------- */
+function openArLedger(companyId){
+  arPopClose();
+  const f=arFacts(companyId), tm=thisMonth();
+  const yms=[...f.bills.map(b=>b.ym), ...f.pays.map(x=>x.ym)].filter(ym=>ym<=tm).sort();
+  let start=yms[0]||tm; const MAX=36;
+  const months=[]; for(let ym=start; ym<=tm; ym=addMonths(ym,1)) months.push(ym);
+  const shown=months.slice(-MAX);
+  const rows=arMonthly(companyId, shown, f), now=rows[rows.length-1]||{closing:0,overdue:0};
+  const st=arStatus(now.closing, now.overdue);
+  const c=findById('companies',companyId);
+  openModal(`<div class="ar-led-h"><div><h3>${esc(arCoName(companyId))} ${arStatusBadge(st)}</h3>
+      <div class="mdsub">売掛元帳 ・ 月末残高 ＝ 前月残高 ＋ 請求額 − 入金額</div></div>
+      <button type="button" class="co-x" onclick="closeModal()" aria-label="閉じる">${IC.close}</button></div>
+    <div class="ar-led-k">
+      <div><span class="muted">現在残高</span><b class="num">¥${arAmt(now.closing)}</b></div>
+      <div><span class="muted">期限超過</span><b class="num ${now.overdue>0?'minus':''}">¥${moneyPlain(now.overdue)}</b></div>
+    </div>
+    ${months.length>MAX?`<div class="infobar" style="margin:0 0 8px;">直近 ${MAX}か月を表示しています（それより前の分は 前月残高 に含まれます）。</div>`:''}
+    <div class="table-wrap ar-led"><table>
+      <thead><tr><th>年月</th><th class="r">前月残高</th><th class="r">請求額</th><th class="r">入金額</th><th class="r">月末残高</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr class="${r.ym===tm?'ar-cur':''}">
+        <td>${r.ym.replace('-','/')}</td><td class="r num ${r.opening?'':'zero'}">${arAmt(r.opening)}</td>
+        <td class="r num ${r.billed?'':'zero'}">${moneyPlain(r.billed)}</td><td class="r num ${r.payment?'':'zero'}">${moneyPlain(r.payment)}</td>
+        <td class="r num ${r.overdue>0?'ar-over':(r.closing>0?'ar-pos':'zero')}" ${r.overdue>0?`title="うち期限超過 ${moneyPlain(r.overdue)}"`:''}>${arAmt(r.closing)}</td></tr>`).join('')}
+      </tbody></table></div>
+    <div class="modal-actions split">
+      <div style="display:flex;gap:8px;">${c?`<button class="btn secondary" onclick="closeModal();openDetail('companies','${attr(companyId)}')">取引先の情報</button>`:''}</div>
+      <div style="display:flex;gap:8px;">${canCreate('receipts')?`<button class="btn secondary" onclick="closeModal();openPayment(null,{companyId:'${attr(companyId)}'})">＋ 入金を記録</button>`:''}
+        <button class="btn" onclick="closeModal()">閉じる</button></div></div>`,'lg');
+}
+
+/* ---------- 入金の充て先（古い請求から自動）----------
+   新しい画面では請求書ごとの消込をしない。ただし 督促・資金繰り・API は
+   請求書ごとの残高（allocations）で動いているので、裏で古い順に充てて食い違わないようにする。 */
+function arFifoAlloc(companyId, amount, paymentId){
+  const old=paymentId? (findById('payments',paymentId)||{}).allocations||[] : [];
+  const mine={}; old.forEach(a=>mine[a.invoiceId]=(mine[a.invoiceId]||0)+num(a.amount));
+  let rest=num(amount); const out=[];
+  (DB.invoices||[]).filter(i=>String(i.companyId)===String(companyId) && AR_LIVE(i))
+    .sort((a,b)=>String(a.dueDate||arYmOfInv(a)).localeCompare(String(b.dueDate||arYmOfInv(b))) || String(a.no||'').localeCompare(String(b.no||'')))
+    .forEach(i=>{
+      if(rest<=0) return;
+      const bal=balanceOfInvoice(i)+(mine[i.id]||0);
+      const use=Math.min(bal, rest);
+      if(use>0){ out.push({ invoiceId:i.id, amount:use }); rest-=use; }
+    });
+  return out;
+}
+/** 請求を取り込んだあと、充て先の決まっていない入金の残りを 古い請求から充てる（既存の充て先は変えない） */
+function arApplyUnallocated(companyId){
+  let n=0;
+  (DB.payments||[]).filter(p=>String(p.companyId)===String(companyId) && p.status!=='取消')
+    .sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')))
+    .forEach(p=>{
+      const used=(p.allocations||[]).reduce((s,a)=>s+num(a.amount),0), rest=received(p)-used;
+      if(rest<=0) return;
+      const add=arFifoAlloc(companyId, rest, null);
+      if(!add.length) return;
+      p.allocations=(p.allocations||[]).concat(add); p.updatedAt=new Date().toISOString();
+      markDirty('payments', p); n++;
+    });
+  return n;
+}
+
+/* ---------- 請求額の手入力（Money Forward にない分だけ）----------
+   明細・税・発行は持たない。取引先・計上月・金額・期日だけ。 */
+function openArBillForm(id, preset){
+  const inv=id? findById('invoices',id) : null;
+  if(inv && (inv.source==='mf' || (inv.items||[]).length)){
+    toast(inv.source==='mf'? 'Money Forward の請求です。MF で直してから取り込み直してください。' : '明細のある請求（旧画面で作成）はここでは直せません。','err'); return; }
+  if(id? !canEdit('invoices') : !canCreate('invoices')){ toast('権限がありません。','err'); return; }
+  const r=inv||Object.assign({ bookMonth:thisMonth(), issueDate:today() }, preset||{});
+  const cos=(DB.companies||[]).filter(x=>!x._gone && x.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  openModal(`<h3>${inv?'請求額の修正':'請求額を手入力'}</h3>
+    <div class="mdsub">Money Forward 請求書に無い請求だけ入力します（明細・PDF は作りません）。MF にある請求は「Money Forward から取り込む」を使ってください。</div>
+    <div class="form-grid" id="arBillF">
+      <div class="full"><label>取引先 <span style="color:var(--danger)">*</span></label><select id="abCo" onchange="arBillDue()"><option value="">-</option>
+        ${cos.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(r.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div><label>計上月 <span style="color:var(--danger)">*</span></label><input id="abYm" type="month" value="${attr(String(r.bookMonth||'').slice(0,7))}" onchange="arBillDue()"></div>
+      <div><label>請求日</label><input id="abDate" type="date" value="${attr(r.issueDate||'')}"></div>
+      <div><label>請求額（税込）<span style="color:var(--danger)">*</span></label><input id="abTotal" class="num" style="text-align:right;" value="${r.total?moneyPlain(r.total):''}" oninput="fmtMoneyInput(this);arBillNet()"></div>
+      <div><label>うち税抜（予実の売上）</label><input id="abNet" class="num" style="text-align:right;" value="${r.subtotal!=null&&r.subtotal!==''?moneyPlain(r.subtotal):''}" oninput="fmtMoneyInput(this);this.dataset.touched=1" ${r.subtotal!=null&&r.subtotal!==''?'data-touched="1"':''}></div>
+      <div><label>入金期日</label><input id="abDue" type="date" value="${attr(r.dueDate||'')}" oninput="this.dataset.touched=1" ${r.dueDate?'data-touched="1"':''}></div>
+      <div><label>請求番号</label><input id="abNo" value="${attr(r.no||'')}" placeholder="空欄なら自動"></div>
+      <div class="full"><label>備考</label><input id="abNote" value="${attr(r.note||'')}"></div>
+    </div>
+    <div class="modal-actions ${inv?'split':''}">
+      ${inv?`<button class="btn danger" onclick="arBillCancel('${attr(inv.id)}')">取消にする</button>`:''}
+      <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+        <button class="btn" onclick="arBillSave('${inv?attr(inv.id):''}')">保存</button></div></div>`);
+  if(!inv) arBillDue();
+}
+function arBillNet(){
+  const n=document.getElementById('abNet'); if(!n || n.dataset.touched) return;
+  const t=num(document.getElementById('abTotal').value); n.value=t? moneyPlain(Math.round(t/1.1)) : '';
+}
+function arBillDue(){
+  const d=document.getElementById('abDue'); if(!d || d.dataset.touched) return;
+  const c=findById('companies', document.getElementById('abCo').value), ym=document.getElementById('abYm').value;
+  if(c && ym) d.value=dueDateOf(ym, c.closingDay, c.paySite, c.payDay);
+}
+function arBillSave(id){
+  const g=k=>document.getElementById(k).value;
+  const companyId=g('abCo'), bookMonth=g('abYm'), total=num(g('abTotal'));
+  if(!companyId || !bookMonth || !total){ toast('取引先・計上月・請求額を入力してください。','err'); return; }
+  const dup=(DB.invoices||[]).filter(i=>String(i.companyId)===String(companyId) && arYmOfInv(i)===bookMonth && AR_LIVE(i) && String(i.id)!==String(id));
+  if(dup.length && !confirm(`この取引先には ${bookMonth} の請求がすでに ${dup.length}件 あります（${dup.map(i=>moneyPlain(docTotal(i))+'円').join('、')}）。\n二重にならないか確認しましたか？ 保存しますか？`)) return;
+  let no=g('abNo').trim();
+  if(!no){ const ym=bookMonth.replace('-',''); const n=(DB.invoices||[]).filter(x=>String(x.no||'').startsWith('INV-'+ym)).length+1; no=`INV-${ym}-${String(n).padStart(3,'0')}`; }
+  const netRaw=g('abNet');
+  const rec={ companyId, bookMonth, issueDate:g('abDate'), dueDate:g('abDue'), total, subtotal: netRaw===''? Math.round(total/1.1) : num(netRaw),
+    no, note:g('abNote'), items:[], status:'確定', locked:true };
+  commitRecord('invoices', rec, { existingId:id||null });
+  arApplyUnallocated(companyId);
+  closeModal(); renderPage(CURRENT_PAGE); toast('保存しました。','ok');
+}
+function arBillCancel(id){
+  const inv=findById('invoices',id); if(!inv) return;
+  if(!confirm(`この請求（${moneyPlain(docTotal(inv))}円）を取消にします。売掛金と予実から外れます。よろしいですか？`)) return;
+  inv.status='取消'; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
+  closeModal(); renderPage(CURRENT_PAGE); toast('取消にしました。','ok');
+}
+
+/* ============================================================================
+   Money Forward 請求書 → このシステムの請求（invoices, source:'mf'）
+   ----------------------------------------------------------------------------
+   ・取り方は2つ。どちらも同じ形 {mfId, number, partnerId, partnerName, billingDate, salesDate,
+     dueDate, subtotal, total} にそろえてから、同じ手順で取り込む。
+       ① API（サーバーの /mf/billings。接続は管理者が1回）  ② MF から出した CSV
+   ・取引先の対応: 取引先に覚えさせた MF の取引先ID（mfPartnerId）→ 無ければ 名前（株式会社などを除いて一致）
+     → それでも無ければ 画面で選ぶ。選んだ対応は取引先に保存し、次からは自動。
+   ・同じ請求は mfId（CSV で ID が無いときは 請求書番号）で見分けて 更新する（二重にしない）。
+   ・計上月 ＝ 売上計上日の月（無ければ請求日の月）。入金期日 ＝ MF の支払期限。
+   ・MF で消した請求は、ここでは自動で消しません（取消は人が決める）。
+   ========================================================================== */
+let MFI=null;     // 取り込みの作業中データ
+const arNormName = s => String(s||'').normalize('NFKC').replace(/株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|一般財団法人|\(株\)|\(有\)|\(同\)|㈱|㈲|御中|様|\s|　/g,'').toLowerCase();
+
+async function openMfImport(){
+  if(!(myRole()==='Admin'||myRole()==='Manager')){ toast('取り込めるのは 管理者・マネージャー だけです。','err'); return; }
+  const fy=CUR_FY;
+  MFI={ items:[], source:'', map:{}, status:null, from:`${fy}-08-01`, to:today() };
+  mfDraw();
+  try{
+    const r=await fetch(API_BASE+'/mf/status',{headers:headers()});
+    MFI.status = r.ok? await r.json() : { configured:false, connected:false, error:'HTTP '+r.status };
+  }catch(e){ MFI.status={ configured:false, connected:false, error:'通信に失敗しました' }; }
+  if(MFI && !MFI.items.length) mfDraw();
+}
+function mfDraw(){
+  if(!MFI) return;
+  const s=MFI.status;
+  const apiBox = !s? '<div class="muted">接続の状態を確認しています…</div>'
+    : !s.configured? `<div class="muted">API は未設定です（サーバーの .env に MF_CLIENT_ID / MF_CLIENT_SECRET を入れると使えます）。下の CSV で取り込めます。</div>`
+    : !s.connected? `<div>Money Forward と未接続です。${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に「接続する」を依頼してください。'}</div>`
+    : `<div class="ar-mf-row">期間（請求日）<input type="date" id="mfFrom" value="${attr(MFI.from)}"> 〜 <input type="date" id="mfTo" value="${attr(MFI.to)}">
+        <button class="btn" onclick="mfFetchApi()">請求書を取得</button>
+        <span class="muted">接続: ${esc(String(s.connectedBy||'').split('@')[0])}${isAdmin()?` ・ <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}</span></div>`;
+  openModal(`<h3>Money Forward から請求を取り込む</h3>
+    <div class="mdsub">請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。</div>
+    <div class="ar-mf-src">
+      <div><div class="form-section" style="margin:0 0 6px;">① API で取得</div>${apiBox}</div>
+      <div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>
+        <input type="file" accept=".csv,text/csv" onchange="mfReadCsv(this.files&&this.files[0])">
+        <div class="fhelp">MF 請求書の一覧から出力した CSV。見出しで列を判断します（取引先名・請求日・合計金額 など）。</div></div>
+    </div>
+    <div id="mfPrev" style="margin-top:12px;">${MFI.items.length? mfPreviewHtml() : ''}</div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal();MFI=null;">閉じる</button>
+      ${MFI.items.length?`<button class="btn" onclick="mfApply()">この内容で取り込む</button>`:''}</div>`,'xl');
+}
+async function mfConnect(){
+  try{
+    const r=await fetch(API_BASE+'/mf/connect',{method:'POST',headers:headers()}); const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.url){ toast(d.message||'接続を始められませんでした。','err'); return; }
+    location.href=d.url;
+  }catch(e){ toast('通信に失敗しました。','err'); }
+}
+async function mfDisconnect(){
+  if(!confirm('Money Forward との接続を切ります。よろしいですか？')) return;
+  await fetch(API_BASE+'/mf/disconnect',{method:'POST',headers:headers()}).catch(()=>{});
+  openMfImport();
+}
+async function mfFetchApi(){
+  MFI.from=document.getElementById('mfFrom').value; MFI.to=document.getElementById('mfTo').value;
+  const box=document.getElementById('mfPrev'); if(box) box.innerHTML='<div class="empty">Money Forward から取得しています…</div>';
+  try{
+    const r=await fetch(API_BASE+'/mf/billings',{method:'POST',headers:headers(),body:JSON.stringify({from:MFI.from,to:MFI.to})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ if(box) box.innerHTML=`<div class="alertbar">${esc(d.message||('HTTP '+r.status))}</div>`; return; }
+    mfSetItems(d.items||[], 'api');
+  }catch(e){ if(box) box.innerHTML='<div class="alertbar">通信に失敗しました。</div>'; }
+}
+function mfReadCsv(file){
+  if(!file) return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    const buf=fr.result; let text=new TextDecoder('utf-8').decode(buf);
+    if(text.includes('�')){ try{ text=new TextDecoder('shift_jis').decode(buf); }catch(e){} }   // MF の CSV は Shift_JIS のことがある
+    const res=mfParseCsv(text);
+    if(res.error){ document.getElementById('mfPrev').innerHTML=`<div class="alertbar">${esc(res.error)}</div>`; return; }
+    mfSetItems(res.items, 'csv');
+  };
+  fr.readAsArrayBuffer(file);
+}
+function arCsvRows(text){
+  const rows=[]; let row=[], cell='', q=false; const s=String(text||'').replace(/^﻿/,'');
+  for(let i=0;i<s.length;i++){ const ch=s[i];
+    if(q){ if(ch==='"'&&s[i+1]==='"'){ cell+='"'; i++; } else if(ch==='"') q=false; else cell+=ch; }
+    else if(ch==='"') q=true; else if(ch===','){ row.push(cell); cell=''; }
+    else if(ch==='\n'){ row.push(cell); rows.push(row); row=[]; cell=''; } else if(ch!=='\r') cell+=ch; }
+  if(cell!==''||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(c=>String(c).trim()!==''));
+}
+/** MF 請求書 CSV → そろえた形。列は見出しの候補で探す（出力の設定で順番が変わるため）。 */
+function mfParseCsv(text){
+  const rows=arCsvRows(text); if(rows.length<2) return { error:'CSV に行がありません。' };
+  const head=rows[0].map(h=>String(h).trim().normalize('NFKC'));
+  const col=names=>{ for(const n of names){ const i=head.findIndex(h=>h===n.normalize('NFKC')); if(i>=0) return i; } return -1; };
+  const C={ id:col(['ID','請求書ID','id']), number:col(['請求書番号','請求番号','billing_number']),
+    partnerId:col(['取引先ID','partner_id']), partner:col(['取引先名','取引先','請求先','partner_name']),
+    billingDate:col(['請求日','発行日','billing_date']), salesDate:col(['売上計上日','計上日','sales_date']),
+    dueDate:col(['お支払期限','支払期限','入金期日','支払期日','due_date']),
+    total:col(['合計金額','請求金額','合計','金額(税込)','税込金額','total_price']), subtotal:col(['小計','小計金額','税抜金額','金額(税抜)','subtotal_price']) };
+  const miss=[['取引先名',C.partner],['請求日',C.billingDate],['合計金額',C.total]].filter(x=>x[1]<0).map(x=>x[0]);
+  if(miss.length) return { error:`CSV に必要な列が見つかりません：${miss.join('・')}（見つかった見出し：${head.slice(0,12).join(' / ')}）` };
+  const d=v=>{ const m=String(v||'').trim().match(/^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/); return m? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : ''; };
+  const v=(r,i)=>i>=0? String(r[i]??'').trim() : '';
+  const items=rows.slice(1).map(r=>({
+    mfId: v(r,C.id), number:v(r,C.number), partnerId:v(r,C.partnerId), partnerName:v(r,C.partner),
+    billingDate:d(v(r,C.billingDate)), salesDate:d(v(r,C.salesDate)), dueDate:d(v(r,C.dueDate)),
+    total:Math.round(num(v(r,C.total))), subtotal: C.subtotal>=0 && v(r,C.subtotal)!==''? Math.round(num(v(r,C.subtotal))) : null,
+  })).filter(x=>x.partnerName && (x.billingDate||x.salesDate) && x.total);
+  items.forEach(x=>{ if(!x.mfId) x.mfId = x.number? 'no:'+x.number : `csv:${arNormName(x.partnerName)}:${x.billingDate}:${x.total}`; });
+  return items.length? { items } : { error:'取り込める行がありませんでした（取引先名・請求日・合計金額 が入っている行が必要です）。' };
+}
+function mfSetItems(items, source){
+  MFI.items=items; MFI.source=source; MFI.map={};
+  const cos=(DB.companies||[]).filter(c=>!c._gone);
+  const byPid={}; cos.forEach(c=>{ if(c.mfPartnerId) byPid[String(c.mfPartnerId)]=c; });
+  const byName={}; cos.forEach(c=>{ const k=arNormName(c.mfPartnerName||c.name); if(!k) return; (byName[k]=byName[k]||[]).push(c); });
+  items.forEach(x=>{
+    const key=mfPartnerKey(x); if(MFI.map[key]!==undefined) return;
+    let c=x.partnerId&&byPid[x.partnerId];
+    if(!c){ const hit=byName[arNormName(x.partnerName)]||[]; if(hit.length===1) c=hit[0]; }
+    MFI.map[key]= c? String(c.id) : '';
+  });
+  mfDraw();
+}
+const mfPartnerKey = x => x.partnerId? 'id:'+x.partnerId : 'nm:'+arNormName(x.partnerName);
+/** 1件の MF 請求 → invoices の形 */
+function mfToInvoice(x, companyId){
+  const bm=(x.salesDate||x.billingDate).slice(0,7);
+  const rec={ companyId, bookMonth:bm, issueDate:x.billingDate||x.salesDate, dueDate:x.dueDate||'', total:num(x.total),
+    no:x.number||'', note:x.title||'', items:[], status:'確定', locked:true, source:'mf', mfId:String(x.mfId), mfPartnerId:x.partnerId||'' };
+  if(x.subtotal!=null && x.subtotal!=='') rec.subtotal=num(x.subtotal);
+  return rec;
+}
+/** 取り込み先の既存請求（mfId → 無ければ 同じ取引先の同じ請求書番号の MF 請求） */
+function mfExisting(x, companyId){
+  const list=(DB.invoices||[]).filter(i=>i.source==='mf');
+  return list.find(i=>String(i.mfId)===String(x.mfId))
+    || (x.number? list.find(i=>String(i.no)===String(x.number) && String(i.companyId)===String(companyId)) : null) || null;
+}
+/** 取り込みの計画（画面の確認と、実際の取り込みで同じものを使う） */
+function mfPlan(){
+  const plan={ add:[], upd:[], same:[], unmapped:[], dupWarn:[] };
+  MFI.items.forEach(x=>{
+    const cid=MFI.map[mfPartnerKey(x)];
+    if(!cid || cid==='__skip'){ plan.unmapped.push(x); return; }
+    const rec=mfToInvoice(x, cid==='__new'? '__new' : cid), ex=cid==='__new'? null : mfExisting(x, cid);
+    if(ex){
+      if(ex.status==='取消') rec.status='取消';          // こちらで取消にした請求は、取り込み直しても生き返らせない
+      const keys=['companyId','bookMonth','issueDate','dueDate','total','subtotal','no'];
+      (keys.some(k=>String(ex[k]??'')!==String(rec[k]??'')) || String(ex.mfId)!==String(rec.mfId))? plan.upd.push({x,rec,ex}) : plan.same.push({x,rec,ex});
+    }else{
+      plan.add.push({x,rec});
+      if(cid!=='__new' && (DB.invoices||[]).some(i=>i.source!=='mf' && AR_LIVE(i) && String(i.companyId)===String(cid) && arYmOfInv(i)===rec.bookMonth)) plan.dupWarn.push({x,rec});
+    }
+  });
+  return plan;
+}
+function mfPreviewHtml(){
+  const groups={};
+  MFI.items.forEach(x=>{ const k=mfPartnerKey(x); (groups[k]=groups[k]||{ k, name:x.partnerName, n:0, total:0 }); groups[k].n++; groups[k].total+=num(x.total); });
+  const cos=(DB.companies||[]).filter(c=>!c._gone && c.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  const P=mfPlan();
+  const g=Object.values(groups).sort((a,b)=>(MFI.map[a.k]?1:0)-(MFI.map[b.k]?1:0) || b.total-a.total);
+  return `<div class="ar-mf-sum">
+      <span>読み込み <b>${MFI.items.length}</b>件（${MFI.source==='api'?'API':'CSV'}）</span>
+      <span>新規 <b>${P.add.length}</b></span><span>更新 <b>${P.upd.length}</b></span><span class="muted">変更なし ${P.same.length}</span>
+      ${P.unmapped.length?`<span class="minus">取引先が未対応 ${P.unmapped.length}件（取り込みません）</span>`:''}
+    </div>
+    ${P.dupWarn.length?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に、このシステムで作った請求がすでにある分が ${P.dupWarn.length}件あります
+      （${esc([...new Set(P.dupWarn.map(d=>arCoName(d.rec.companyId)+' '+d.rec.bookMonth))].slice(0,6).join('、'))}）。二重計上にならないよう、古い方を 取消 にするか確認してください。</div>`:''}
+    <div class="table-wrap" style="max-height:46vh;"><table>
+      <thead><tr><th>MF の取引先</th><th class="r">件数</th><th class="r">合計（税込）</th><th>このシステムの取引先</th></tr></thead>
+      <tbody>${g.map(x=>`<tr><td>${esc(x.name)}</td><td class="r num">${x.n}</td><td class="r num">${moneyPlain(x.total)}</td>
+        <td><select onchange="MFI.map['${attr(x.k)}']=this.value;document.getElementById('mfPrev').innerHTML=mfPreviewHtml();" style="min-width:240px;${MFI.map[x.k]?'':'border-color:var(--danger);'}">
+          <option value="">— 選んでください —</option>
+          <option value="__new" ${MFI.map[x.k]==='__new'?'selected':''}>＋ 新しい得意先として作る（${esc(x.name)}）</option>
+          <option value="__skip" ${MFI.map[x.k]==='__skip'?'selected':''}>取り込まない</option>
+          ${cos.map(c=>`<option value="${attr(c.id)}" ${String(MFI.map[x.k])===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></td></tr>`).join('')}
+      </tbody></table></div>`;
+}
+function mfApply(){
+  if(!MFI || !MFI.items.length) return;
+  /* 新しく作る取引先を先に作り、対応表を本物の ID に置き換える */
+  const newCo={};
+  Object.keys(MFI.map).forEach(k=>{
+    if(MFI.map[k]!=='__new') return;
+    const x=MFI.items.find(i=>mfPartnerKey(i)===k); if(!x) return;
+    const { record }=commitRecord('companies', { name:x.partnerName, kind:'得意先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%',
+      mfPartnerId:x.partnerId||'', mfPartnerName:x.partnerName }, {});
+    newCo[k]=String(record.id); MFI.map[k]=String(record.id);
+  });
+  const P=mfPlan();
+  if(!P.add.length && !P.upd.length){ toast('取り込む変更はありませんでした。','ok'); return; }
+  if(P.dupWarn.length && !confirm(`同じ取引先・同じ計上月に このシステムの請求がすでにある分が ${P.dupWarn.length}件あります。\n二重計上にならないか確認しましたか？ 取り込みますか？`)) return;
+  const touched=new Set();
+  P.add.forEach(({rec})=>{ commitRecord('invoices', rec, {}); touched.add(String(rec.companyId)); });
+  P.upd.forEach(({rec,ex})=>{ commitRecord('invoices', rec, { existingId:ex.id }); touched.add(String(rec.companyId)); touched.add(String(ex.companyId)); });
+  /* 取引先に MF の取引先を覚えさせる（次回から自動で対応） */
+  Object.keys(MFI.map).forEach(k=>{
+    const cid=MFI.map[k]; if(!cid || cid==='__skip' || newCo[k]) return;
+    const x=MFI.items.find(i=>mfPartnerKey(i)===k), c=findById('companies',cid); if(!x||!c) return;
+    if(String(c.mfPartnerId||'')!==String(x.partnerId||'') || String(c.mfPartnerName||'')!==x.partnerName)
+      commitRecord('companies', { mfPartnerId:x.partnerId||'', mfPartnerName:x.partnerName }, { existingId:cid });
+  });
+  touched.forEach(id=>arApplyUnallocated(id));
+  const msg=`取り込みました：新規 ${P.add.length}件 ／ 更新 ${P.upd.length}件${P.unmapped.length?` ／ 未対応で見送り ${P.unmapped.length}件`:''}`;
+  MFI=null; closeModal(); renderPage(CURRENT_PAGE); toast(msg,'ok');
+}
+
 function viewInvoices(){
   const p='invoices';
   const q=(SEARCH[p]||'').toLowerCase();
@@ -2738,9 +3331,7 @@ function viewReceipts(){
 
   const kpis=`<div class="kpi-grid">
     <div class="kpi"><div class="lbl">今月の入金</div><div class="num plus">${moneyPlain(thisM.reduce((s,x)=>s+num(x.amount),0))}</div><div class="sub">${thisM.length}件</div></div>
-    <div class="kpi"><div class="lbl">未回収残高</div><div class="num">${moneyPlain(arTotal())}</div></div>
-    <div class="kpi"><div class="lbl">未消込の入金</div><div class="num ${unAllocated()>0?'minus':''}">${moneyPlain(unAllocated())}</div>
-      <div class="sub">入金したが請求に紐づいていない額</div></div>
+    <div class="kpi clickable" onclick="goto('arbook')"><div class="lbl">売掛金残高</div><div class="num">${arAmt(arTotals().balance)}</div><div class="sub">売掛金の表を見る →</div></div>
   </div>`;
 
   const cols=[
@@ -2748,11 +3339,7 @@ function viewReceipts(){
     {key:'companyId', label:'取引先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ar')},
     {key:'amount', label:'入金額', cls:'r', noFilter:true, val:r=>`<b class="num plus">${moneyPlain(r.amount)}</b>`},
     {key:'fee', label:'振込手数料', cls:'r', noFilter:true, val:r=>money(r.fee)},
-    {key:'alloc', label:'消込先', noFilter:true, val:r=>{
-      const a=(r.allocations||[]);
-      if(!a.length) return '<span class="badge b-amber">未消込</span>';
-      const first=findById('invoices',a[0].invoiceId);
-      return `${esc(first?first.no:'-')}${a.length>1?` <span class="muted">他${a.length-1}件</span>`:''}`; }},
+    {key:'source', label:'取込元', raw:r=>PAY_SOURCE_LABEL[r.source||'manual']||r.source, val:r=>esc(PAY_SOURCE_LABEL[r.source||'manual']||r.source)},
     {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payments', r.id)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
     {key:'note', label:'備考', noFilter:true, val:r=>esc(r.note||'')},
@@ -2764,10 +3351,13 @@ function viewReceipts(){
     ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payments')">${IC.doc} CSV出力</button>
       <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
 
-  return pageShell({ title:'入金・消込', count:list.length, shown:rows.length,
-    sub:'入金は予実（売上）に影響しません。売掛金の残高が減ります。',
+  return pageShell({ title:'入金', count:list.length, shown:rows.length,
+    sub:'入金は予実（売上）に影響しません。取引先の売掛金残高が減ります。',
     tools, body: kpis+dataTable(p, rows, cols, { allRows:list, onRow:r=>`openPayment('${r.id}')` }) });
 }
+/* 入金の出どころ。いまは手入力だけ。銀行・Money Forward などから取り込むときは
+   payments に source（'bank' / 'mf' など）と 外部ID（extId）を付けて入れる — 計算は source を見ない。 */
+const PAY_SOURCE_LABEL = { manual:'手入力', mf:'Money Forward', bank:'銀行', api:'API', csv:'CSV' };
 function unAllocated(){
   return (DB.payments||[]).filter(p=>p.status!=='取消')
     .reduce((s,p)=>s+Math.max(0, num(p.amount)-(p.allocations||[]).reduce((t,a)=>t+num(a.amount),0)),0);
@@ -2789,43 +3379,28 @@ function openPayment(id, preset){
     note: p? p.note : '',
     allocations: p? (p.allocations||[]).map(a=>Object.assign({},a)) : [] };
   drawPaymentModal();
-  if(!id && preset?.focusInvoice) setTimeout(()=>payAuto(),0);
 }
 function drawPaymentModal(){
   const c=PAY_CTX;
-  const open=openInvoices().filter(i=>!c.companyId||String(i.companyId)===String(c.companyId))
-    .sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||'')));
-  const allocMap={}; (c.allocations||[]).forEach(a=>allocMap[a.invoiceId]=num(a.amount));
-  const allocSum=Object.values(allocMap).reduce((s,v)=>s+v,0);
-  const rest=num(c.amount)-allocSum;
-  const rows=open.map(i=>{
-    const bal=balanceOfInvoice(i)+ (c.id? (allocMap[i.id]||0) : 0);
-    return `<tr><td>${esc(i.no)}</td><td>${esc(i.bookMonth||'')}</td>
-      <td>${isOverdue(i)?`<span class="badge b-red">${esc(i.dueDate)}</span>`:esc(i.dueDate||'')}</td>
-      <td class="r num">${moneyPlain(bal)}</td>
-      <td style="width:130px;"><input class="num" style="width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:right;font-size:12px;"
-        value="${allocMap[i.id]?moneyPlain(allocMap[i.id]):''}" oninput="fmtMoneyInput(this);payAlloc('${i.id}',this.value)" placeholder="0"></td></tr>`;
-  }).join('');
+  const cos=(DB.companies||[]).filter(x=>!x._gone && (x.kind!=='仕入先' || String(x.id)===String(c.companyId)))
+    .slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  const bal = c.companyId? arMonthly(c.companyId,[thisMonth()])[0] : null;
+  /* ★ 2026-09-14: 請求書ごとの消込はしない。入金は取引先の売掛金残高から差し引くだけ。
+     （督促・資金繰り・API のために、保存時に 古い請求から自動で充てる → arFifoAlloc） */
   openModal(`<h3>${c.id?'入金の修正':'入金を記録'}</h3>
-    <div class="mdsub">1回の振込で複数の請求を消し込めます。差額は「未消込」として残ります。</div>
+    <div class="mdsub">入金は取引先の売掛金残高から差し引きます（請求書ごとの消込は不要です）。</div>
     <div class="form-grid">
       <div><label>入金日</label><input type="date" value="${attr(c.date)}" onchange="PAY_CTX.date=this.value"></div>
-      <div><label>取引先</label><select onchange="PAY_CTX.companyId=this.value;PAY_CTX.allocations=[];drawPaymentModal()">
-        <option value="">-</option>${(DB.companies||[]).filter(x=>!x._gone).map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      <div><label>入金額</label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PAY_CTX.amount=num(this.value);payRefreshRest()"></div>
-      <div><label>振込手数料（先方負担分）</label><input class="num" style="text-align:right;" value="${c.fee?moneyPlain(c.fee):''}" oninput="fmtMoneyInput(this);PAY_CTX.fee=num(this.value)"></div>
+      <div><label>取引先</label><select onchange="PAY_CTX.companyId=this.value;drawPaymentModal()">
+        <option value="">-</option>${cos.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div><label>入金額</label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PAY_CTX.amount=num(this.value)"></div>
+      <div><label>振込手数料（先方負担分）</label><input class="num" style="text-align:right;" value="${c.fee?moneyPlain(c.fee):''}" oninput="fmtMoneyInput(this);PAY_CTX.fee=num(this.value)">
+        <div class="fhelp">差し引かれて入金された手数料。売掛金はこの分も減ります。</div></div>
       <div><label>方法</label><select onchange="PAY_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div><label>備考</label><input value="${attr(c.note||'')}" oninput="PAY_CTX.note=this.value"></div>
     </div>
-    <div class="form-section" style="margin-top:14px;">${IC.yen} 消込先の請求書
-      <a class="pillbtn pill-save" style="margin-left:auto;" onclick="payAuto()">期日の古い順に自動で割り当て</a></div>
-    ${c.companyId? (open.length? `<div class="table-wrap"><table>
-        <thead><tr><th>請求番号</th><th>計上月</th><th>期日</th><th class="r">残高</th><th class="r">消込額</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>`
-      : '<div class="infobar">この取引先に未回収の請求はありません。</div>')
-      : '<div class="warnbar">先に取引先を選んでください。</div>'}
-    <div id="payRest" style="margin-top:10px;font-size:13px;text-align:right;">
-      消込合計 <b class="num">${moneyPlain(allocSum)}</b> ／ 未消込 <b class="num ${rest?(rest>0?'minus':'plus'):''}">${moneyPlain(rest)}</b></div>
+    ${bal? `<div class="infobar" style="margin-top:12px;">この取引先の売掛金残高（今月末時点）：<b class="num">¥${arAmt(bal.closing)}</b>
+      ${bal.overdue>0?` ・ <span class="minus">うち期限超過 ¥${moneyPlain(bal.overdue)}</span>`:''}${c.id?' （この入金を含む）':''}</div>` : ''}
     <div class="modal-actions ${c.id?'split':''}">
       ${c.id?`<button class="btn danger" onclick="payDelete()">削除</button>`:''}
       <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
@@ -2859,12 +3434,12 @@ function payAuto(){
 function paySave(){
   const c=PAY_CTX;
   if(!c.companyId||!num(c.amount)){ toast('取引先と入金額を入力してください。','err'); return; }
-  const s=(c.allocations||[]).reduce((t,a)=>t+num(a.amount),0);
-  if(s>num(c.amount)+num(c.fee)+1){
-    if(!confirm(`消込額（${moneyPlain(s)}）が入金額を超えています。このまま保存しますか？`)) return;
-  }
+  /* 充て先は 古い請求から自動。取引先・金額が変わっていなければ 今の充て先をそのまま使う */
+  const old=c.id? findById('payments',c.id) : null;
+  const same = old && String(old.companyId)===String(c.companyId) && num(old.amount)===num(c.amount) && num(old.fee)===num(c.fee);
+  const allocations = same? (old.allocations||[]) : arFifoAlloc(c.companyId, num(c.amount)+num(c.fee), c.id);
   commitRecord('payments', { companyId:c.companyId, date:c.date, amount:num(c.amount), fee:num(c.fee),
-    method:c.method, note:c.note, allocations:c.allocations, status:'確定' }, { existingId:c.id });
+    method:c.method, note:c.note, allocations, status:'確定' }, { existingId:c.id });
   closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast('入金を記録しました。','ok');
 }
 function payDelete(){
@@ -4317,7 +4892,7 @@ function viewDunning(){
     const pr=r.promise? `${esc(r.promise.date)}${r.promise.amount?`<div class="muted" style="font-size:10.5px;">${moneyPlain(r.promise.amount)}円</div>`:''}
       <span class="badge ${r.promise.state==='broken'?'b-red':(r.promise.state==='kept'?'b-green':'b-blue')}">${r.promise.state==='broken'?'過ぎた':(r.promise.state==='kept'?'守られた':'待ち')}</span>` : '<span class="zero">—</span>';
     const stageTpl = r.todo && r.todo.stage ? DUN_STAGE[r.todo.stage].tpl : (r.stage? DUN_STAGE[r.stage].tpl : 'd-ar-remind');
-    return `<tr onclick="coOpen('ar','${attr(r.companyId)}');goto('arco')" style="cursor:pointer;">
+    return `<tr onclick="openArLedger('${attr(r.companyId)}')" style="cursor:pointer;">
       <td><b>${esc(r.company.name||'')}</b> <span class="badge ${r.grade.cls}">${esc(r.grade.g)}</span>
         ${r.creditOver?'<span class="badge b-red" title="与信限度額を超えています">限度超過</span>':''}
         <div class="muted" style="font-size:10.5px;">${r.owner?'担当 '+esc(String(r.owner).split('@')[0]):'<span style="color:var(--warning);">担当未設定</span>'}</div></td>
@@ -5084,6 +5659,8 @@ function ledPerfBadge(companyId, side){
 
 /* ---------- 画面 ---------- */
 function openLedger(companyId, side){
+  /* ★ 2026-09-14: 売掛側は 売掛元帳（月ごとの残高）を開く。請求書の一覧ではない。 */
+  if(side!=='ap' && companyId){ openArLedger(companyId); return; }
   /* 台帳は 取引先別／支払先別 の中に移りました。どこの会社名を押しても、そこで開きます。 */
   const sd = side==='ap' ? 'ap' : 'ar';
   if(companyId){ LED_CO=String(companyId); CO_SEL[sd]=String(companyId); }
@@ -6454,9 +7031,11 @@ function markNotifSeen(){ try{ localStorage.setItem(NOTIF_SEEN_KEY, today()); }c
 const PAGE_GUIDE = {
   dashboard:  { step:'', what:'（入力はありません）', effect:'今日の数字：売上・未回収・支払予定・目標' },
 
+  arbook:     { step:'③', what:'<b>Money Forward から取り込む</b>（請求）→ 入金を記録。MF に無い請求だけ「請求額を手入力」',
+                effect:'取引先ごとに 前月残高＋請求−入金＝月末残高。期日を過ぎた残りは<b>期限超過</b>になります' },
   invoices:   { step:'③', what:'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>。単発は「＋ 個別に請求を作成」',
                 effect:'確定して初めて<b>売上</b>と<b>売掛金</b>になります' },
-  receipts:   { step:'④', what:'入金を記録し、<b>どの請求に充てるか</b>を決める（1回の振込で複数可）',
+  receipts:   { step:'④', what:'入金を記録する（取引先・入金日・金額）。請求書ごとの消込はしません',
                 effect:'売掛残高が減ります。損益は動きません' },
   aging:      { step:'⑤', what:'（入力なし）どの会社がどれだけ遅れているかを見る',
                 effect:'61日以上は要対応。会社名から台帳へ飛べます' },

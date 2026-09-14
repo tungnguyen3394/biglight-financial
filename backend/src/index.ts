@@ -16,6 +16,7 @@ import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from '
 import { checkCollections, checkMoneyRules, permOf } from './authz'
 import { initFiles, filesRouter } from './files'
 import { loadStateCached } from './statecache'
+import { mfRouter } from './mfinvoice'
 /* CSV_MAP_WORKER / CSV_MAP_ASSIGN は crmsync.ts に残してあります（人を扱う必要が戻ったら
    この import と下の map の分岐を足すだけ。公式 §16「使わなくなってもコードは消さない」）。 */
 import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY } from './crmsync'
@@ -513,6 +514,17 @@ app.use(filesRouter({
   audit: (email: string, action: string, id: string, detail: any) =>
     pool.query('INSERT INTO audit_log(actor_email,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5::jsonb)',
       [email, action, 'files', id, JSON.stringify(detail || {})]).then(() => {}).catch((e: any) => console.error('[files] audit:', e?.message)),
+}))
+
+/* ===================== Money Forward 請求書（読むだけ・mfinvoice.ts） =====================
+   MF_CLIENT_ID / MF_CLIENT_SECRET が無ければ /mf/status が configured:false を返すだけ。 */
+app.use(mfRouter({
+  fetch: (...a: Parameters<typeof fetch>) => fetch(...a),
+  cfgGet, cfgSet: (k: string, v: string) => cfgSet(k, v),
+  verify: requireActive,
+  audit: (email: string, action: string, detail: any) =>
+    pool.query('INSERT INTO audit_log(actor_email,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5::jsonb)',
+      [email, action, 'moneyforward', '', JSON.stringify(detail || {})]).then(() => {}).catch((e: any) => console.error('[mf] audit:', e?.message)),
 }))
 
 /* ===================== CRM連携 ===================== */

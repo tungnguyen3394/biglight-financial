@@ -124,6 +124,8 @@ export function docTotal(doc: any): number {
 export function docNet(doc: any): number {
   if (!doc) return 0
   if (Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items)
+  // Money Forward 等から取り込んだ請求は 税抜（subtotal）を持っている → それを使う（web/index.html と同じ式）
+  if (doc.subtotal != null && doc.subtotal !== '') return num(doc.subtotal)
   return Math.round(num(doc.total) / 1.1)
 }
 export const ymOfDoc = (d: any) => String((d && d.bookMonth) || '').slice(0, 7)
