@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
+code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -445,6 +445,55 @@ console.log('\n― 添付ファイル（画面側） ―');
   ctx.__x.setSession({ email:'test@biglight.jp', role:'Admin', status:'active' });
   eq('管理者には添付欄が出る', ctx.attSection('invoices','I1').includes('3件'), true);
   ctx.__x.setAttCounts({});
+}
+
+console.log('\n― 取引先モーダル（得意先／支払先・横3列） ―');
+/* ★ 2026-09-14: 新規登録・編集・詳細 を同じ3列にした。
+   見た目を変えても、フォームから項目が1つでも落ちると 保存でその値が消える。だから全項目を数える。 */
+{
+  const E = ctx.__x.ENTITIES.companies;
+  const modalHtml = fn => { el.innerHTML=''; fn(); return String(el.innerHTML); };
+  const allNamed = h => E.fields.every(f => h.includes(`name="${f.name}"`));
+
+  const fAr = modalHtml(()=>ctx.openForm('companies','C1'));
+  eq('得意先 編集は3列', (fAr.match(/class="co-col"/g)||[]).length, 3);
+  eq('得意先 編集は data-side=ar', fAr.includes('data-side="ar"'), true);
+  eq('得意先の文言は 入金サイト・入金日', fAr.includes('入金サイト') && fAr.includes('>入金日<'), true);
+  eq('得意先 編集に全項目が残る（保存で消えない）', allNamed(fAr), true);
+  eq('得意先 編集に 取引状況（売掛残高・請求ルール・台帳）', ['売掛残高','請求ルール','最終請求・入金','台帳を見る'].every(s=>fAr.includes(s)), true);
+  eq('得意先 編集に 添付の1行', fAr.includes('＋ ファイル追加'), true);
+  eq('保存する項目名は変えない（paySite/payDay）', fAr.includes('name="paySite"') && fAr.includes('name="payDay"'), true);
+
+  const fAp = modalHtml(()=>ctx.openForm('companies','C3'));
+  eq('支払先 編集は data-side=ap', fAp.includes('data-side="ap"'), true);
+  eq('支払先の文言は 支払サイト・支払日', fAp.includes('支払サイト') && fAp.includes('>支払日<') && fAp.includes('管理・口座情報'), true);
+  eq('支払先 編集にも全項目が残る（隠すだけ）', allNamed(fAp), true);
+  eq('支払先 編集に 振込先・口座', fAp.includes('name="bankInfo"'), true);
+
+  const dAr = modalHtml(()=>ctx.openDetail('companies','C1'));
+  eq('得意先 詳細も3列', (dAr.match(/class="co-col"/g)||[]).length, 3);
+  eq('詳細には入力欄を出さない', /name="(name|paySite|note)"/.test(dAr), false);
+  eq('得意先 詳細に 1か月後・末日', dAr.includes('1か月後') && dAr.includes('末日'), true);
+  const dAp = modalHtml(()=>ctx.openDetail('companies','C3'));
+  eq('支払先 詳細は 買掛残高・支払状況・最終支払', ['買掛残高','支払状況','最終支払','台帳を見る'].every(s=>dAp.includes(s)), true);
+  eq('支払先 詳細に 売掛のカードは出さない', dAp.includes('売掛残高'), false);
+
+  const fNew = modalHtml(()=>ctx.openForm('companies', null, {kind:'仕入先', closingDay:31, paySite:1, payDay:31}));
+  eq('新規登録は 支払先の見出し', fNew.includes('新規登録') && fNew.includes('data-side="ap"'), true);
+  eq('新規登録には 取引状況を出さない', fNew.includes('co-stats'), false);
+  eq('新規登録の添付は 保存後の案内', fNew.includes('保存すると付けられます'), true);
+  eq('新規登録にも全項目', allNamed(fNew), true);
+
+  /* 得意先なのに 支払の伝票もある会社 → 売掛・買掛を並べる（5枚） */
+  _db.bills.push({ id:'BCOT', companyId:'C1', status:'確定', bookMonth:'2025-09', dueDate:'2025-10-31', items:[{name:'x', amount:1000, taxCat:'対象外'}] });
+  const dBoth = modalHtml(()=>ctx.openDetail('companies','C1'));
+  eq('両方の動きがあれば 5枚', dBoth.includes('co-stat-row n5') && dBoth.includes('買掛残高') && dBoth.includes('売掛残高'), true);
+  _db.bills = _db.bills.filter(b=>b.id!=='BCOT');
+
+  eq('期日の見本（得意先）', ctx.coDuePreview({kind:'得意先', paySite:1, payDay:31}).includes('入金予定日'), true);
+  eq('期日の見本（支払先）', ctx.coDuePreview({kind:'仕入先', paySite:2, payDay:25}).includes('支払予定日'), true);
+  eq('サイト未入力なら案内', ctx.coDuePreview({kind:'仕入先', paySite:''}).includes('支払サイトを入れると'), true);
+  el.innerHTML='';
 }
 
 console.log('\n― 画面の入れ替えは1回だけ ―');

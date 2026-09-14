@@ -323,6 +323,73 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .form-section:first-child{margin-top:0;}
   .fhelp{font-size:11px; color:var(--muted); margin-top:3px; line-height:1.5;}
   @media(max-width:700px){ .form-grid{grid-template-columns:1fr;} }
+
+  /* ===== 取引先モーダル（得意先／支払先）: 横3列（大）→ 2列（中）→ 1列（スマホ） ===== */
+  .modal.modal-co{width:1320px; max-width:min(94vw,100%); max-height:94vh; padding:14px 20px 12px;}
+  .coform .lb-ap,.coform .lb-both{display:none;}
+  .coform[data-side=ap] .lb-ar,.coform[data-side=both] .lb-ar{display:none;}
+  .coform[data-side=ap] .lb-ap,.coform[data-side=both] .lb-both{display:inline;}
+  .coform[data-side=ar] [data-only=ap]:not(.hasv),.coform[data-side=ap] [data-only=ar]:not(.hasv){display:none;}
+  .co-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px;}
+  .co-title{display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; min-width:0;}
+  .modal .co-title h3{margin:0; font-size:16.5px;}
+  .co-mode{font-weight:600; color:var(--muted); font-size:13px; margin-left:8px;}
+  .co-dir{display:inline-block; font-size:12px; font-weight:600; padding:3px 11px; border-radius:999px; border:1px solid transparent;}
+  .co-dir.d-ar{background:#eaf3ff; color:#0b5cd7; border-color:#bcd7fb;}
+  .co-dir.d-ap{background:#f2ecff; color:#6941c6; border-color:#d9cbfa;}
+  .co-dir.d-both{background:#e7f7ec; color:#166534; border-color:#bee9cb;}
+  html.dark .co-dir.d-ar{background:#16233f; color:#7fb3ff; border-color:#2b4470;}
+  html.dark .co-dir.d-ap{background:#241b3a; color:#c4b5fd; border-color:#3d2f63;}
+  html.dark .co-dir.d-both{background:#13301f; color:#7bd79b; border-color:#28502f;}
+  .co-lock{font-size:11.5px; color:var(--muted);}
+  .co-x{flex:none; width:32px; height:32px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center; cursor:pointer;}
+  .co-x:hover{color:var(--text); background:var(--row-hover);}
+  .co3{display:grid; grid-template-columns:minmax(0,35fr) minmax(0,30fr) minmax(0,35fr); border:1px solid var(--border); border-radius:10px;}
+  .co-col{min-width:0; padding:10px 14px 12px;}
+  .co-col+.co-col{border-left:1px solid var(--border);}
+  .co-colhead{display:flex; align-items:center; gap:6px; font-weight:700; font-size:13px; color:var(--primary);
+    margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--border);}
+  .form-grid.co-sub{grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 10px;}
+  .co-sub > div{min-width:0;}
+  .form-grid.co-sub label{font-size:11.5px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .form-grid.co-sub input,.form-grid.co-sub select,.form-grid.co-sub textarea{padding:6px 9px; font-size:13px; border-radius:7px;}
+  .form-grid.co-sub textarea{min-height:0; height:66px; resize:vertical; line-height:1.5;}
+  .co-v > div{font-size:13.5px; min-height:24px; padding:1px 0 4px; border-bottom:1px dashed var(--border); overflow-wrap:anywhere;}
+  .co-note{max-height:4.8em; overflow:auto; white-space:pre-wrap;}
+  .co-preview{font-size:12px; line-height:1.6; background:var(--surface-2); border-radius:7px; padding:6px 9px;}
+  .co-stats{display:flex; gap:10px; align-items:stretch; margin-top:10px; min-width:0;}
+  .co-stats-lb{flex:none; display:flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:var(--muted);}
+  .co-stat-row{flex:1; min-width:0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px;}
+  .co-stat-row.n5{grid-template-columns:repeat(5,minmax(0,1fr));}
+  .co-stat{min-width:0; border:1px solid var(--border); border-radius:9px; padding:7px 11px; background:var(--card);}
+  .co-stat.click{cursor:pointer;}
+  .co-stat.click:hover{border-color:var(--primary); background:var(--row-hover);}
+  .co-stat .lbl{font-size:11px; font-weight:600; color:var(--muted);}
+  .co-stat .val,.co-stat .sub{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .co-stat .val{font-size:13px; margin-top:1px;}
+  .co-stat .val .big{font-size:17px;}
+  .co-stat .sub{font-size:11px; color:var(--muted); margin-top:2px;}
+  .co-att{display:flex; align-items:center; gap:8px; min-width:0; margin-top:8px; padding:6px 11px; border:1px solid var(--border); border-radius:9px; font-size:12.5px;}
+  .co-att-lb{flex:none; display:inline-flex; align-items:center; gap:5px; font-weight:700; color:var(--muted);}
+  .co-att-list{flex:1; min-width:0; display:flex; flex-wrap:wrap; gap:6px;}
+  .co-chip{max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; font-size:12px; font-weight:600;
+    color:var(--primary); background:var(--primary-soft); padding:2px 9px; border-radius:6px;}
+  .co-chip.more{color:var(--muted); background:var(--surface-2);}
+  .co-att-add{flex:none;}
+  .modal-co .modal-actions{margin-top:10px; padding-top:10px;}
+  @media(max-width:1100px){
+    .co3{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .co-col:nth-child(3){grid-column:1/-1; border-left:none; border-top:1px solid var(--border);}
+    .co-stats{flex-direction:column; gap:6px;}
+    .co-stat-row,.co-stat-row.n5{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));}
+  }
+  @media(max-width:700px){
+    .co3{grid-template-columns:minmax(0,1fr);}
+    .co-col+.co-col{border-left:none; border-top:1px solid var(--border);}
+    .co-att{flex-wrap:wrap;}
+  }
+  @media(max-width:520px){ .form-grid.co-sub{grid-template-columns:minmax(0,1fr);} }
   .ac-wrap{position:relative;}
   .ac-list{position:absolute; top:calc(100% + 3px); left:0; right:0; background:var(--card); border:1px solid var(--border);
     border-radius:10px; box-shadow:0 10px 26px rgba(16,24,40,.14); z-index:70; max-height:250px; overflow-y:auto; display:none;}
@@ -1832,21 +1899,42 @@ function openForm(entKey, id, preset){
   /* 払い方を入れていない古い費目は「即払い」。空欄のまま '-' と出ると、どちらか分からない。 */
   if(entKey==='costItems' && !row.payMode) row.payMode='即払い';
   FORM_CTX = { entity:entKey, id: isEdit?id:null, items: (row.items||[]).map(x=>Object.assign({},x)) };
+  /* 取引先（得意先／支払先）は 3列の専用レイアウト。入力欄そのものは下の formFieldHtml を共用する。 */
+  if(entKey==='companies') return openCompanyModal('form', row, isEdit?id:null);
 
   let sec=null;
   const fields = E.fields.map(f=>{
     let hd='';
     if(f.section && f.section!==sec){ sec=f.section; hd=secHead(f); }
+    return hd+formFieldHtml(entKey, E, f, row);
+  }).join('');
+
+  openModal(`
+    <h3>${isEdit?'編集':'新規作成'} — ${esc(E.label)}</h3>
+    ${row.source==='crm'?`<div class="mdsub">CRM連携の項目は編集できません。会計情報だけこの画面で入力します。</div>`:''}
+    <form id="entForm" class="form-grid" onsubmit="return saveForm(event)">${fields}</form>
+    <div class="modal-actions ${isEdit&&canDelete(page)?'split':''}">
+      ${isEdit&&canDelete(page)?`<button class="btn danger" onclick="deleteFromForm('${entKey}','${id}')">削除</button>`:''}
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" onclick="closeModal()">キャンセル</button>
+        <button class="btn" onclick="saveForm(event)">保存</button>
+      </div>
+    </div>`, (E.fields.some(f=>f.type==='items') || E.fields.length>7) ? 'lg' : '');
+}
+/** フォームの1項目（ラベル＋入力欄）。o で見た目だけ差し替えられる（保存される値は変わらない）:
+    o.label（HTML可）/ o.options / o.ph / o.noHelp（説明は title に回して高さを取らない）/ o.cls / o.attrs */
+function formFieldHtml(entKey, E, f, row, o){
+    o=o||{};
     const locked = (E.readOnly || (f.crm && row.source==='crm'));
     const v = row[f.name]==null? '' : row[f.name];
     let input='';
     if(f.type==='items'){
       input = `<div id="itemsBox">${itemsEditorHtml()}</div>`;
-      return hd+`<div class="full"><label>${esc(f.label)}</label>${input}</div>`;
+      return `<div class="full"><label>${esc(f.label)}</label>${input}</div>`;
     }
     if(f.type==='textarea') input=`<textarea name="${f.name}" ${locked?'readonly':''}>${esc(v)}</textarea>`;
     else if(f.type==='select') input=`<select name="${f.name}" ${locked?'disabled':''}><option value="">-</option>`+
-      selOpts(f.options||[], v)+`</select>`;
+      selOpts(o.options||f.options||[], v)+`</select>`;
     else if(f.type==='account'){
       input=`<select name="${f.name}" ${locked?'disabled':''}><option value="">-</option>`+accountOptionsHtml(v)+`</select>`;
       /* 「欲しい科目が無い」ときに、どこへ行けばいいかをその場で言う。
@@ -1874,26 +1962,15 @@ function openForm(entKey, id, preset){
     else if(f.type==='money') input=`<input name="${f.name}" type="text" inputmode="numeric" class="num" style="text-align:right;" value="${attr(v===''?'':moneyPlain(v))}" oninput="fmtMoneyInput(this)" ${locked?'readonly':''}>`;
     else if(f.type==='month') input=`<input name="${f.name}" type="month" value="${attr(String(v).slice(0,7))}" ${locked?'readonly':''}>`;
     else if(f.type==='date') input=`<input name="${f.name}" type="date" value="${attr(String(v).slice(0,10))}" ${locked?'readonly':''}>`;
-    else if(f.type==='number') input=`<input name="${f.name}" type="number" value="${attr(v)}" ${locked?'readonly':''}>`;
-    else if(f.name==='owner') input=`<input name="${f.name}" type="text" value="${attr(v)}" placeholder="${attr(f.ph||'')}" list="ownerList" autocomplete="off">
+    else if(f.type==='number') input=`<input name="${f.name}" type="number" value="${attr(v)}"${o.ph?` placeholder="${attr(o.ph)}"`:''} ${locked?'readonly':''}>`;
+    else if(f.name==='owner') input=`<input name="${f.name}" type="text" value="${attr(v)}" placeholder="${attr(o.ph||f.ph||'')}" list="ownerList" autocomplete="off">
       <datalist id="ownerList">${(_USERS||[]).filter(u=>u.status==='active').map(u=>`<option value="${attr(u.email)}">${esc(u.name||'')}</option>`).join('')}</datalist>`;
-    else input=`<input name="${f.name}" type="text" value="${attr(v)}" placeholder="${attr(f.ph||'')}" ${locked?'readonly':''}>`;
-    return hd+`<div class="${f.full?'full':''}">
-      <label>${esc(f.label)}${f.req?' <span style="color:var(--danger)">*</span>':''}${locked?' <span class="tag crm">CRM</span>':''}</label>
-      ${input}${f.help?`<div class="fhelp">${f.help}</div>`:''}</div>`;
-  }).join('');
-
-  openModal(`
-    <h3>${isEdit?'編集':'新規作成'} — ${esc(E.label)}</h3>
-    ${row.source==='crm'?`<div class="mdsub">CRM連携の項目は編集できません。会計情報だけこの画面で入力します。</div>`:''}
-    <form id="entForm" class="form-grid" onsubmit="return saveForm(event)">${fields}</form>
-    <div class="modal-actions ${isEdit&&canDelete(page)?'split':''}">
-      ${isEdit&&canDelete(page)?`<button class="btn danger" onclick="deleteFromForm('${entKey}','${id}')">削除</button>`:''}
-      <div style="display:flex;gap:8px;">
-        <button class="btn secondary" onclick="closeModal()">キャンセル</button>
-        <button class="btn" onclick="saveForm(event)">保存</button>
-      </div>
-    </div>`, (E.fields.some(f=>f.type==='items') || E.fields.length>7) ? 'lg' : '');
+    else input=`<input name="${f.name}" type="text" value="${attr(v)}" placeholder="${attr(o.ph||f.ph||'')}" ${locked?'readonly':''}>`;
+    const cls=[f.full?'full':'', o.cls||''].filter(Boolean).join(' ');
+    const tip=(o.noHelp && f.help)? ` title="${attr(String(f.help).replace(/<[^>]+>/g,''))}"` : '';
+    return `<div class="${cls}"${o.attrs||''}${tip}>
+      <label>${o.label!=null?o.label:esc(f.label)}${f.req?' <span style="color:var(--danger)">*</span>':''}${locked?' <span class="tag crm">CRM</span>':''}</label>
+      ${input}${(f.help&&!o.noHelp)?`<div class="fhelp">${f.help}</div>`:''}</div>`;
 }
 function selOpts(list, v){
   return list.map(o=>{ const val=typeof o==='object'?o.k:o, lb=typeof o==='object'?o.label:o;
@@ -2059,6 +2136,7 @@ function kv(label, value){ return `<div style="display:flex;gap:10px;padding:6px
 
 function openDetail(entKey, id){
   const E=ENTITIES[entKey], row=findById(E.key,id); if(!row) return;
+  if(entKey==='companies') return openCompanyModal('detail', row, row.id);
   let html='';
   if(entKey==='invoices'||entKey==='bills') html = docDetailHtml(entKey,row);
   else{
@@ -2072,7 +2150,6 @@ function openDetail(entKey, id){
       if(f.type==='account') v = v? esc(v+' '+accountLabel(v)) : '';
       return hd+kv(f.label, esc(v==null?'':String(v)));
     }).join('');
-    if(entKey==='companies') html += companyExtraDetail(row);
   }
   const page=E.page;
   html += attSection(entKey, row.id);
@@ -3885,6 +3962,7 @@ async function attRefresh(entity, id, canDel){
   try{
     const r=await fetch(API_BASE+'/files?entity='+encodeURIComponent(entity)+'&id='+encodeURIComponent(id),{headers:headers()});
     const d=await r.json().catch(()=>({}));
+    if(entity==='companies' && r.ok) coAttPaint(id, d.items||[]);      // 下の取引先モーダルの1行も付けた・消したに合わせる
     const box=document.getElementById('attList'); if(!box) return;      // 待っている間に閉じられていたら何もしない
     if(!r.ok){ box.innerHTML=`<div class="alertbar">${esc(d.message||'添付を取得できませんでした（HTTP '+r.status+'）')}</div>`; return; }
     const items=d.items||[];
@@ -5610,16 +5688,231 @@ function viewCompanies(mode){
       (noRule? `<div class="warnbar">請求ルールが未設定の得意先が ${noRule}社あります。ルールを作ると毎月の請求が自動で作られます。</div>`:'')
       +dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('companies','${r.id}')` }) });
 }
-function companyExtraDetail(c){
-  const rules=rulesOfCompany(c.id);
-  return `<div class="form-section" style="margin-top:14px;">${IC.yen} 取引状況
-      <a class="pillbtn pill-manage" style="margin-left:auto;" onclick="closeModal();openLedger('${c.id}','ar')">台帳（履歴・タイムライン）を見る</a></div>
-    ${kv('売掛残高', `<b class="num">${moneyPlain(arBalanceOf(c.id))}</b> 円 ${ledPerfBadge(c.id,'ar')}`)}
-    ${kv('買掛残高', `<b class="num">${moneyPlain(apBalanceOf(c.id))}</b> 円 ${ledPerfBadge(c.id,'ap')}`)}
-    ${kv('請求ルール', rules.length? rules.map(r=>esc(ruleText(r))).join('<br>')+
-      `<div style="margin-top:6px;"><a class="pillbtn pill-manage" onclick="closeModal();openRules('${c.id}')">ルールを編集</a></div>`
-      : `<span class="muted">未設定</span> <a class="pillbtn pill-new" onclick="closeModal();openRules('${c.id}')">ルールを作る</a>`)}
-    ${c._crmDiff&&c._crmDiff.length? `<div class="warnbar" style="margin-top:10px;">${IC.warn} CRMの内容と手入力が違う項目があります：${esc(c._crmDiff.join('、'))}</div>`:''}`;
+/* ============================================================================
+   取引先モーダル（得意先／支払先）— 新規登録・編集・詳細 を同じ「横3列」で
+   ----------------------------------------------------------------------------
+   ★ 2026-09-14 利用者の指示:
+     得意先 ＝ BIGLIGHT が お金を受け取る相手（請求書を出す・売掛金）
+     支払先 ＝ BIGLIGHT が お金を払う相手（請求書を受け取る・買掛金）
+     ① 基本情報 ｜ ② 条件 ｜ ③ 管理・口座 を横に並べ、縦に長くしない（1920×1080 で1画面）。
+   ★ データは今までどおり companies 1つ（kind: 得意先／仕入先／両方）。項目名も変えない
+     （paySite・payDay は API・MCP・CRM連携がそのまま読む）。変えるのは画面の文言だけ:
+     得意先 ＝ 入金サイト・入金日 ／ 支払先 ＝ 支払サイト・支払日。
+   ★ 区分に関係ない欄（例: 支払先の 請求書メール）は CSS で隠すだけ。フォームには残すので
+     保存しても値は消えない。すでに値が入っている欄は、区分に関係なく出したまま。
+   ========================================================================== */
+const coSideOf = kind => kind==='仕入先' ? 'ap' : (kind==='両方' ? 'both' : 'ar');
+/** 区分で文言を切り替える（.coform[data-side] で片方だけ見せる）。both を省くと ar と同じ。 */
+const coLb = (ar, ap, both) => `<span class="lb-ar">${ar}</span><span class="lb-ap">${ap}</span><span class="lb-both">${both==null?ar:both}</span>`;
+/* 保存する値は 得意先／仕入先／両方 のまま。見せ方だけ「支払先」。 */
+const CO_KIND_OPTS = [{k:'得意先',label:'得意先（受け取る）'},{k:'仕入先',label:'支払先（払う）'},{k:'両方',label:'両方'}];
+/* only: その区分のときだけ出す欄（ar=得意先 / ap=支払先）。full: 列の中で横いっぱい。 */
+const CO_LAYOUT = [
+  { icon:'building', head:()=>'基本情報', fields:[
+    {n:'name', label:'会社名', full:1}, {n:'kana', full:1},
+    {n:'kind', options:CO_KIND_OPTS}, {n:'corpNo'},
+    {n:'zip'}, {n:'phone'},
+    {n:'staffName'}, {n:'field', label:'業種・分野'},
+    {n:'email', full:1}, {n:'address', full:1} ]},
+  { icon:'yen', head:()=>coLb('請求・回収条件','支払条件','請求・支払条件'), preview:true, fields:[
+    {n:'closingDay', label:'締日', ph:'31＝末日'},
+    {n:'paySite', label:coLb('入金サイト（か月後）','支払サイト（か月後）','サイト（か月後）'), ph:'1＝翌月'},
+    {n:'payDay', label:coLb('入金日','支払日','入金日・支払日'), ph:'31＝末日'},
+    {n:'dueAdjust', label:'土日祝の場合'},
+    {n:'creditLimit', only:'ar'} ]},
+  { icon:'pen', head:()=>coLb('管理情報','管理・口座情報','管理・口座情報'), fields:[
+    {n:'owner', label:'BIGLIGHT担当者', ph:'メール'}, {n:'taxCat', label:'税区分'},
+    {n:'billEmail', label:'請求先メール', full:1, only:'ar'},
+    {n:'billTo', full:1, only:'ar'},
+    {n:'bankInfo', full:1, only:'ap'},
+    {n:'note', full:1} ]},
+];
+
+function openCompanyModal(mode, row, id){
+  const E=ENTITIES.companies, isForm=mode==='form', isEdit=!!id;
+  const c = id? findById('companies', id) : null;          // 取引状況・添付は 保存済みの会社だけ
+  const side=coSideOf(row.kind);
+  const hasv = n => row[n]!=null && String(row[n]).trim()!=='';
+  const placed = new Set(CO_LAYOUT.flatMap(col=>col.fields.map(x=>x.n)));
+  const cols = CO_LAYOUT.map((col,ci)=>{
+    const items=col.fields.slice();
+    /* 宣言に項目が増えても 画面から落ちない（＝保存で消えない）ように、最後の列の 備考 の前に足す */
+    if(ci===CO_LAYOUT.length-1) E.fields.filter(f=>!placed.has(f.name)).forEach(f=>items.splice(items.length-1,0,{n:f.name, full:1}));
+    const cells=items.map(it=>{
+      const f=E.fields.find(x=>x.name===it.n); if(!f) return '';
+      const cls=[it.full?'full':'', it.only&&hasv(it.n)?'hasv':''].filter(Boolean).join(' ');
+      const attrs=it.only? ` data-only="${it.only}"` : '';
+      if(isForm) return formFieldHtml('companies', E, Object.assign({}, f, {full:false}), row,
+        { label:it.label, options:it.options, ph:it.ph, noHelp:true, cls, attrs });
+      return `<div class="co-v ${cls}"${attrs}><label>${it.label!=null?it.label:esc(f.label)}</label><div>${coValHtml(f, row)}</div></div>`;
+    }).join('');
+    const pv = col.preview? `<div class="full co-preview" id="coDuePv">${coDuePreview(row)}</div>` : '';
+    return `<section class="co-col"><div class="co-colhead">${IC[col.icon]||''}${'①②③'[ci]||''} ${col.head()}</div>
+      <div class="form-grid co-sub">${cells}${pv}</div></section>`;
+  }).join('');
+
+  const modeLabel = isForm? (isEdit?'編集':'新規登録') : '詳細';
+  const dir = coLb('<span class="co-dir d-ar">BIGLIGHT が お金を<b>受け取る</b>相手 ・ 請求書を出す ・ 売掛金</span>',
+                   '<span class="co-dir d-ap">BIGLIGHT が お金を<b>払う</b>相手 ・ 請求書を受け取る ・ 買掛金</span>',
+                   '<span class="co-dir d-both">受け取る（売掛金）と 払う（買掛金）の両方がある相手</span>');
+  const diff = c&&c._crmDiff&&c._crmDiff.length? `<div class="warnbar" style="margin:0 0 8px;">${IC.warn} CRMの内容と手入力が違う項目があります：${esc(c._crmDiff.join('、'))}</div>` : '';
+  const canDel = isForm && isEdit && canDelete('companies');
+  const actions = isForm
+    ? `<div class="modal-actions ${canDel?'split':''}">
+        ${canDel?`<button class="btn danger" onclick="deleteFromForm('companies','${attr(id)}')">削除</button>`:''}
+        <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+          <button class="btn" onclick="saveForm(event)">保存</button></div></div>`
+    : `<div class="modal-actions"><button class="btn secondary" onclick="closeModal()">閉じる</button>
+        ${canEdit('companies')?`<button class="btn" onclick="closeModal();openForm('companies','${attr(id)}')">編集</button>`:''}</div>`;
+
+  openModal(`<div class="coform" data-side="${side}">
+    <div class="co-head">
+      <div class="co-title"><h3>${coLb('得意先','支払先','得意先・支払先')}<span class="co-mode">${modeLabel}</span></h3>
+        ${dir}${c?sourceTag(c):''}
+        ${isForm&&row.source==='crm'?'<span class="co-lock">CRM の項目は編集できません（会計・管理の項目だけ入力）</span>':''}</div>
+      <button type="button" class="co-x" onclick="closeModal()" title="閉じる" aria-label="閉じる">${IC.close}</button>
+    </div>${diff}
+    ${isForm? `<form id="entForm" class="co3" onsubmit="return saveForm(event)" oninput="coFormSync()">${cols}</form>` : `<div class="co3">${cols}</div>`}
+    ${c? coStatsHtml(c, side) : ''}
+    ${coAttHtml(id)}
+    ${actions}</div>`, 'co');
+  if(id && canSee('companies')) coAttLoad(id);
+}
+/** 入力に合わせて 区分の文言と 期日の見本 を直す（フォームを作り直さないので 入力中の値は消えない） */
+function coFormSync(){
+  const f=document.getElementById('entForm'); if(!f) return;
+  const g=n=>{ const el=f.querySelector(`[name="${n}"]`); return el? el.value : ''; };
+  if(FORM_CTX) FORM_CTX.coDirty=true;
+  const box=f.closest && f.closest('.coform');
+  if(box) box.dataset.side=coSideOf(g('kind'));
+  const pv=document.getElementById('coDuePv');
+  if(pv) pv.innerHTML=coDuePreview({ kind:g('kind'), closingDay:g('closingDay'), paySite:g('paySite'), payDay:g('payDay'), dueAdjust:g('dueAdjust') });
+}
+/** 「今月分なら いつ お金が動くか」を1行で。計算は請求・支払と同じ dueDateOf と 休業日の調整。 */
+function coDuePreview(r){
+  const side=coSideOf(r.kind);
+  const what = side==='ap'? '支払予定日' : (side==='both'? '期日' : '入金予定日');
+  if(r.paySite==null || r.paySite===''){
+    return `<span class="muted">${side==='ap'?'支払':(side==='both'?'':'入金')}サイトを入れると、${what}が自動で決まります。</span>`;
+  }
+  const ym=thisMonth(), due=dueDateOf(ym, r.closingDay, r.paySite, r.payDay);
+  const mode=r.dueAdjust||'翌営業日';
+  let adj=due, guard=0;
+  if(mode!=='そのまま'){ const step=mode==='前営業日'?-1:1; while(isBankHoliday(adj) && guard++<15) adj=addDays(adj,step); }
+  const wd=d=>'日月火水木金土'[new Date(d+'T00:00:00').getDay()];
+  return `例）<b>${Number(ym.slice(5))}月分</b> → ${what} <b class="num">${due}（${wd(due)}）</b>`
+    + (adj!==due? ` → 休業日のため <b class="num">${adj}（${wd(adj)}）</b>` : '');
+}
+/** 詳細（見るだけ）での値の出し方 */
+function coValHtml(f, r){
+  const v=r[f.name];
+  if(f.name==='dueAdjust' && (v==null || v==='')) return '翌営業日 <span class="muted" style="font-size:11px;">（未設定のときの扱い）</span>';
+  if(v==null || String(v).trim()==='') return '<span class="zero">-</span>';
+  switch(f.name){
+    case 'kind': {
+      const o=CO_KIND_OPTS.find(x=>x.k===v);
+      return `<span class="badge ${({'得意先':'b-blue','仕入先':'b-purple','両方':'b-green'})[v]||'b-gray'}">${esc(o?o.label:v)}</span>`;
+    }
+    case 'closingDay': case 'payDay': return Number(v)>=31? '末日' : esc(v)+'日';
+    case 'paySite': return Number(v)===0? '当月' : esc(v)+'か月後';
+    case 'owner': { const u=(_USERS||[]).find(x=>x.email===v); return esc(u&&u.name? `${u.name}（${v}）` : v); }
+    case 'note': return `<div class="co-note">${esc(v)}</div>`;
+  }
+  if(f.type==='money') return `<span class="num">${moneyPlain(v)}</span> 円`;
+  return esc(String(v));
+}
+/** 取引状況のカードから別画面へ。編集中なら 保存されないことを先に聞く。 */
+function coGo(what, id, side){
+  if(FORM_CTX && FORM_CTX.coDirty && document.getElementById('entForm')
+     && !confirm('入力中の内容は保存されていません。このまま移動しますか？')) return;
+  closeModal();
+  if(what==='rules') openRules(id); else openLedger(id, side);
+}
+/** 取引状況（横並びのカード）。得意先＝売掛、支払先＝買掛。両方の動きがある会社は 両方を並べる。 */
+function coStatsHtml(c, side){
+  const id=String(c.id), jid=attr(c.id);
+  const ofCo = x => x && String(x.companyId)===id;
+  const live = x => x.status!=='取消' && x.status!=='作成中';
+  const latest = (list, dateOf) => list.slice().sort((a,b)=>String(dateOf(b)||'').localeCompare(String(dateOf(a)||'')))[0]||null;
+  const card = (lbl, val, sub, go) => `<div class="co-stat${go?' click':''}"${go?` onclick="${go}"`:''}>
+      <div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
+  const dm = (d, amt) => `<span class="num">${esc(String(d||'').slice(0,10))}</span> <b class="num">${moneyPlain(amt)}</b>`;
+  const none = '<span class="zero">なし</span>';
+  const perf = sd => { const p=ledPerf(c.id, sd, null);
+    if(!p.n) return p.openOver? `<span class="badge b-red">超過中 ${p.openOver}件</span>` : '';
+    return `<span class="badge ${p.rate>=95?'b-green':(p.rate>=80?'b-amber':'b-red')}">期日内 ${p.rate}%</span>`; };
+
+  /* 売掛（受け取る） */
+  const invs=(DB.invoices||[]).filter(i=>ofCo(i)&&live(i)), openI=invs.filter(i=>balanceOfInvoice(i)>0);
+  const pays=(DB.payments||[]).filter(p=>ofCo(p)&&p.status!=='取消');
+  const lastInv=latest(invs, invDocDate), lastPay=latest(pays, p=>p.date);
+  const rules=rulesOfCompany(c.id), arBal=arBalanceOf(c.id);
+  const ruleVal = rules.length? `${rules.length}件` : '<span style="color:var(--amber);font-weight:600;">未設定</span>';
+  const ruleSub = rules.length? esc(ruleText(rules[0]))+(rules.length>1?` 他${rules.length-1}件`:'') : '押すと作れます';
+  /* 買掛（払う） */
+  const bills=(DB.bills||[]).filter(b=>ofCo(b)&&live(b)), openB=bills.filter(b=>balanceOfBill(b)>0);
+  const pos=(DB.payouts||[]).filter(p=>ofCo(p)&&p.status!=='取消'), lastPo=latest(pos, p=>p.date);
+  const overB=openB.filter(isOverdue);
+  const nextB=openB.filter(b=>!isOverdue(b)&&b.dueDate).sort((a,b)=>String(effDue(a)).localeCompare(String(effDue(b))))[0]||null;
+  const apBal=apBalanceOf(c.id);
+  const nItems=(DB.costItems||[]).filter(ofCo).length, nProps=(DB.properties||[]).filter(ofCo).length;
+  const apStatus = overB.length? `<b style="color:var(--danger);">期日超過 ${overB.length}件</b>`
+    : (nextB? `次回 ${dm(effDue(nextB), balanceOfBill(nextB))}` : '<span class="zero">未払なし</span>');
+
+  /* 区分が片方でも、もう片方の伝票が実際にあれば 両方を出す（見落とさないため） */
+  let st=side;
+  if(st==='ar' && (bills.length||pos.length)) st='both';
+  if(st==='ap' && (invs.length||pays.length)) st='both';
+
+  const go = (w, sd) => `coGo('${w}','${jid}','${sd||''}')`;
+  const cArBal = card('売掛残高', `<b class="num big ${arBal?'minus':''}">${moneyPlain(arBal)}</b> 円`,
+    `${openI.length}件 未回収 ${perf('ar')}${creditOver(c.id)?' <span class="badge b-red">与信超過</span>':''}`, go('ledger','ar'));
+  const cApBal = card('買掛残高', `<b class="num big">${moneyPlain(apBal)}</b> 円`,
+    `${openB.length}件 未払 ${perf('ap')}`, go('ledger','ap'));
+  const cLed = st==='both'
+    ? card('台帳を見る', `<a class="pillbtn pill-manage" onclick="${go('ledger','ar')}">請求・入金</a> <a class="pillbtn pill-manage" onclick="${go('ledger','ap')}">支払</a>`, '履歴・タイムライン')
+    : card('台帳を見る', `<span class="pillbtn pill-manage">台帳を開く ›</span>`, '履歴・タイムライン', go('ledger', st));
+  let list;
+  if(st==='ap') list=[ cApBal,
+      card('支払状況', apStatus, (nItems||nProps)? `費目 ${nItems}件${nProps?`・物件 ${nProps}件`:''}` : '', go('ledger','ap')),
+      card('最終支払', lastPo? dm(lastPo.date, lastPo.amount) : none, lastPo&&lastPo.method? esc(lastPo.method) : '', go('ledger','ap')),
+      cLed ];
+  else if(st==='both') list=[ cArBal, cApBal,
+      card('請求', ruleVal, `最終請求 ${lastInv? dm(invDocDate(lastInv), docTotal(lastInv)) : none}`, go('rules')),
+      card('支払', apStatus, `最終支払 ${lastPo? dm(lastPo.date, lastPo.amount) : none}`, go('ledger','ap')),
+      cLed ];
+  else list=[ cArBal,
+      card('請求ルール', ruleVal, ruleSub, go('rules')),
+      card('最終請求・入金', `請求 ${lastInv? dm(invDocDate(lastInv), docTotal(lastInv)) : none}`, `入金 ${lastPay? dm(lastPay.date, lastPay.amount) : none}`, go('ledger','ar')),
+      cLed ];
+  return `<div class="co-stats"><div class="co-stats-lb">${IC.chart}取引状況</div>
+    <div class="co-stat-row n${list.length}">${list.join('')}</div></div>`;
+}
+/** 添付ファイルを1行で（名前を並べ、押すと開く）。付ける・消すは今までの添付画面をそのまま使う。 */
+function coAttHtml(id){
+  if(!canSee('companies')) return '';
+  const lb=`<span class="co-att-lb">${IC.clip}添付ファイル</span>`;
+  if(!id) return `<div class="co-att">${lb}<span class="muted">保存すると付けられます。</span></div>`;
+  const canUp=canEdit('companies')||canCreate('companies');
+  return `<div class="co-att">${lb}<span class="co-att-list" id="coAttList" data-id="${attr(id)}"><span class="muted">読み込み中…</span></span>
+    <a class="pillbtn ${canUp?'pill-new':'pill-manage'} co-att-add" onclick="attOpen('companies','${attr(id)}')">${canUp?'＋ ファイル追加':'一覧を開く'}</a></div>`;
+}
+async function coAttLoad(id){
+  try{
+    const r=await fetch(API_BASE+'/files?entity=companies&id='+encodeURIComponent(id),{headers:headers()});
+    const d=await r.json().catch(()=>({}));
+    coAttPaint(id, r.ok? (d.items||[]) : null);
+  }catch(e){ coAttPaint(id, null); }
+}
+function coAttPaint(id, items){
+  const box=document.getElementById('coAttList');
+  if(!box || !box.dataset || box.dataset.id!==String(id)) return;     // 別の会社を開き直していたら書かない
+  if(items==null){ box.innerHTML='<span class="muted">一覧を取得できませんでした（右のボタンから開けます）</span>'; return; }
+  (ATT_COUNTS.companies=ATT_COUNTS.companies||{})[id]=items.length;
+  if(!items.length){ box.innerHTML='<span class="muted">まだありません</span>'; return; }
+  const MAX=6;
+  box.innerHTML=items.slice(0,MAX).map(f=>`<a class="co-chip" onclick="attView('${attr(f.id)}','${attr(f.mime)}')" title="${attr(f.fileName)}（${attSize(f.size)}）">${esc(f.fileName)}</a>`).join('')
+    + (items.length>MAX? `<a class="co-chip more" onclick="attOpen('companies','${attr(id)}')">他 ${items.length-MAX}件</a>` : '');
 }
 function ruleText(r){
   if(r.kind==='per_worker') return `${r.name||'支援委託料'}：${moneyPlain(r.unitPrice)}円 × 在籍者数（${(COUNT_MODES.find(m=>m.k===(r.countMode||'month_end'))||{}).label}）`;
