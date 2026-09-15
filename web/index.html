@@ -468,6 +468,10 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .ar-led-k{display:flex; gap:26px; margin:4px 0 10px;}
   .ar-led-k > div{display:flex; flex-direction:column;}
   .ar-led-k .muted{font-size:11.5px;} .ar-led-k b{font-size:20px;}
+  .ar-led-k{flex-wrap:wrap; row-gap:8px;}
+  .ar-led-grade{gap:2px; min-width:0; flex:1 1 260px;}
+  .ar-led-grade .ar-grade{font-size:15px; padding:2px 10px; font-weight:800;}
+  .ar-led-grade .why{font-size:12.5px;}
   .ar-led{max-height:58vh; overflow:auto;}
   .ar-led td,.ar-led th{padding:6px 12px;}
   .ar-mf-src{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
@@ -2891,6 +2895,11 @@ function openArLedger(companyId){
     <div class="ar-led-k">
       <div><span class="muted">現在残高</span><b class="num">¥${arAmt(now.closing)}</b></div>
       <div><span class="muted">期限超過</span><b class="num ${now.overdue>0?'minus':''}">¥${moneyPlain(now.overdue)}</b></div>
+      ${(()=>{ /* ★ 2026-09-15 利用者の指示: 売掛元帳に 評価 だけ戻す（督促記録・メールは戻さない） */
+        const g=payGrade(companyId,'ar'), p=ledPerf(companyId,'ar',null);
+        return `<div class="ar-led-grade"><span class="muted">評価（入金の守り方）</span>
+          <div><span class="badge ${g.cls} ar-grade">${esc(g.g)}</span> <span class="why">${esc(g.why)}</span></div>
+          ${p.n?`<span class="muted">期日内 ${p.onTime}/${p.n}件${p.avgLate?` ・ 遅れた分は平均 ${p.avgLate}日（最大 ${p.worst}日）`:''}</span>`:''}</div>`; })()}
     </div>
     ${months.length>MAX?`<div class="infobar" style="margin:0 0 8px;">直近 ${MAX}か月を表示しています（それより前の分は 前月残高 に含まれます）。</div>`:''}
     <div class="table-wrap ar-led"><table>

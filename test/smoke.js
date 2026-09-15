@@ -821,6 +821,11 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     const pgBefore=ctx.__x.CURRENT_PAGE; el.innerHTML='';
     ctx.openLedger(kita2.id,'ar');
     eq('会社名から 売掛元帳 を開く（画面は移らない）', [ctx.__x.CURRENT_PAGE===pgBefore, String(el.innerHTML).includes('売掛元帳')], [true,true]);
+    /* ★ 2026-09-15: 売掛元帳に 評価 を戻した（取引先別の一覧と同じ payGrade） */
+    eq('売掛元帳に 評価 が出る（遅れがちな会社は D）', String(el.innerHTML).includes('評価（入金の守り方）') && String(el.innerHTML).includes('ar-grade">D<'), true);
+    el.innerHTML=''; ctx.openLedger(saku2.id,'ar');
+    eq('期日どおりの会社は 売掛元帳でも A', String(el.innerHTML).includes('ar-grade">A<'), true);
+    eq('売掛元帳には 督促記録・メールは戻さない', /督促記録|メールを送る/.test(String(el.innerHTML)), false);
     ctx.coOpen('ar', null);
   }
 
