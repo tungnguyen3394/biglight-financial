@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName };';
+code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, get DASH_RANGE(){return DASH_RANGE} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -679,14 +679,81 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     status:'確定', items:[{accountCode:'4100', amount:12345, taxCat:'課税10%'}] });
   const before={}; Object.keys(_db).forEach(k=>{ if(Array.isArray(_db[k])) before[k]=_db[k].length; });
 
+  /* デモを入れる前の数字（本物の分）。デモの分だけで 8,000万・20% になっているかを見る */
+  const FYA = ctx.fyOf(ctx.thisMonth())-1;
+  const S12 = a => a.reduce((t,v)=>t+v,0);
+  const pre = { rev:S12(ctx.plBook(FYA,'actual').revenue), ord:S12(ctx.plBook(FYA,'actual').ordinary) };
   await ctx.demoSeed();
   const n = ctx.demoCount();
   eq('デモが入った（件数）', n>300, true);
-  eq('取引先は9社', _db.companies.filter(c=>c.demo).length, 9);
+  eq('取引先は23社（得意先15・支払先8）', _db.companies.filter(c=>c.demo).length, 23);
   eq('特定技能者は作らない', _db.workers.filter(w=>w.demo).length, 0);
   eq('物件は4件', _db.properties.filter(p=>p.demo).length, 4);
-  eq('14か月 × 3社 の請求', _db.invoices.filter(i=>i.demo).length, 42);
+  const demoMonths = (()=>{ let n=0; for(let ym=ctx.fyMonths(FYA)[0]; ym<=ctx.thisMonth(); ym=ctx.addMonths(ym,1)) n++; return n; })();
+  eq('前年度の期首から今月まで × 15社 の請求', _db.invoices.filter(i=>i.demo).length, demoMonths*15);
   eq('全部に【デモ】の印', _db.companies.filter(c=>c.demo).every(c=>c.name.startsWith('【デモ】')), true);
+
+  console.log('\n― デモの数字: 前年度 売上 8,000万円・経常利益 20% ―');
+  {
+    const bk=ctx.plBook(FYA,'actual');
+    eq('前年度の売上（デモの分）＝ 80,000,000', S12(bk.revenue)-pre.rev, 80000000);
+    eq('前年度の経常利益（デモの分）＝ 16,000,000（20%）', S12(bk.ordinary)-pre.ord, 16000000);
+    eq('前年度は12か月すべてに売上がある', bk.revenue.every(v=>v>0), true);
+    eq('前年度は12か月すべてに費用がある', bk.sga.every(v=>v>0) && bk.cogs.every(v=>v>0), true);
+    eq('予算も2年度ぶん', [FYA, FYA+1].every(fy=>S12(ctx.plBook(fy,'budget').revenue)>0), true);
+    eq('OKR の見本がある', (_db.objectives||[]).filter(o=>o.demo).length, 2);
+  }
+
+  console.log('\n― 担当者別の売上 ―');
+  {
+    const sum=(a,s,e)=>a.slice(s,e+1).reduce((t,v)=>t+v,0);
+    [[0,11],[7,8],[0,9],[4,4],[11,11]].forEach(([s,e])=>{
+      eq(`担当者別の合計＝予実の売上（${s}〜${e}）`, ctx.staffRevenue(FYA,s,e).total, sum(ctx.actualSeries(FYA,'revenue'),s,e));
+    });
+    const sr=ctx.staffRevenue(FYA,0,11);
+    const names=sr.rows.map(r=>r.name);
+    eq('4人に分かれる（山田・佐々木・中村・自分）', ['デモ 山田','デモ 佐々木','デモ 中村'].every(x=>names.includes(x)) && sr.rows.some(r=>r.key==='test@biglight.jp'), true);
+    const fuji=_db.companies.find(c=>c.name.includes('富士ビル'));
+    const fInv=_db.invoices.filter(i=>i.companyId===fuji.id && ctx.fyOf(i.bookMonth)===FYA);
+    eq('担当交代の前（8〜1月）の請求は 元の担当が写っている', fInv.filter(i=>ctx.fyIndexOf(i.bookMonth)<6).every(i=>i.staff==='デモ 佐々木'), true);
+    eq('担当交代の後（2〜7月）の請求は 新しい担当', fInv.filter(i=>ctx.fyIndexOf(i.bookMonth)>=6).every(i=>i.staff==='デモ 中村'), true);
+    eq('取引先の今の担当は 新しい担当', fuji.owner, 'デモ 中村');
+    const sasakiH1=ctx.staffRevenue(FYA,0,5).rows.find(r=>r.name==='デモ 佐々木');
+    eq('上期の佐々木に 富士ビルの売上が入る', sasakiH1.cos.has(String(fuji.id)), true);
+    eq('下期の佐々木には 富士ビルは入らない', ctx.staffRevenue(FYA,6,11).rows.find(r=>r.name==='デモ 佐々木').cos.has(String(fuji.id)), false);
+    /* 名前（CRM）とメール（このシステム）が同じ人なら 1行にまとまる */
+    ctx.__x.setUsers([{ email:'yamada@biglight.jp', name:'デモ　山田', status:'active' }]);
+    eq('名前でもメールでも同じ人', ctx.staffOf('デモ 山田').key, ctx.staffOf('YAMADA@biglight.jp').key);
+    const saku=_db.companies.find(c=>c.name.includes('さくら製作所'));
+    const keep=saku.owner; saku.owner='yamada@biglight.jp';
+    eq('メールに変えても 山田は1行のまま', ctx.staffRevenue(FYA,0,11).rows.filter(r=>r.key==='yamada@biglight.jp').length, 1);
+    saku.owner=keep; ctx.__x.setUsers([]);
+    eq('知らない名前は そのまま名前で出す', ctx.staffOf('田中 一郎').name, '田中 一郎');
+    eq('空は 未設定', ctx.staffOf('').name, '未設定');
+  }
+
+  console.log('\n― ダッシュボード: 集計する月 ―');
+  {
+    eq('デモのあとは 前年度を通期で開く', [ctx.__x.CUR_FY, ctx.__x.DASH_RANGE.s, ctx.__x.DASH_RANGE.e], [FYA,0,11]);
+    let h=ctx.viewDashboard();
+    eq('在籍者 の数は出さない', h.includes('在籍者'), false);
+    eq('担当者別 売上 が出る', h.includes('担当者別 売上') && h.includes('デモ 山田'), true);
+    eq('月を横に引く帯が出る', (h.match(/class="dr-cell/g)||[]).length, 12);
+    eq('通期の売上高が出る', h.includes(ctx.__x.moneyPlain(S12(ctx.plBook(FYA,'actual').revenue))), true);
+    ctx.setDashRange(0,9);
+    h=ctx.viewDashboard();
+    eq('8月〜翌5月（年をまたぐ）', h.includes(`${FYA}年8月〜${FYA+1}年5月（10か月）`), true);
+    const rv=ctx.actualSeries(FYA,'revenue').slice(0,10).reduce((t,v)=>t+v,0);
+    eq('選んだ月の売上高', h.includes(ctx.__x.moneyPlain(rv)), true);
+    ctx.setDashRange(8,7);
+    eq('逆に引いても 小さい方から', [ctx.__x.DASH_RANGE.s, ctx.__x.DASH_RANGE.e], [7,8]);
+    h=ctx.viewDashboard();
+    eq('3〜4月', h.includes(`${FYA+1}年3月〜4月（2か月）`), true);
+    eq('過去の範囲は 残高を月末時点で', h.includes(`${FYA+1}-04-30`), true);
+    const b=ctx.dashBalances(FYA,8), tot=ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[`${FYA+1}-04`])[0].closing,0);
+    eq('売掛残高（4月末）＝ 売掛金の画面の月末残高の合計', b.ar, tot);
+    ctx.setDashRange(0,11);
+  }
 
   /* 会社ごとに払い方のくせが違う ＝ タイムラインの色が全部見られる */
   const sakura=_db.companies.find(c=>c.name.includes('さくら製作所'));

@@ -250,6 +250,32 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .c-amber .dash-head{background:#d08a1d;} .c-red .dash-head{background:#d6544c;}
   .c-green .dash-head{background:#2f9e57;} .c-purple .dash-head{background:#7a56d6;}
 
+  /* ===== ダッシュボード: 集計する月（横に引いて選ぶ） ===== */
+  .drange{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 12px 8px; margin-bottom:12px;}
+  .drange-top{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; font-size:13px;}
+  .drange-top .lbl{font-weight:700;}
+  .drange-top .rng{font-weight:700; color:var(--primary); font-variant-numeric:tabular-nums;}
+  .drange-pre{margin-left:auto; display:flex; gap:4px; flex-wrap:wrap;}
+  .drange-pre button{border:1px solid var(--border-strong); background:var(--card); color:var(--text); border-radius:14px;
+    padding:3px 10px; font-size:11.5px; cursor:pointer;}
+  .drange-pre button.on{background:var(--primary); border-color:var(--primary); color:#fff;}
+  .drange-bar{display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:3px; user-select:none; -webkit-user-select:none;
+    touch-action:none; cursor:ew-resize;}
+  .dr-cell{position:relative; border:1px solid var(--border); border-radius:8px; padding:4px 2px 3px; text-align:center;
+    background:var(--bg-subtle); min-height:58px; display:flex; flex-direction:column; justify-content:flex-end;}
+  .dr-bar{height:26px; display:flex; align-items:flex-end; justify-content:center; margin-bottom:3px;}
+  .dr-bar i{display:block; width:40%; max-width:18px; min-height:2px; border-radius:3px 3px 0 0; background:var(--border-strong);}
+  .dr-cell .m{font-size:11.5px; font-weight:650; line-height:1.1;}
+  .dr-cell .y{font-size:9.5px; color:var(--muted); line-height:1.1;}
+  .dr-cell.on{background:var(--primary-soft); border-color:var(--primary);}
+  .dr-cell.on .dr-bar i{background:var(--primary);}
+  .dr-cell.noact .m{color:var(--muted);}
+  .dr-cell.q0{margin-left:4px;}
+  .drange-help{font-size:10.5px; color:var(--muted); margin-top:5px;}
+  .staff-bar{height:6px; border-radius:3px; background:var(--bg-subtle); overflow:hidden; min-width:60px;}
+  .staff-bar i{display:block; height:100%; background:#149086;}
+  @media (max-width:640px){ .dr-cell .y{display:none;} .dr-cell{min-height:44px; padding:3px 0;} .dr-bar{height:14px;} .dr-cell .m{font-size:10.5px;} .drange-bar{gap:2px;} .dr-cell.q0{margin-left:0;} .drange-pre{margin-left:0;} }
+
   /* ===== Toolbar ===== */
   .toolbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;}
   .toolbar-left{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
@@ -853,8 +879,8 @@ const ENTITIES = {
       {name:'dueAdjust',  label:'期日が土日祝のとき', type:'select', options:DUE_ADJUST,
         help:'翌営業日＝休み明けに払われる（多くの会社）／前営業日＝休みの前に払われる。遅れの判断と評価は、この調整後の日で行います。'},
       {name:'creditLimit',label:'与信限度額',   type:'money', help:'未回収がこの額を超えると、ベルと 請求を作るときに知らせます。'},
-      {name:'owner',      label:'回収の担当者', type:'text', ph:'担当者のメール（例: tanaka@biglight.jp）',
-        help:'督促キューで「自分の担当」だけに絞れます。'},
+      {name:'owner',      label:'BIGLIGHT担当者', type:'text', ph:'名前 または メール',
+        help:'CRM の 所属機関情報「BIGLIGHT担当者」と同じ人。CRM の CSV を取り込むと CRM の値が入ります。担当者別の売上と、督促の「自分の担当」に使います。'},
       {name:'taxCat',     label:'既定の税区分', type:'select', options:TAX_CATS},
       {name:'billTo',     label:'請求書送付先', type:'text'},
       {name:'billEmail',  label:'請求書メール', type:'text'},
@@ -1689,6 +1715,13 @@ function autoItemsFor(companyId, ym){
 
 /* ---------- 予実: 実績はここで「計算」される ---------- */
 function ymOfDoc(d){ return (d.bookMonth||'').slice(0,7); }
+/** 請求書1枚の売上（税抜）。明細があれば 収益科目の行だけ、無ければ税抜の合計。
+    予実（actualSeries）と 担当者別の売上 は必ずこの1つの式を使う（合計が1円も違わないように）。 */
+function invRevenue(inv){
+  if(!inv || inv.status==='取消') return 0;
+  if(!(inv.items||[]).length) return docNet(inv);
+  return inv.items.reduce((t,it)=>t+(accountKind(it.accountCode)==='revenue'? itemAmount(it) : 0), 0);
+}
 /** kind 別・月別の実績（税抜）。CUR_FY の12か月配列を返す。 */
 function actualSeries(fy, kind, opt){
   opt = opt||{};
@@ -1702,8 +1735,7 @@ function actualSeries(fy, kind, opt){
       if(inv.status==='取消') return;
       if(opt.confirmedOnly && inv.status==='作成中') return;
       const ym=ymOfDoc(inv); if(idx[ym]==null) return;
-      (inv.items||[]).forEach(it=>{ if(accountKind(it.accountCode)==='revenue') addTo(ym, itemAmount(it)); });
-      if(!(inv.items||[]).length) addTo(ym, docNet(inv));
+      addTo(ym, invRevenue(inv));
     });
   } else {
     // 費用側: bills（買掛あり）＋ expenses（即払い）
@@ -2155,6 +2187,7 @@ function prepareDoc(entKey, rec, existingId){
     const prevRec = existingId? findById('invoices',existingId) : null;
     if(prevRec && prevRec.carry) rec.carry = prevRec.carry;
     else rec.carry = invoiceCarry(Object.assign({id:existingId||'__new__'}, rec));
+    if(prevRec && prevRec.staff) rec.staff = prevRec.staff; else stampStaff(rec);
   }
   const old = existingId? findById(key,existingId) : null;
   if(old && old.workerSnapshot) rec.workerSnapshot = old.workerSnapshot;
@@ -2954,6 +2987,7 @@ function arBillSave(id){
   const netRaw=g('abNet');
   const rec={ companyId, bookMonth, issueDate:g('abDate'), dueDate:g('abDue'), total, subtotal: netRaw===''? Math.round(total/1.1) : num(netRaw),
     no, note:g('abNote'), items:[], status:'確定', locked:true };
+  if(!id) stampStaff(rec);
   commitRecord('invoices', rec, { existingId:id||null });
   arApplyUnallocated(companyId);
   closeModal(); renderPage(CURRENT_PAGE); toast('保存しました。','ok');
@@ -3161,7 +3195,7 @@ function mfApply(){
   if(!P.add.length && !P.upd.length){ toast('取り込む変更はありませんでした。','ok'); return; }
   if(P.dupWarn.length && !confirm(`同じ取引先・同じ計上月に このシステムの請求がすでにある分が ${P.dupWarn.length}件あります。\n二重計上にならないか確認しましたか？ 取り込みますか？`)) return;
   const touched=new Set();
-  P.add.forEach(({rec})=>{ commitRecord('invoices', rec, {}); touched.add(String(rec.companyId)); });
+  P.add.forEach(({rec})=>{ stampStaff(rec); commitRecord('invoices', rec, {}); touched.add(String(rec.companyId)); });
   P.upd.forEach(({rec,ex})=>{ commitRecord('invoices', rec, { existingId:ex.id }); touched.add(String(rec.companyId)); touched.add(String(ex.companyId)); });
   /* 取引先に MF の取引先を覚えさせる（次回から自動で対応） */
   Object.keys(MFI.map).forEach(k=>{
@@ -3242,6 +3276,7 @@ function confirmInvoice(id){
   inv.status='確定'; inv.locked=true;
   if(!inv.issueDate) inv.issueDate=today();
   inv.carry = invoiceCarry(inv);            // ★ 送った請求書の数字を写して残す（あとで入金を直しても変わらない）
+  stampStaff(inv);
   markDirty('invoices',inv); renderPage(CURRENT_PAGE); toast('確定しました。','ok');
 }
 
@@ -4844,7 +4879,7 @@ function dunStatus(companyId){
     todo={ rank:stage, cls:DUN_STAGE[stage].cls, text:`${DUN_STAGE[stage].label}：${DUN_STAGE[stage].note}`, method:DUN_STAGE[stage].method, stage };
 
   return { companyId, company:c, overdue, amount, maxDays, oldestDue, stage, logs, last, promise, todo,
-    owner:c.owner||'', grade:payGrade(companyId,'ar'), creditOver: creditOver(companyId) };
+    owner:c.owner||'', staff:staffOf(c.owner), grade:payGrade(companyId,'ar'), creditOver: creditOver(companyId) };
 }
 /** 与信限度額を超えているか（限度額を入れていない会社は false） */
 function creditOver(companyId){
@@ -4869,7 +4904,7 @@ function viewDunning(){
   const all=dunRows(), me=String((SESSION&&SESSION.email)||'').toLowerCase();
   let rows=all;
   if(DUN_FILTER==='today') rows=rows.filter(r=>r.todo);
-  if(DUN_MINE) rows=rows.filter(r=>String(r.owner).toLowerCase()===me);
+  if(DUN_MINE) rows=rows.filter(r=>isMyStaff(r.owner));
   const todoN=all.filter(r=>r.todo).length;
   const broken=all.filter(r=>r.promise&&r.promise.state==='broken'&&r.overdue.length);
   const waiting=all.filter(r=>r.promise&&r.promise.state==='waiting');
@@ -4895,7 +4930,7 @@ function viewDunning(){
     return `<tr onclick="openArLedger('${attr(r.companyId)}')" style="cursor:pointer;">
       <td><b>${esc(r.company.name||'')}</b> <span class="badge ${r.grade.cls}">${esc(r.grade.g)}</span>
         ${r.creditOver?'<span class="badge b-red" title="与信限度額を超えています">限度超過</span>':''}
-        <div class="muted" style="font-size:10.5px;">${r.owner?'担当 '+esc(String(r.owner).split('@')[0]):'<span style="color:var(--warning);">担当未設定</span>'}</div></td>
+        <div class="muted" style="font-size:10.5px;">${r.owner?'担当 '+esc(r.staff.name):'<span style="color:var(--warning);">担当未設定</span>'}</div></td>
       <td class="r num">${r.amount?`<b class="minus">${moneyPlain(r.amount)}</b><div class="muted" style="font-size:10.5px;">${r.overdue.length}件</div>`:'<span class="zero">0</span>'}</td>
       <td class="r">${r.maxDays?`<b>${r.maxDays}日</b>`:'<span class="zero">—</span>'}</td>
       <td><span class="badge ${st.cls}">${esc(st.label)}</span></td>
@@ -6227,6 +6262,8 @@ function viewCompanies(mode){
       ${r.address?`<div class="muted" style="font-size:10.5px;">${esc(r.address)}</div>`:''}`,
       raw:r=>r.name||''},
     {key:'kind', label:'区分', val:r=>statusBadge(r.kind||'得意先')},
+    ...(vend? [] : [{key:'owner', label:'BIGLIGHT担当', raw:r=>staffOf(r.owner).name,
+      val:r=>r.owner? esc(staffOf(r.owner).name) : '<span class="zero">未設定</span>'}]),
     vend? {key:'buys', label:'この会社に払っているもの', noFilter:true, val:r=>{
       const its=(DB.costItems||[]).filter(x=>String(x.companyId)===String(r.id));
       const prs=(DB.properties||[]).filter(x=>String(x.companyId)===String(r.id));
@@ -6392,7 +6429,7 @@ function coValHtml(f, r){
     }
     case 'closingDay': case 'payDay': return Number(v)>=31? '末日' : esc(v)+'日';
     case 'paySite': return Number(v)===0? '当月' : esc(v)+'か月後';
-    case 'owner': { const u=(_USERS||[]).find(x=>x.email===v); return esc(u&&u.name? `${u.name}（${v}）` : v); }
+    case 'owner': { const st=staffOf(v); return esc(st.email && st.name!==st.email? `${st.name}（${st.email}）` : st.name); }
     case 'note': return `<div class="co-note">${esc(v)}</div>`;
   }
   if(f.type==='money') return `<span class="num">${moneyPlain(v)}</span> 円`;
@@ -6795,45 +6832,246 @@ function krDel(id){
 /* ============================================================================
    ⑬ ダッシュボード
    ========================================================================== */
+/* ============================================================================
+   BIGLIGHT担当者 — 取引先の owner（CRM 所属機関情報「BIGLIGHT担当者」と同じ人）
+   ----------------------------------------------------------------------------
+   ★ 2026-09-15 利用者の指示: 売上を 担当者ごとに 分けて見る。
+     CRM は 担当を「名前」で持ち、このシステムは 今まで「メール」で持っていた。
+     同じ人が 2行に分かれないよう、ユーザー一覧（名前・メール）で 1人に寄せる。
+   ★ 請求書は 確定したときの担当を写して残す（inv.staff）。途中で担当が替わっても、
+     過去の売上は 当時の担当のまま（写していない古い請求は 今の担当で数える）。
+   ========================================================================== */
+function normPerson(v){ return String(v||'').replace(/[\s　]+/g,'').toLowerCase(); }
+/** 名前でもメールでも 1人に寄せる。key が同じなら同じ人。 */
+function staffOf(v){
+  const raw=String(v||'').trim();
+  if(!raw) return { key:'', name:'未設定', email:'' };
+  const low=raw.toLowerCase(), isMail=raw.includes('@');
+  const users=_USERS||[];
+  const u = users.find(x=>String(x.email||'').toLowerCase()===low)
+         || (!isMail && users.find(x=>x.name && normPerson(x.name)===normPerson(raw)));
+  if(u) return { key:String(u.email).toLowerCase(), name:u.name||String(u.email).split('@')[0], email:u.email };
+  if(SESSION && SESSION.email && low===String(SESSION.email).toLowerCase())
+    return { key:low, name:SESSION.name||raw.split('@')[0], email:SESSION.email };
+  return isMail? { key:low, name:raw.split('@')[0], email:raw } : { key:'n:'+normPerson(raw), name:raw, email:'' };
+}
+function isMyStaff(v){
+  const me=String((SESSION&&SESSION.email)||'').toLowerCase();
+  return !!me && staffOf(v).key===me;
+}
+/** 確定した請求書に その時の担当を写す（すでに写してあれば そのまま） */
+function stampStaff(inv){
+  if(!inv || inv.staff) return inv;
+  const c=findById('companies', inv.companyId);
+  if(c && c.owner) inv.staff=String(c.owner);
+  return inv;
+}
+/** 請求書の担当（写した担当 → 無ければ 取引先の今の担当） */
+function invStaffRaw(inv){
+  if(inv && inv.staff) return inv.staff;
+  const c=inv && findById('companies', inv.companyId);
+  return (c && c.owner) || '';
+}
+
+/* ============================================================================
+   ダッシュボード — 年度（上の選択）× 集計する月（横に引いて選ぶ）
+   ----------------------------------------------------------------------------
+   ★ 2026-09-15 利用者の指示: 3〜4月、8月〜翌5月 のように、年度（8月〜翌7月）の中で
+     続いた月を選び、その合計を出す。年度をまたぐ範囲は選べない。
+   ★ 売上・利益は 選んだ月の合計。残高（売掛・買掛）は 選んだ最後の月の月末時点
+     （今月以降なら 今日時点）。足し算できない数字を足さない。
+   ========================================================================== */
+const DASH_RANGE_KEY='bl_yj_dash_rng';
+let DASH_RANGE=null;              // { fy, s, e }  s,e は年度内の index（0=8月）
+function dashRange(){
+  const fy=CUR_FY;
+  if(!DASH_RANGE){ try{ DASH_RANGE=JSON.parse(localStorage.getItem(DASH_RANGE_KEY)||'null'); }catch(e){ DASH_RANGE=null; } }
+  const ok = DASH_RANGE && Number(DASH_RANGE.fy)===fy && DASH_RANGE.s>=0 && DASH_RANGE.e<=11 && DASH_RANGE.s<=DASH_RANGE.e;
+  if(!ok) DASH_RANGE={ fy, s:0, e:lastActualIdx(fy) };
+  return DASH_RANGE;
+}
+function setDashRange(s, e){
+  s=Math.max(0,Math.min(11,Number(s))); e=Math.max(0,Math.min(11,Number(e)));
+  if(s>e){ const t=s; s=e; e=t; }
+  DASH_RANGE={ fy:CUR_FY, s, e };
+  try{ localStorage.setItem(DASH_RANGE_KEY, JSON.stringify(DASH_RANGE)); }catch(e2){}
+  renderPage('dashboard');
+}
+function dashRangeLabel(fy, s, e){
+  const ms=fyMonths(fy), a=ms[s], b=ms[e];
+  const f=ym=>`${Number(ym.slice(0,4))}年${Number(ym.slice(5))}月`;
+  return (s===e? f(a) : `${f(a)}〜${a.slice(0,4)===b.slice(0,4)? Number(b.slice(5))+'月' : f(b)}`)+`（${e-s+1}か月）`;
+}
+/* 横に引く: 押した月から 指を離した月まで。途中は その場で色だけ変える（画面は作り直さない） */
+let _drDrag=null;
+function dashDragStart(ev){
+  const cell=ev.target.closest && ev.target.closest('.dr-cell'); if(!cell) return;
+  const bar=cell.parentElement, i=Number(cell.dataset.i);
+  _drDrag={ bar, a:i, s:i, e:i, id:ev.pointerId };
+  try{ bar.setPointerCapture(ev.pointerId); }catch(e){}
+  dashDragPaint();
+  ev.preventDefault();
+}
+function dashDragMove(ev){
+  if(!_drDrag) return;
+  const cells=[..._drDrag.bar.querySelectorAll('.dr-cell')];
+  let i=-1;
+  cells.forEach((c,k)=>{ const r=c.getBoundingClientRect(); if(ev.clientX>=r.left-2 && ev.clientX<=r.right+2) i=k; });
+  if(i<0){ const r0=cells[0].getBoundingClientRect(); i = ev.clientX<r0.left? 0 : 11; }
+  const s=Math.min(_drDrag.a,i), e=Math.max(_drDrag.a,i);
+  if(s!==_drDrag.s || e!==_drDrag.e){ _drDrag.s=s; _drDrag.e=e; dashDragPaint(); }
+}
+function dashDragEnd(){
+  if(!_drDrag) return;
+  const d=_drDrag; _drDrag=null;
+  setDashRange(d.s, d.e);
+}
+function dashDragPaint(){
+  const d=_drDrag; if(!d) return;
+  d.bar.querySelectorAll('.dr-cell').forEach((c,k)=>c.classList.toggle('on', k>=d.s && k<=d.e));
+  const l=document.getElementById('drLbl'); if(l) l.textContent=dashRangeLabel(CUR_FY, d.s, d.e);
+}
+
+/** 担当者別の売上（選んだ月）。合計は 予実の売上高と1円も違わない（伝票に無い調整は別の行） */
+function staffRevenue(fy, s, e){
+  const months=fyMonths(fy).slice(s, e+1), inRange=new Set(months);
+  const map=new Map();
+  const row=st=>{ if(!map.has(st.key)) map.set(st.key,{ key:st.key, name:st.name, email:st.email, revenue:0, prev:0, n:0, cos:new Map() }); return map.get(st.key); };
+  (DB.invoices||[]).forEach(inv=>{
+    if(inv.status==='取消') return;
+    const ym=ymOfDoc(inv); if(!inRange.has(ym)) return;
+    const v=invRevenue(inv); if(!v) return;
+    const r=row(staffOf(invStaffRaw(inv)));
+    r.revenue+=v; r.n++;
+    const cid=String(inv.companyId||''); r.cos.set(cid,(r.cos.get(cid)||0)+v);
+  });
+  /* 前年同期（同じ月の並び・当時の担当で） */
+  const prevMonths=new Set(fyMonths(fy-1).slice(s, e+1));
+  (DB.invoices||[]).forEach(inv=>{
+    if(inv.status==='取消' || !prevMonths.has(ymOfDoc(inv))) return;
+    const v=invRevenue(inv); if(v) row(staffOf(invStaffRaw(inv))).prev+=v;
+  });
+  const adjust=(DB.actualAdjust||[]).reduce((t,a)=>(Number(a.fy)===Number(fy) && accountKind(a.accountCode)==='revenue'
+    && Number(a.mIndex)>=s && Number(a.mIndex)<=e)? t+num(a.amount) : t, 0);
+  const rows=[...map.values()].filter(r=>r.revenue||r.prev)
+    .sort((a,b)=>(a.key===''?1:0)-(b.key===''?1:0) || b.revenue-a.revenue || a.name.localeCompare(b.name,'ja'));
+  return { rows, adjust, total: rows.reduce((t,r)=>t+r.revenue,0)+adjust };
+}
+/** 残高（選んだ最後の月の月末。今月以降は今日）。売掛は 売掛金の画面と同じ式 */
+function dashBalances(fy, e){
+  const ym=fyMonths(fy)[e], tm=thisMonth(), at=ym<tm? ym : tm, asOf=ym<tm? monthEnd(ym) : today();
+  let ar=0, arOver=0; const arByCo={};
+  arCompanyIds().forEach(id=>{ const r=arMonthly(id,[at])[0]; ar+=r.closing; arOver+=r.overdue; arByCo[id]=r; });
+  let ap=0;
+  (DB.bills||[]).forEach(b=>{ if(b.status==='取消'||b.status==='作成中') return; if(ymOfDoc(b)&&ymOfDoc(b)<=at) ap+=docTotal(b); });
+  (DB.payouts||[]).forEach(p=>{ if(p.status==='取消'||!p.date) return; if(String(p.date).slice(0,10)<=asOf) ap-=num(p.amount); });
+  return { ym:at, asOf, now: ym>=tm, ar, arOver, arByCo, ap:Math.max(0,ap) };
+}
+function openStaffCompanies(key){
+  const R=dashRange(), fy=CUR_FY, sr=staffRevenue(fy, R.s, R.e), r=sr.rows.find(x=>x.key===key);
+  if(!r) return;
+  const bal=dashBalances(fy, R.e);
+  const list=[...r.cos.entries()].map(([id,v])=>({ id, v, c:findById('companies',id)||{} })).sort((a,b)=>b.v-a.v);
+  openModal(`<h3>${esc(r.name)} の売上 <span class="muted" style="font-size:12px;font-weight:400;">${esc(dashRangeLabel(fy,R.s,R.e))}</span></h3>
+    <div class="mdsub">請求書の計上月で集計（税抜）。確定したときの担当で数えています。</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>取引先</th><th class="r">売上（税抜）</th><th class="r">構成比</th><th>今の担当</th><th class="r">売掛残高</th></tr></thead>
+      <tbody>${list.map(x=>{ const b=bal.arByCo[x.id]; const cur=staffOf(x.c.owner);
+        return `<tr><td>${esc(x.c.name||'(削除された取引先)')}</td><td class="r num">${moneyPlain(x.v)}</td>
+          <td class="r num">${r.revenue? (x.v/r.revenue*100).toFixed(1)+'%' : '—'}</td>
+          <td>${cur.key===r.key? esc(cur.name) : `<span class="badge b-amber">${esc(cur.name)}</span>`}</td>
+          <td class="r num">${b&&b.closing? moneyPlain(b.closing) : '<span class="zero">0</span>'}</td></tr>`; }).join('')}
+      <tr style="font-weight:700;"><td>合計</td><td class="r num">${moneyPlain(r.revenue)}</td><td></td><td></td><td></td></tr></tbody>
+    </table></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">閉じる</button></div>`, 'lg');
+}
+
 function viewDashboard(){
-  const fy=CUR_FY, i=lastActualIdx(fy);
+  const fy=CUR_FY, R=dashRange(), s=R.s, e=R.e;
+  const lastAct=lastActualIdx(fy), eAct=Math.min(e,lastAct);
   const act=plBook(fy,'actual'), bud=plBook(fy,'budget'), prev=plBook(fy-1,'actual');
-  const cRev=compareSeries(act.revenue,prev.revenue,i), cOrd=compareSeries(act.ordinary,prev.ordinary,i);
+  const S=(a,from,to)=> to<from? 0 : sumRange(a,from,to);
+  const rev=S(act.revenue,s,e), gross=S(act.gross,s,e), ord=S(act.ordinary,s,e);
+  const budRev=S(bud.revenue,s,eAct), budOrd=S(bud.ordinary,s,eAct);
+  const actRevCmp=S(act.revenue,s,eAct), actOrdCmp=S(act.ordinary,s,eAct);
+  const prevRev=S(prev.revenue,s,eAct), prevOrd=S(prev.ordinary,s,eAct);
   const t=today();
   const overdue=openInvoices().filter(x=>isOverdue(x));
   const dueSoon=openBills().filter(b=>effDue(b)&&effDue(b)<=addDays(t,7));
   const week=cashPlanByWeek(4);
   const objs=(DB.objectives||[]).filter(o=>o.period===curPeriod());
+  const bal=dashBalances(fy, e);
+  const rate=(a,b)=> b? (a/b*100).toFixed(1)+'%' : '—';
 
   const empty = !(DB.invoices||[]).length && !(DB.budgets||[]).length;
   const guide = empty? `<div class="panel"><div class="panel-hd"><b>はじめかた</b><span class="sub">この順番で進めると迷いません</span></div>
     <div class="panel-bd"><ol style="margin:0;padding-left:20px;line-height:2;font-size:13px;">
       <li><b>CRM連携</b>で 所属機関（取引先）を取り込む → <a onclick="goto('crmlink')" style="color:var(--primary);cursor:pointer;">CRM連携へ</a></li>
-      <li><b>取引先管理</b>で会社ごとの<b>請求ルール</b>（単価×人数など）と支払サイトを設定 → <a onclick="goto('companies')" style="color:var(--primary);cursor:pointer;">取引先へ</a></li>
+      <li><b>取引先管理</b>で会社ごとの<b>請求ルール</b>（月額など）・支払サイト・BIGLIGHT担当者を設定 → <a onclick="goto('companies')" style="color:var(--primary);cursor:pointer;">取引先へ</a></li>
       <li><b>請求管理</b>で「請求を作成（月まとめ）」→ 内容を確認して確定 → <a onclick="goto('invoices')" style="color:var(--primary);cursor:pointer;">請求へ</a></li>
       <li><b>予実管理</b>で年間予算を入力（前年実績からの作成も可） → <a onclick="goto('yojitsu')" style="color:var(--primary);cursor:pointer;">予実へ</a></li>
       <li>入金・支払を記録し、費用管理の表を埋めると、実績と資金繰りが自動で計算されます</li>
     </ol></div></div>`:'';
 
-  return pageShell({ title:'ダッシュボード', sub:fyLabel(fy)+' ／ '+FY_MONTH_LABELS[i]+'時点',
-    body: guide+`
-    <div class="kpi-grid">
-      <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">当月売上</div>
-        <div class="num">${moneyPlain(cRev.month)}</div>
-        <div class="sub">予算比 ${bud.revenue[i]?((cRev.month/bud.revenue[i])*100).toFixed(0)+'%':'—'} ／ 前年 ${pct(cRev.month,cRev.lastYearMonth)}</div></div>
-      <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">年度累計 売上</div>
-        <div class="num">${moneyPlain(cRev.ytd)}</div><div class="sub">前年同期 ${pct(cRev.ytd,cRev.lastYearYtd)}</div></div>
-      <div class="kpi clickable" onclick="goto('compare')"><div class="lbl">年度累計 経常利益</div>
-        <div class="num ${cOrd.ytd<0?'minus':'plus'}">${moneyPlain(cOrd.ytd)}</div><div class="sub">前年同期 ${pct(cOrd.ytd,cOrd.lastYearYtd)}</div></div>
-      <div class="kpi clickable" onclick="goto('aging')"><div class="lbl">売掛残高</div>
-        <div class="num">${moneyPlain(arTotal())}</div>
-        <div class="sub ${overdue.length?'minus':''}">うち延滞 ${moneyPlain(overdue.reduce((s,x)=>s+balanceOfInvoice(x),0))}</div></div>
-      <div class="kpi clickable" onclick="goto('bills')"><div class="lbl">買掛残高</div>
-        <div class="num">${moneyPlain(apTotal())}</div><div class="sub">7日以内 ${moneyPlain(dueSoon.reduce((s,b)=>s+balanceOfBill(b),0))}</div></div>
-      <div class="kpi clickable" onclick="goto('workers')"><div class="lbl">在籍者</div>
-        <div class="num">${(DB.assignments||[]).filter(a=>activeInMonth(a,thisMonth())).length}名</div>
-        <div class="sub">${new Set((DB.assignments||[]).filter(a=>activeInMonth(a,thisMonth())).map(a=>a.companyId)).size}社</div></div>
+  /* ── 集計する月 ── */
+  const months=fyMonths(fy), maxRev=Math.max(1,...act.revenue.map(v=>Math.abs(v)));
+  const presets=[['通期',0,11],['上期',0,5],['下期',6,11],['Q1',0,2],['Q2',3,5],['Q3',6,8],['Q4',9,11],['期首〜直近',0,lastAct]];
+  const strip=`<div class="drange">
+    <div class="drange-top"><span class="lbl">集計する月</span><span class="rng" id="drLbl">${esc(dashRangeLabel(fy,s,e))}</span>
+      ${e>lastAct? `<span class="badge b-gray">実績は ${esc(FY_MONTH_LABELS[lastAct])} まで</span>`:''}
+      <span class="drange-pre">${presets.map(([l,a,b])=>`<button type="button" class="${a===s&&b===e?'on':''}" onclick="setDashRange(${a},${b})">${l}</button>`).join('')}</span></div>
+    <div class="drange-bar" onpointerdown="dashDragStart(event)" onpointermove="dashDragMove(event)" onpointerup="dashDragEnd()" onpointercancel="dashDragEnd()">
+      ${months.map((ym,i)=>`<div class="dr-cell ${i>=s&&i<=e?'on':''} ${i>lastAct?'noact':''} ${i&&i%3===0?'q0':''}" data-i="${i}"
+          title="${esc(ym)} 売上 ${moneyPlain(act.revenue[i])}円 ／ 経常利益 ${moneyPlain(act.ordinary[i])}円">
+        <div class="dr-bar"><i style="height:${Math.round(Math.max(0,act.revenue[i])/maxRev*100)}%"></i></div>
+        <div class="m">${FY_MONTH_LABELS[i]}</div><div class="y">${ym.slice(0,4)}</div></div>`).join('')}
     </div>
+    <div class="drange-help">月を押したまま 横に引くと、続いた月を選べます（年度 8月〜翌7月 の中）。棒は その月の売上。</div>
+  </div>`;
+
+  /* ── 担当者別 ── */
+  const sr=staffRevenue(fy,s,e), top=Math.max(1,...sr.rows.map(r=>r.revenue));
+  const staffArr={}; Object.entries(bal.arByCo).forEach(([id,r])=>{ const c=findById('companies',id); const k=staffOf(c&&c.owner).key;
+    (staffArr[k]=staffArr[k]||{ bal:0, over:0 }); staffArr[k].bal+=r.closing; staffArr[k].over+=r.overdue; });
+  const staffTbl=`<div class="dash-section c-teal"><div class="dash-head">担当者別 売上
+      <span class="cnt">${sr.rows.filter(r=>r.key).length}人 ・ ${moneyPlain(sr.total)}円</span></div>
+    <div class="table-wrap" style="border:0;border-radius:0;"><table>
+      <thead><tr><th>BIGLIGHT担当者</th><th class="r">売上（税抜）</th><th style="width:22%;">構成比</th><th class="r">前年同期</th>
+        <th class="r">取引先</th><th class="r">売掛残高（${bal.now?'今日':esc(Number(bal.ym.slice(5))+'月末')}）</th><th class="r">うち期限超過</th></tr></thead>
+      <tbody>${sr.rows.length? sr.rows.map(r=>{ const b=staffArr[r.key]||{bal:0,over:0};
+        return `<tr onclick="openStaffCompanies('${attr(r.key)}')" style="cursor:pointer;">
+          <td><b>${r.key? esc(r.name) : '<span style="color:var(--warning);">担当 未設定</span>'}</b>${r.email&&r.email!==r.name?`<div class="muted" style="font-size:10.5px;">${esc(r.email)}</div>`:''}</td>
+          <td class="r num"><b>${moneyPlain(r.revenue)}</b></td>
+          <td><div style="display:flex;align-items:center;gap:6px;"><div class="staff-bar" style="flex:1;"><i style="width:${Math.max(0,r.revenue/top*100)}%"></i></div>
+            <span class="num" style="font-size:11.5px;min-width:42px;text-align:right;">${rate(r.revenue,sr.total)}</span></div></td>
+          <td class="r">${pct(r.revenue, r.prev)}</td>
+          <td class="r num">${r.cos.size}社</td>
+          <td class="r num">${b.bal? moneyPlain(b.bal) : '<span class="zero">0</span>'}</td>
+          <td class="r num">${b.over? `<b class="minus">${moneyPlain(b.over)}</b>` : '<span class="zero">0</span>'}</td></tr>`; }).join('')
+        + (sr.adjust? `<tr><td class="muted">伝票に無い調整（予実の手入力）</td><td class="r num">${moneyPlain(sr.adjust)}</td><td colspan="5"></td></tr>`:'')
+        + `<tr style="font-weight:700;background:var(--thead);"><td>合計</td><td class="r num">${moneyPlain(sr.total)}</td><td></td>
+            <td class="r">${pct(rev, S(prev.revenue,s,e))}</td><td></td><td class="r num">${moneyPlain(bal.ar)}</td><td class="r num">${bal.arOver?moneyPlain(bal.arOver):'<span class="zero">0</span>'}</td></tr>`
+        : '<tr><td colspan="7" class="empty">この月の売上はまだありません。</td></tr>'}</tbody></table></div>
+    <div class="fhelp" style="padding:6px 14px 10px;">担当者は 取引先の「BIGLIGHT担当者」（CRM 所属機関情報と同じ）。請求書は確定したときの担当で数えます。行を押すと取引先ごとの内訳。</div></div>`;
+
+  return pageShell({ title:'ダッシュボード', sub:fyLabel(fy)+' ／ '+esc(dashRangeLabel(fy,s,e)),
+    body: guide+strip+`
+    <div class="kpi-grid">
+      <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上高</div>
+        <div class="num">${moneyPlain(rev)}</div>
+        <div class="sub">予算比 ${budRev? (actRevCmp/budRev*100).toFixed(0)+'%' : '—'} ／ 前年同期 ${pct(actRevCmp, prevRev)}</div></div>
+      <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上総利益</div>
+        <div class="num ${gross<0?'minus':''}">${moneyPlain(gross)}</div><div class="sub">粗利率 ${rate(gross,rev)}</div></div>
+      <div class="kpi clickable" onclick="goto('compare')"><div class="lbl">経常利益（税引前）</div>
+        <div class="num ${ord<0?'minus':'plus'}">${moneyPlain(ord)}</div>
+        <div class="sub">利益率 ${rate(ord,rev)} ／ 予算比 ${budOrd? (actOrdCmp/budOrd*100).toFixed(0)+'%' : '—'} ／ 前年 ${pct(actOrdCmp, prevOrd)}</div></div>
+      <div class="kpi clickable" onclick="goto('arbook')"><div class="lbl">売掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
+        <div class="num">${moneyPlain(bal.ar)}</div>
+        <div class="sub ${bal.arOver?'minus':''}">うち期限超過 ${moneyPlain(bal.arOver)}</div></div>
+      <div class="kpi clickable" onclick="goto('bills')"><div class="lbl">買掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
+        <div class="num">${moneyPlain(bal.ap)}</div><div class="sub">${bal.now? '7日以内 '+moneyPlain(dueSoon.reduce((s2,b)=>s2+balanceOfBill(b),0)) : '月末時点'}</div></div>
+    </div>
+    ${staffTbl}
 
     ${overdue.length? `<div class="dash-section c-red"><div class="dash-head clickable" onclick="goto('aging')">
         ${IC.warn} 入金期日を過ぎた請求<span class="cnt">${overdue.length}件 ・ ${moneyPlain(overdue.reduce((s,x)=>s+balanceOfInvoice(x),0))}円 →</span></div>
@@ -6891,7 +7129,7 @@ function notifItems(){
   const dr=dunRows().filter(r=>r.todo);
   if(dr.length){
     const me=String((SESSION&&SESSION.email)||'').toLowerCase();
-    const mine=dr.filter(r=>String(r.owner).toLowerCase()===me).length;
+    const mine=dr.filter(r=>isMyStaff(r.owner)).length;
     const brk=dr.filter(r=>r.todo.rank===5).length;
     out.push({ sev: brk?'danger':'warn', key:'dunning', label:'今日やる督促', n:dr.length, go:"goto('dunning')",
       sub:(brk?`入金の約束を過ぎた会社 ${brk}社`:'')+(mine?`${brk?' ・ ':''}あなたの担当 ${mine}社`:'') || dr.slice(0,3).map(r=>r.company.name).join('、') });
@@ -7144,9 +7382,13 @@ const GUIDE_NOTE = {
       入るのは、管理者がこのボタンを押したときだけ。
    ★ 入れたものには全部 demo:true の印と【デモ】の名前を付けます。
       「デモを消す」はその印が付いた行だけを消します。本物には触れません。
-   ★ 何が入るか: 取引先9社（得意先3・仕入先6）／物件4／費目15／
-      14か月ぶんの 請求・入金・支払請求・支払・費用／予算。
-      入金の遅れ方を会社ごとに変えてあるので、台帳のタイムラインの色が全部見られます。
+   ★ 何が入るか（2026-09-15 利用者の指示で作り直し）:
+      得意先15社（BIGLIGHT担当者 4人に割り振り）／支払先8社／物件4／費目／
+      前年度の期首（8月）から今月までの 請求・入金・支払請求・支払・費用・給与／予算（2年度）／OKR。
+      ・前年度は 12か月そろい、売上 ちょうど 8,000万円・経常利益（税引前）ちょうど 20%（1,600万円）。
+        費用は作ったあとで 賞与の額で合わせる（本物のデータが入っていても、デモの分だけで合わせる）。
+      ・途中で担当が替わる会社が1社ある（担当者別の売上が 当時の担当で数えられるかを見る）。
+      ・入金の遅れ方を会社ごとに変えてあるので、台帳のタイムラインと督促の色が全部見られます。
    ========================================================================== */
 const DEMO_TAG='【デモ】';
 let _dseed=20260913;
@@ -7156,7 +7398,7 @@ const dint = (lo,hi)=>lo+Math.floor(drnd()*(hi-lo+1));
 const dvar = (base,pct)=>Math.round(base*(1+(drnd()*2-1)*pct)/100)*100;
 
 function demoCount(){
-  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','accounts','workers','assignments','collectionLogs'];
+  const keys=['companies','properties','costItems','invoices','payments','bills','payouts','expenses','budgets','billingRules','accounts','workers','assignments','collectionLogs','objectives','keyResults'];
   return keys.reduce((n,k)=>n+((DB[k]||[]).filter(x=>x&&x.demo).length),0);
 }
 function demoPanel(){
@@ -7165,7 +7407,7 @@ function demoPanel(){
       <span class="sub">画面の動きを確かめるための作り物。本物のデータには触れません</span></div>
     <div class="panel-bd">
       ${n? `<div class="infobar">いま <b>${n}件</b> のデモデータが入っています（名前が ${esc(DEMO_TAG)} で始まる行）。</div>`
-         : `<div class="fhelp" style="margin-bottom:10px;">取引先・物件・14か月ぶんの請求と入金・支払・費用をまとめて作ります。
+         : `<div class="fhelp" style="margin-bottom:10px;">取引先・物件・前年度12か月＋今年度の請求と入金・支払・費用・予算をまとめて作ります（前年度の売上 8,000万円・経常利益 20%）。
               入金の遅れ方を会社ごとに変えてあるので、取引先台帳のタイムラインの色が全部見られます。</div>`}
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn ${n?'secondary':''}" onclick="demoSeed()">${n?'デモデータを作り直す':'デモデータを入れる'}</button>
@@ -7180,24 +7422,52 @@ async function demoSeed(){
   if(!isAdmin()){ toast('デモデータは管理者だけが入れられます。','err'); return; }
   if(demoCount() && !confirm('すでにデモデータがあります。いったん全部消してから作り直しますか？')) return;
   if(demoCount()){ await demoRemove(true); }
-  if(!confirm('デモデータを入れます。\n\n・名前が【デモ】で始まる行が約350件できます\n・本物のデータには触れません\n・あとから「全部消す」で消せます\n\nよろしいですか？')) return;
+  if(!confirm('デモデータを入れます。\n\n・名前が【デモ】で始まる行が約1,300件できます\n・前年度12か月: 売上 8,000万円／経常利益 1,600万円（20%）\n・本物のデータには触れません\n・あとから「全部消す」で消せます\n\nよろしいですか？')) return;
 
   _dseed=20260913;
   const D=r=>Object.assign({demo:true}, r);
   const endYm=thisMonth();
-  const months=[]; for(let i=13;i>=0;i--) months.push(addMonths(endYm,-i));   // 14か月
+  const FY_A=fyOf(endYm)-1, FY_B=FY_A+1;                 // FY_A = 12か月そろう年度（前年度）
+  const months=[]; for(let ym=fyMonths(FY_A)[0]; ym<=endYm; ym=addMonths(ym,1)) months.push(ym);
   const t=today();
   const put=(k,r)=>commitRecord(k, D(r), {}).record;
+  /* 合わせる前の数字（本物のデータの分）。デモの分だけで 8,000万・20% にするため */
+  const base0={ rev:sum12(actualSeries(FY_A,'revenue')), cost:sum12(actualSeries(FY_A,'cogs'))+sum12(actualSeries(FY_A,'sga')), nonop:sum12(actualSeries(FY_A,'nonop')) };
 
-  /* ── 取引先 ── */
-  const cust=[
-    put('companies',{name:DEMO_TAG+'株式会社さくら製作所', kana:'サクラセイサクショ', kind:'得意先', closingDay:31, paySite:1, payDay:31,
-      taxCat:'課税10%', address:'栃木県小山市…', staffName:'佐藤', note:'いつも期日どおり'}),
-    put('companies',{name:DEMO_TAG+'東和フーズ株式会社', kana:'トウワフーズ', kind:'得意先', closingDay:20, paySite:2, payDay:25,
-      taxCat:'課税10%', address:'群馬県太田市…', staffName:'鈴木', note:'20日締・翌々月25日払い（期日は長いが守る）'}),
-    put('companies',{name:DEMO_TAG+'北関東物流サービス', kana:'キタカントウブツリュウ', kind:'得意先', closingDay:15, paySite:1, payDay:20,
-      taxCat:'課税10%', address:'茨城県古河市…', staffName:'高橋', note:'入金が遅れがち'}),
+  /* ── BIGLIGHT担当者（4人）。1人目は いま使っている人（督促の「自分の担当」も見られる） ── */
+  const me=(SESSION&&SESSION.email)||'';
+  const ST={ me: me||'デモ 高木', yamada:'デモ 山田', sasaki:'デモ 佐々木', nakamura:'デモ 中村' };
+
+  /* ── 得意先15社 ──
+     base = 前年度の月額（税抜）。今年度は 8% 上げる（北関東だけ据え置き）。
+     pay  = 払い方のくせ: ontime（期日どおり）/ slow（3〜12日遅れ）/ late（遅れがち・直近未入金）/ lapse（3か月前の1回だけ払っていない） */
+  const CUST=[
+    {k:'sakura', name:'株式会社さくら製作所', kana:'サクラセイサクショ', cl:31, site:1, day:31, addr:'栃木県小山市…', staff:'佐藤', owner:ST.yamada, base:420000, pay:'ontime', note:'いつも期日どおり。在籍人数×30,000円'},
+    {k:'towa',   name:'東和フーズ株式会社', kana:'トウワフーズ', cl:20, site:2, day:25, addr:'群馬県太田市…', staff:'鈴木', owner:ST.me, base:550000, pay:'slow', note:'20日締・翌々月25日払い（期日は長いが少し遅れる）'},
+    {k:'kita',   name:'北関東物流サービス', kana:'キタカントウブツリュウ', cl:15, site:1, day:20, addr:'茨城県古河市…', staff:'高橋', owner:ST.me, base:70000, pay:'late', note:'入金が遅れがち'},
+    {k:'midori', name:'みどり農園株式会社', kana:'ミドリノウエン', cl:31, site:1, day:31, addr:'栃木県真岡市…', staff:'加藤', owner:ST.yamada, base:360000, pay:'ontime'},
+    {k:'daiwa',  name:'大和建設工業株式会社', kana:'ダイワケンセツコウギョウ', cl:31, site:1, day:31, addr:'埼玉県熊谷市…', staff:'伊藤', owner:ST.me, base:600000, pay:'ontime', limit:1500000},
+    {k:'hikari', name:'社会福祉法人ひかり介護会', kana:'ヒカリカイゴカイ', cl:31, site:1, day:25, addr:'栃木県宇都宮市…', staff:'渡辺', owner:ST.yamada, base:480000, pay:'ontime'},
+    {k:'marufuku', name:'丸福水産加工株式会社', kana:'マルフクスイサンカコウ', cl:25, site:1, day:31, addr:'茨城県ひたちなか市…', staff:'山本', owner:ST.sasaki, base:390000, pay:'slow'},
+    {k:'kanto',  name:'関東精密機械株式会社', kana:'カントウセイミツキカイ', cl:31, site:2, day:10, addr:'群馬県伊勢崎市…', staff:'中島', owner:ST.me, base:520000, pay:'ontime'},
+    {k:'aoba',   name:'あおば食品株式会社', kana:'アオバショクヒン', cl:31, site:1, day:31, addr:'栃木県足利市…', staff:'小川', owner:ST.yamada, base:300000, pay:'ontime'},
+    {k:'fuji',   name:'富士ビルメンテナンス株式会社', kana:'フジビルメンテナンス', cl:31, site:1, day:31, addr:'埼玉県さいたま市…', staff:'石井', owner:ST.sasaki, base:450000, pay:'ontime',
+      moveTo:ST.nakamura, moveAt:6, note:'2月から担当が 佐々木 → 中村 に替わった'},
+    {k:'hitachi', name:'常陸自動車部品株式会社', kana:'ヒタチジドウシャブヒン', cl:20, site:1, day:31, addr:'茨城県日立市…', staff:'森', owner:ST.sasaki, base:410000, pay:'ontime'},
+    {k:'satsuki', name:'さつき外食グループ株式会社', kana:'サツキガイショクグループ', cl:31, site:1, day:31, addr:'栃木県小山市…', staff:'清水', owner:ST.nakamura, base:350000, pay:'slow'},
+    {k:'nasu',   name:'那須リゾートホテル株式会社', kana:'ナスリゾートホテル', cl:31, site:1, day:20, addr:'栃木県那須町…', staff:'池田', owner:ST.nakamura, base:280000, pay:'slow'},
+    {k:'ryomo',  name:'両毛プラスチック株式会社', kana:'リョウモウプラスチック', cl:31, site:1, day:31, addr:'群馬県桐生市…', staff:'橋本', owner:ST.sasaki, base:240000, pay:'lapse', limit:400000},
+    {k:'utsunomiya', name:'宇都宮ロジスティクス株式会社', kana:'ウツノミヤロジスティクス', cl:31, site:1, day:31, addr:'栃木県宇都宮市…', staff:'山下', owner:ST.nakamura, base:330000, pay:'ontime'},
   ];
+  const custBy={};
+  CUST.forEach(x=>{
+    /* 担当が途中で替わる会社は、最初は元の担当で作る（請求を作りながら 替わった月に切り替える） */
+    custBy[x.k]=put('companies',{name:DEMO_TAG+x.name, kana:x.kana, kind:'得意先', closingDay:x.cl, paySite:x.site, payDay:x.day,
+      taxCat:'課税10%', address:x.addr, staffName:x.staff, owner:x.owner, creditLimit:x.limit||'', note:x.note||''});
+  });
+  /* 督促の見本: 北関東は与信限度額を超え、約束を過ぎた。東和は 約束待ち */
+  custBy.kita.creditLimit=250000; markDirty('companies',custBy.kita);
+
   const vend={
     oya:  put('companies',{name:DEMO_TAG+'丸山不動産', kind:'仕入先', closingDay:31, paySite:1, payDay:27, taxCat:'課税10%', note:'社宅・事務所の大家'}),
     den:  put('companies',{name:DEMO_TAG+'東京電力エナジーパートナー', kind:'仕入先', closingDay:31, paySite:1, payDay:28, taxCat:'課税10%'}),
@@ -7205,24 +7475,22 @@ async function demoSeed(){
     gas:  put('companies',{name:DEMO_TAG+'東京ガス', kind:'仕入先', closingDay:31, paySite:1, payDay:28, taxCat:'課税10%'}),
     clean:put('companies',{name:DEMO_TAG+'クリーンサポート', kind:'仕入先', closingDay:31, paySite:1, payDay:25, taxCat:'課税10%', note:'寮の共用部清掃'}),
     tsu:  put('companies',{name:DEMO_TAG+'グローバル通訳サービス', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'通訳・翻訳（売上原価）'}),
+    gai:  put('companies',{name:DEMO_TAG+'登録支援パートナーズ合同会社', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'支援業務の外注（売上原価）'}),
+    ad:   put('companies',{name:DEMO_TAG+'北関東求人メディア', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'求人広告'}),
   };
 
-  /* ── 督促の見本: 担当者・与信限度額・対応の記録（約束を過ぎた会社／守った会社） ── */
-  const me=(SESSION&&SESSION.email)||'';
-  [cust[0],cust[1],cust[2]].forEach(c=>{ c.owner=me; markDirty('companies',c); });
-  cust[2].creditLimit=250000; markDirty('companies',cust[2]);
-  const DEMO_LOGS=[
-    { companyId:cust[2].id, date:addDays(t,-25), method:'メール', content:'督促1のメールを送信', nextDate:addDays(t,-18) },
-    { companyId:cust[2].id, date:addDays(t,-12), method:'電話', content:'経理の高橋様。社内の承認が遅れている、今月10日までに払うとのこと',
-      promiseDate:addDays(t,-4), promiseAmount:150000, nextDate:addDays(t,-3) },
-    { companyId:cust[1].id, date:addDays(t,-6), method:'電話', content:'鈴木様。振込を忘れていた、今週中に払うとのこと',
-      promiseDate:addDays(t,2), promiseAmount:181500, nextDate:addDays(t,3) },
-  ];
+  /* ── 請求ルール（月額固定）。今年度の月額 ── */
+  const feeOf=(x, ym)=> x.k==='kita'? x.base : (fyOf(ym)===FY_A? x.base : Math.round(x.base*1.08/10000)*10000);
+  CUST.forEach(x=>put('billingRules',{companyId:custBy[x.k].id, kind:'fixed', name:x.k==='towa'?'月額支援料':'支援委託料',
+    unitPrice:feeOf(x,endYm), accountCode:'4100', taxCat:'課税10%', active:true}));
 
-  /* ── 請求ルール（月額固定。人数×単価は使わなくなりました） ── */
-  put('billingRules',{companyId:cust[0].id, kind:'fixed', name:'支援委託料', unitPrice:120000, accountCode:'4100', taxCat:'課税10%', active:true});
-  put('billingRules',{companyId:cust[1].id, kind:'fixed', name:'月額支援料', unitPrice:165000, accountCode:'4100', taxCat:'課税10%', active:true});
-  put('billingRules',{companyId:cust[2].id, kind:'fixed', name:'支援委託料', unitPrice:70000,  accountCode:'4100', taxCat:'課税10%', active:true});
+  const DEMO_LOGS=[
+    { companyId:custBy.kita.id, date:addDays(t,-25), method:'メール', content:'督促1のメールを送信', nextDate:addDays(t,-18) },
+    { companyId:custBy.kita.id, date:addDays(t,-12), method:'電話', content:'経理の高橋様。社内の承認が遅れている、今月10日までに払うとのこと',
+      promiseDate:addDays(t,-4), promiseAmount:150000, nextDate:addDays(t,-3) },
+    { companyId:custBy.towa.id, date:addDays(t,-6), method:'電話', content:'鈴木様。振込を忘れていた、今週中に払うとのこと',
+      promiseDate:addDays(t,2), promiseAmount:Math.round(feeOf(CUST[1],endYm)*1.1), nextDate:addDays(t,3) },
+  ];
 
   /* ── 勘定科目の階層（利用者の例のとおり: 地代家賃→建物ごと、水道光熱費→電気・水道・ガス） ── */
   if(!accTreeReady()) accInitTree();
@@ -7249,14 +7517,14 @@ async function demoSeed(){
       rooms:4, capacity:8, contractStart:addMonths(endYm,-14)+'-01', contractEnd:addMonths(endYm,2)+'-28',
       rent:143000, kyoeki:8800, parking:0, deposit:286000, note:'★まもなく満了。更新するか要判断'}),
     put('properties',{name:DEMO_TAG+'本社事務所', kind:'事務所', address:'栃木県小山市駅前通り2-5', companyId:vend.oya.id,
-      rooms:1, capacity:0, contractStart:addMonths(endYm,-38)+'-01', contractEnd:addMonths(endYm,10)+'-31',
+      rooms:1, capacity:0, contractStart:addMonths(endYm,-38)+'-01', contractEnd:addMonths(endYm,10)+'-28',
       rent:220000, kyoeki:22000, parking:0, deposit:660000}),
     put('properties',{name:DEMO_TAG+'第2駐車場', kind:'駐車場', address:'栃木県小山市本郷町1-2-20', companyId:vend.oya.id,
       rent:33000, kyoeki:0, parking:0, contractStart:addMonths(endYm,-20)+'-01', contractEnd:''}),
   ];
 
   /* ── 費目（月次費用表の行） ──
-     家賃と清掃は「買掛」＝毎月の支払請求になる。光熱費は「即払い」＝マスに打つ。 */
+     家賃・清掃・外注・求人広告は「買掛」＝毎月の支払請求になる。光熱費・給与などは「即払い」＝マスに打つ。 */
   const ci=(o)=>put('costItems', Object.assign({kind:'fixed', taxCat:'課税10%', active:true}, o));
   const rentAcc = pr => pr.kind==='駐車場'? A.rentPark : (pr.kind==='事務所'? A.rentOffice : A.rentDorm);
   const rentItems = props.map(pr=>ci({name:DEMO_TAG+pr.name.replace(DEMO_TAG,'')+' 家賃', accountCode:rentAcc(pr),
@@ -7271,44 +7539,69 @@ async function demoSeed(){
   });
   const cleanItem = ci({name:DEMO_TAG+'寮の共用部清掃', accountCode:'6900', monthly:33000, payMode:'買掛',
     companyId:vend.clean.id, propertyId:props[0].id});
+  const gaiItem = ci({name:DEMO_TAG+'支援業務の外注', accountCode:'5100', monthly:1265000, payMode:'買掛', companyId:vend.gai.id});
+  const adItem  = ci({name:DEMO_TAG+'求人広告', accountCode:'6310', monthly:121000, payMode:'買掛', companyId:vend.ad.id});
+  /* 即払い（税込で入力）。tax: 対象外＝給与など消費税のかからないもの */
   const other=[
+    { it: ci({name:DEMO_TAG+'役員報酬', accountCode:'6100', monthly:700000, payMode:'即払い', taxCat:'対象外'}), base:700000, tax:'対象外', method:'銀行振込' },
+    { it: ci({name:DEMO_TAG+'給与手当', accountCode:'6110', monthly:1300000, payMode:'即払い', taxCat:'対象外'}), base:1300000, tax:'対象外', method:'銀行振込' },
+    { it: ci({name:DEMO_TAG+'法定福利費（社会保険）', accountCode:'6120', monthly:300000, payMode:'即払い', taxCat:'対象外'}), base:300000, tax:'対象外', method:'口座振替' },
+    { it: ci({name:DEMO_TAG+'生活支援・送迎・研修', accountCode:'5300', monthly:0, payMode:'即払い', kind:'variable'}), base:520000, vary:.15, method:'クレジット' },
     { it: ci({name:DEMO_TAG+'クラウド・通信費', accountCode:'6220', monthly:38500, payMode:'即払い'}), base:38500 },
     { it: ci({name:DEMO_TAG+'複合機リース', accountCode:'6900', monthly:16500, payMode:'即払い'}), base:16500 },
-    { it: ci({name:DEMO_TAG+'旅費交通費', accountCode:'6300', monthly:0, payMode:'即払い', kind:'variable'}), base:45000, vary:true },
+    { it: ci({name:DEMO_TAG+'旅費交通費', accountCode:'6300', monthly:0, payMode:'即払い', kind:'variable'}), base:110000, vary:.35 },
+    { it: ci({name:DEMO_TAG+'接待交際費', accountCode:'6320', monthly:0, payMode:'即払い', kind:'variable'}), base:55000, vary:.5, skip:.2 },
+    { it: ci({name:DEMO_TAG+'振込手数料', accountCode:'6400', monthly:0, payMode:'即払い', kind:'variable'}), base:15000, vary:.2, method:'口座振替' },
+    { it: ci({name:DEMO_TAG+'消耗品費', accountCode:'6410', monthly:0, payMode:'即払い', kind:'variable'}), base:40000, vary:.4 },
   ];
 
-  /* ── 14か月ぶんの 請求・入金 ──
-     会社ごとに「払い方のくせ」を変える。台帳のタイムラインで色の違いが見えるように。 */
+  /* ── 請求・入金 ──
+     前年度の売上は ちょうど 8,000万円: 月額の合計 575万円×12 ＋ 紹介料・申請手数料 1,100万円。 */
+  const SPOT_A=[700000,800000,900000,1000000,900000,1100000,800000,1000000,1100000,1000000,900000,800000];
   const invOf=(c, ym, items)=>{
     const rec={ companyId:c.id, bookMonth:ym, issueDate:monthEnd(ym), status:'確定', items,
       dueDate: dueDateOf(ym, c.closingDay, c.paySite, c.payDay), note:DEMO_TAG+'自動作成' };
-    prepareDoc('invoices', rec, null);
+    prepareDoc('invoices', rec, null);                        // ★ ここで その時の担当が請求書に写る
     return put('invoices', rec);
   };
   const payFor=(c, inv, dayOffset, ratio)=>{
-    const date=addDays(inv.dueDate, dayOffset);
+    const date=addDays(effDue(inv), dayOffset);
     if(date>t) return null;                                  // 未来の入金は作らない
     const amt=Math.round(docTotal(inv)*(ratio==null?1:ratio));
     return put('payments',{ companyId:c.id, date, amount:amt, fee:0, method:'銀行振込', status:'確定',
       allocations:[{invoiceId:inv.id, amount:amt}], note:DEMO_TAG });
   };
+  const spotTargets=CUST.filter(x=>x.k!=='kita');
   months.forEach((ym,mi)=>{
-    /* さくら製作所: 在籍4名 × 30,000。いつも期日どおり（緑） */
-    const i1=invOf(cust[0], ym, [{accountCode:'4100', name:'支援委託料', qty:4+(mi>9?1:0), price:30000, taxCat:'課税10%'}]
-      .concat(mi%6===3? [{accountCode:'4300', name:'在留期間更新 申請手数料', qty:1, price:44000, taxCat:'課税10%'}]:[]));
-    payFor(cust[0], i1, dint(-2,0));
+    const fi=fyIndexOf(ym), isA=fyOf(ym)===FY_A;
+    /* 担当の交代（その月の請求から新しい担当） */
+    CUST.forEach(x=>{
+      if(x.moveTo && (!isA || fi>=x.moveAt) && custBy[x.k].owner!==x.moveTo){ custBy[x.k].owner=x.moveTo; markDirty('companies',custBy[x.k]); }
+    });
+    /* 紹介料・申請手数料: 30万円の紹介料を何件か＋端数を申請手数料。どの会社に付くかは月ごとに回す */
+    const spot=isA? SPOT_A[fi] : Math.round(SPOT_A[fi]*1.1/10000)*10000;
+    const extra={};
+    const nIntro=Math.floor(spot/300000), rest=spot-nIntro*300000;
+    for(let k=0;k<nIntro;k++){ const x=spotTargets[(mi*5+k*7)%spotTargets.length];
+      (extra[x.k]=extra[x.k]||[]).push({accountCode:'4200', name:'人材紹介料', qty:1, price:300000, taxCat:'課税10%'}); }
+    if(rest){ const x=spotTargets[(mi*3+11)%spotTargets.length];
+      (extra[x.k]=extra[x.k]||[]).push({accountCode:'4300', name:'在留申請・更新 手数料', qty:1, price:rest, taxCat:'課税10%'}); }
 
-    /* 東和フーズ: 月額固定。期日は遠いが、3〜12日遅れる（黄） */
-    const i2=invOf(cust[1], ym, [{accountCode:'4100', name:'月額支援料', qty:1, price:165000, taxCat:'課税10%'}]
-      .concat(mi%5===1? [{accountCode:'4200', name:'人材紹介料', qty:1, price:dvar(300000,.15), taxCat:'課税10%'}]:[]));
-    payFor(cust[1], i2, dint(3,12));
-
-    /* 北関東物流: 遅れがち（赤）。直近3か月は未入金のまま＝いま超過中 */
-    const i3=invOf(cust[2], ym, [{accountCode:'4100', name:'支援委託料', qty:2, price:35000, taxCat:'課税10%'}]);
-    if(mi < months.length-3){
-      if(mi%7===2) payFor(cust[2], i3, dint(25,45), .6);      // 一部入金だけ
-      else payFor(cust[2], i3, dint(20,70));
-    }
+    CUST.forEach(x=>{
+      const c=custBy[x.k], fee=feeOf(x,ym);
+      let main;
+      if(x.k==='sakura') main={accountCode:'4100', name:'支援委託料', qty:fee/30000, price:30000, taxCat:'課税10%'};   // 前年度14名・今年度15名
+      else if(x.k==='kita') main={accountCode:'4100', name:'支援委託料', qty:2, price:35000, taxCat:'課税10%'};
+      else main={accountCode:'4100', name:x.k==='towa'?'月額支援料':'支援委託料', qty:1, price:fee, taxCat:'課税10%'};
+      const inv=invOf(c, ym, [main].concat(extra[x.k]||[]));
+      const ago=months.length-1-mi;                          // 何か月前の請求か（0＝今月）
+      if(x.pay==='ontime') payFor(c, inv, dint(-3,0));
+      else if(x.pay==='slow') payFor(c, inv, dint(3,12));
+      else if(x.pay==='lapse'){ if(ago!==3) payFor(c, inv, dint(-2,0)); }
+      else if(x.pay==='late'){
+        if(ago>=3){ if(mi%7===2) payFor(c, inv, dint(25,45), .6); else payFor(c, inv, dint(20,70)); }
+      }
+    });
   });
 
   /* ── 支払請求（買掛）と支払 ── */
@@ -7325,6 +7618,7 @@ async function demoSeed(){
       allocations:[{billId:bill.id, amount:docTotal(bill)}], note:DEMO_TAG });
   };
   months.forEach((ym,mi)=>{
+    const isA=fyOf(ym)===FY_A;
     /* 家賃: 大家さんへ1枚にまとめて（物件ごとの明細） */
     const rentBill=billOf(vend.oya, ym, props.map((pr,i)=>({ accountCode:rentAcc(pr), costItemId:rentItems[i].id,
       name:pr.name.replace(DEMO_TAG,'')+' 家賃', amount: netOfGross(num(pr.rent)+num(pr.kyoeki)+num(pr.parking),'課税10%'), taxCat:'課税10%' })), '家賃');
@@ -7332,14 +7626,18 @@ async function demoSeed(){
     /* 清掃 */
     const cb=billOf(vend.clean, ym, [{accountCode:'6900', costItemId:cleanItem.id, name:'寮 共用部清掃', amount:30000, taxCat:'課税10%'}], '清掃');
     if(mi < months.length-2) payoutFor(vend.clean, cb, dint(0,4));
-    /* 通訳・翻訳（売上原価）: 毎月ではない */
-    if(mi%3!==2){
-      const tb=billOf(vend.tsu, ym, [{accountCode:'5200', name:'通訳・翻訳費', amount:dvar(90000,.4), taxCat:'課税10%'}], '通訳');
-      if(mi < months.length-2) payoutFor(vend.tsu, tb, dint(-1,2));
-    }
+    /* 支援業務の外注（売上原価）: 毎月 */
+    const gb=billOf(vend.gai, ym, [{accountCode:'5100', costItemId:gaiItem.id, name:'支援業務委託', amount:isA?1150000:1250000, taxCat:'課税10%'}], '外注');
+    payoutFor(vend.gai, gb, 0);
+    /* 通訳・翻訳（売上原価）: 毎月、量が変わる */
+    const tb=billOf(vend.tsu, ym, [{accountCode:'5200', name:'通訳・翻訳費', amount:dvar(240000,.25), taxCat:'課税10%'}], '通訳');
+    if(mi < months.length-2) payoutFor(vend.tsu, tb, dint(-1,2));
+    /* 求人広告 */
+    const ab=billOf(vend.ad, ym, [{accountCode:'6310', costItemId:adItem.id, name:'求人広告 掲載料', amount:110000, taxCat:'課税10%'}], '広告');
+    payoutFor(vend.ad, ab, 0);
   });
 
-  /* ── 光熱費など「即払い」の費用（月次費用表のマス） ──
+  /* ── 光熱費・給与など「即払い」の費用（月次費用表のマス） ──
      夏と冬は電気・ガスが上がる。1年の形が出るように季節で変える。 */
   const season=(ym,kind)=>{
     const m=Number(ym.split('-')[1]);
@@ -7354,39 +7652,69 @@ async function demoSeed(){
         taxCat:'課税10%', method:'口座振替', note:u.it.name.replace(DEMO_TAG,'') });
     });
     other.forEach(o=>{
-      const amt = o.vary? (drnd()<.25? 0 : dvar(o.base,.5)) : o.base;
+      if(o.skip && drnd()<o.skip) return;
+      const amt = o.vary? dvar(o.base,o.vary) : o.base;
       if(!amt) return;
-      put('expenses',{ costItemId:o.it.id, bookMonth:ym, date:monthEnd(ym), accountCode:o.it.accountCode,
-        amount:amt, taxCat:'課税10%', method:'クレジット', note:o.it.name.replace(DEMO_TAG,'') });
+      put('expenses',{ costItemId:o.it.id, bookMonth:ym, date:o.tax==='対象外'? ym+'-25' : monthEnd(ym), accountCode:o.it.accountCode,
+        amount:amt, taxCat:o.tax||'課税10%', method:o.method||'クレジット', note:o.it.name.replace(DEMO_TAG,'') });
     });
   });
 
-  /* ── 予算（今年度と前年度） ── */
-  [CUR_FY, CUR_FY-1].forEach(fy=>{
+  /* ── 前年度を ちょうど 売上 8,000万円・経常利益 20% に合わせる ──
+     デモで増えた分だけを見て、足りない費用を 賞与（12月・7月）で埋める。 */
+  {
+    const rev=sum12(actualSeries(FY_A,'revenue'))-base0.rev;
+    const cost=sum12(actualSeries(FY_A,'cogs'))+sum12(actualSeries(FY_A,'sga'))-base0.cost;
+    const nonop=sum12(actualSeries(FY_A,'nonop'))-base0.nonop;
+    const bonus=Math.max(0, Math.round(rev*0.8 + nonop - cost));   // 経常 = 売上 − 費用 + 営業外 = 売上×20%
+    const half=Math.floor(bonus/2);
+    [[fyMonths(FY_A)[4], half], [fyMonths(FY_A)[11], bonus-half]].forEach(([ym,amt])=>{
+      if(amt>0) put('expenses',{ costItemId:other[1].it.id, bookMonth:ym, date:ym+'-25', accountCode:'6110',
+        amount:amt, taxCat:'対象外', method:'銀行振込', note:'賞与' });
+    });
+  }
+
+  /* ── 予算（前年度と今年度。今年度は 1割増し） ── */
+  [FY_A, FY_B].forEach(fy=>{
+    const g = fy===FY_B? 1.1 : 1;
     fyMonths(fy).forEach((ym,i)=>{
-      put('budgets',{fy, mIndex:i, accountCode:'4100', amount: fy===CUR_FY? 700000 : 620000});
-      put('budgets',{fy, mIndex:i, accountCode:'4200', amount: 100000});
-      put('budgets',{fy, mIndex:i, accountCode:'5200', amount: 90000});
-      put('budgets',{fy, mIndex:i, accountCode:'6200', amount: 620000});
-      put('budgets',{fy, mIndex:i, accountCode:'6210', amount: 95000});
+      [['4100',5700000],['4200',650000],['4300',250000],
+       ['5100',1150000],['5200',240000],['5300',470000],
+       ['6100',700000],['6110',1300000+((i===4||i===11)?900000:0)],['6120',300000],
+       ['6200',600000],['6210',95000],['6310',110000],['6900',230000]].forEach(([code,amt])=>{
+        const fixed=['6100','6200','6210'].includes(code);
+        put('budgets',{fy, mIndex:i, accountCode:code, amount: fixed? amt : Math.round(amt*g/10000)*10000});
+      });
     });
   });
+
+  /* ── OKR（前年度 Q4 と 今の四半期）。数字は実データから自動で取る ── */
+  [FY_A+'-Q4', FY_B+'-Q'+quarterOfIdx(fyIndexOf(endYm))].forEach((period,pi)=>{
+    const o=put('objectives',{ title:DEMO_TAG+(pi? '新しい受入れ先を増やし、売上を伸ばす' : '利益率 20% を守る'), period, level:'会社', ownerEmail:me, status:'順調' });
+    put('keyResults',{ objectiveId:o.id, period, title:'四半期の売上', target:pi? 22000000 : 20000000, unit:'円', autoSource:{type:'yojitsu', metric:'revenue', scope:'quarter'} });
+    put('keyResults',{ objectiveId:o.id, period, title:'四半期の経常利益', target:pi? 4400000 : 4000000, unit:'円', autoSource:{type:'yojitsu', metric:'ordinary', scope:'quarter'} });
+    put('keyResults',{ objectiveId:o.id, period, title:'期限を過ぎた売掛金', target:300000, unit:'円', lowerIsBetter:true, autoSource:{type:'ar', metric:'overdue'} });
+  });
+
   DEMO_LOGS.forEach(l=>put('collectionLogs', Object.assign({ by:me, stage:0, invoiceIds:[] }, l)));
   if(!DB.settings) DB.settings={};
   if(!num(DB.settings.cashStart)){ DB.settings.cashStart=3500000; PENDING.changed.settings=DB.settings; }
 
   toast('デモデータを作りました。保存しています…','ok');
   await pushDelta();
-  LED_CO=String(cust[2].id); LED_SIDE='ar'; LED_TAB='timeline';
+  /* 12か月そろった前年度を 通期で開く */
+  CUR_FY=FY_A; try{ localStorage.setItem('bl_yj_fy',String(CUR_FY)); }catch(e){}
+  DASH_RANGE={ fy:FY_A, s:0, e:11 }; try{ localStorage.setItem(DASH_RANGE_KEY, JSON.stringify(DASH_RANGE)); }catch(e){}
+  LED_CO=String(custBy.kita.id); LED_SIDE='ar'; LED_TAB='timeline';
   toast(`デモデータ ${demoCount()}件 を入れました。`,'ok');
-  goto('ledger');
+  goto('dashboard');
 }
 
 /** 印（demo:true）が付いた行だけを消す。本物には触れない。 */
 async function demoRemove(quiet){
   if(!isAdmin()){ toast('管理者だけが消せます。','err'); return; }
   /* 消す順番: 使っている側から先に。科目は最後（費目・伝票が参照しているため） */
-  const keys=['collectionLogs','payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies','accounts'];
+  const keys=['collectionLogs','keyResults','objectives','payments','payouts','invoices','bills','expenses','costItems','properties','billingRules','assignments','workers','budgets','companies','accounts'];
   const total=demoCount();
   if(!total){ toast('デモデータはありません。','ok'); return; }
   if(!quiet && !confirm(`デモデータ ${total}件 を全部消します。\n【デモ】の印が付いた行だけを消すので、本物のデータは残ります。\n\nよろしいですか？`)) return;
@@ -7473,7 +7801,8 @@ function crmCsvModal(){
         <div class="fhelp">特定技能者・雇用は取り込まなくなりました（人はCRMが正）。</div></div>
       <div class="full"><label>CSVの中身（1行目に列見出し）</label>
         <textarea id="csvText" style="min-height:170px;font-family:ui-monospace,monospace;font-size:12px;" placeholder="ID,所属機関名,フリガナ,..."></textarea>
-        <div class="fhelp">列見出しで判断します。並び順は自由です。CRMの「Excel／CSV」出力をそのまま貼れます。</div></div>
+        <div class="fhelp">列見出しで判断します。並び順は自由です。CRMの「Excel／CSV」出力をそのまま貼れます。
+          「BIGLIGHT担当者」の列があれば、取引先の担当者も入ります（空欄の行は今の担当のまま）。</div></div>
     </div>
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
       <button class="btn" onclick="crmCsvGo()">取り込む</button></div>`,'lg');

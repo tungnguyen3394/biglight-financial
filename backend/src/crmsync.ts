@@ -53,6 +53,10 @@ export async function fetchFromCrm(): Promise<CrmPayload> {
   } finally { clearTimeout(timer) }
 }
 
+/** 同じ人か（空白の有無・大文字小文字は見ない）。名前とメールの突き合わせは画面側で行う。 */
+const sameStaff = (a: any, b: any) =>
+  String(a ?? '').replace(/[\s\u3000]+/g, '').toLowerCase() === String(b ?? '').replace(/[\s\u3000]+/g, '').toLowerCase()
+
 const pick = (src: any, fields: string[]) => {
   const o: any = {}
   for (const f of fields) if (src[f] !== undefined) o[f] = src[f]
@@ -69,7 +73,7 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
   {
     const base: any[] = Array.isArray(out.companies) ? out.companies.slice() : []
     const byCrm = new Map(base.map((c, i) => [String(c?.crmId ?? ''), i]))
-    let added = 0, updated = 0, diff = 0
+    let added = 0, updated = 0, diff = 0, staffChanged = 0
     const seen = new Set<string>()
 
     for (const src of (payload.companies || [])) {
@@ -77,6 +81,10 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
       if (!crmId) continue
       seen.add(crmId)
       const incoming = pick(src, CRM_COMPANY_FIELDS)
+      /* BIGLIGHT担当者（CRM の 所属機関情報）→ 予実の owner。担当者別の売上に使う。
+         CRM の値は ユーザーの「名前」。空欄のときは上書きしない（予実で入れた担当を消さない）。 */
+      const staff = String(src.biglightStaff ?? '').trim()
+      if (staff) incoming.owner = staff
       const at = byCrm.get(crmId)
       if (at == null) {
         base.push({
@@ -86,6 +94,8 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
         added++
       } else {
         const cur = base[at]
+        if (incoming.owner && sameStaff(incoming.owner, cur.owner)) delete incoming.owner
+        if (incoming.owner) staffChanged++
         // Cảnh báo khi CRM đổi đúng trường đang bị override → người dùng tự quyết
         const ov = cur.overrides || {}
         const conflicts = Object.keys(ov).filter(f =>
@@ -105,7 +115,7 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
       if (c?.source === 'crm' && c.crmId && !seen.has(String(c.crmId)) && !c._gone) { c._gone = true; gone++ }
     }
     out.companies = base
-    stats.companies = `+${added} ~${updated}${gone ? ` 消失${gone}` : ''}${diff ? ` ⚠相違${diff}` : ''}`
+    stats.companies = `+${added} ~${updated}${gone ? ` 消失${gone}` : ''}${diff ? ` ⚠相違${diff}` : ''}${staffChanged ? ` 担当変更${staffChanged}` : ''}`
   }
 
   /* ---------- 特定技能者 → workers (chỉ đọc) ---------- */
@@ -200,6 +210,7 @@ export const CSV_MAP_COMPANY: Record<string, string> = {
   '郵便番号': 'zip', '住所': 'address', '電話番号': 'phone', 'FAX': 'fax', 'メール': 'email',
   'Website': 'website', '分野': 'field', '業務区分': 'bizType', '代表者': 'repName',
   '担当者氏名': 'staffName', '担当者メール': 'staffEmail', '取引状況': 'contractStatus',
+  'BIGLIGHT担当者': 'biglightStaff',
 }
 export const CSV_MAP_WORKER: Record<string, string> = {
   'ID': 'crmId', 'ID番号': 'code', '特定技能者名': 'name', 'カタカナ': 'kana', '生年月日': 'dob',
