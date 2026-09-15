@@ -35,6 +35,7 @@
 | 15 | Checklist dựng app mới | — |
 | 16 | Anti-pattern — bài học từ sự cố thật | Không |
 | 17 | Mở dữ liệu cho AI & tự động hoá (khoá API + MCP) | Thêm khi cần |
+| 18 | Hướng dẫn sử dụng bằng hình ảnh → PDF (ảnh chụp thật + khung tô màu) | Đổi nội dung, giữ công cụ |
 
 ---
 
@@ -1678,6 +1679,71 @@ Rollback: chạy lại với `enable=false`; cắt một người: 失効 khoá 
 - [ ] Sửa qua AI: `操作履歴` hiện cũ→mới, đúng tên khoá; máy khác nhận thay đổi qua SSE?
 - [ ] Xoá qua AI: thiếu `confirm` thì từ chối; dòng có tham chiếu thì từ chối; dòng đã xoá còn nguyên trong audit?
 - [ ] Tắt `MCP_ENABLED`: mọi đường trả 404 và app cũ chạy y như trước?
+
+---
+
+# §18. HƯỚNG DẪN SỬ DỤNG BẰNG HÌNH ẢNH → PDF
+
+> Làm lần đầu cho app BIGLIGHT (2026-09-15): **2 bản riêng** — 企業ポータル tiếng Nhật, 本人ポータル
+> tiếng Việt. Mã nguồn: `guide/` trong repo CRM (`guide/README.md` là cách dùng chi tiết).
+> Không gộp hai đối tượng vào một tài liệu: người đọc khác nhau, ngôn ngữ khác nhau, việc cần làm khác nhau.
+
+## 18.1 Ba quyết định, đừng làm ngược
+
+1. **Ảnh là màn hình THẬT, dữ liệu là dữ liệu GIẢ.** Chạy app trên máy (backend + postgres cục bộ),
+   nạp dữ liệu mẫu có chủ đích, chụp bằng Playwright ở khổ iPhone (393×852, DPR 3).
+   Không chụp production (lộ dữ liệu người thật) và không vẽ mockup (lệch với app sau vài tuần).
+2. **Khung tô màu nằm ĐÈ lên ảnh bằng HTML, không vẽ chết vào ảnh.** Đổi màu, đổi số, bỏ khung
+   → chỉ build lại, không chụp lại.
+3. **Vị trí khung đo bằng CSS selector lúc chụp**, không đo tay. Giao diện xê dịch → chụp lại là khung tự theo.
+   Selector không còn → công cụ báo `⚠ không thấy khung` thay vì ra PDF sai im lặng.
+
+## 18.2 Tách 3 lớp — người sửa chữ không đụng code
+
+| File | Ai sửa | Chứa |
+|---|---|---|
+| `<bản>/noidung.mjs` | người viết nội dung | tiêu đề, các bước, `tip`/`note`, `mark: 'tên-khung'` |
+| `<bản>/chup.mjs` | lập trình viên | mở màn nào, bấm gì trước khi chụp, `marks: { tên: selector }` |
+| `tools/*` | không ai (dùng lại) | build PDF, chụp, dựng môi trường, style |
+
+Sửa chữ = sửa `noidung.mjs` + `node tools/build.mjs <bản>` — **không cần máy chủ**.
+
+## 18.3 Quy trình
+
+```
+node tools/env.mjs                 # postgres cục bộ (embedded, không Docker) + backend + seed + 2 trang web
+node tools/capture.mjs <bản>       # → shots/*.png + shots/*.json (vị trí khung)
+node tools/build.mjs [<bản>]       # → pdf/*.pdf (Chromium page.pdf, A4)
+```
+
+Bố cục trang: bìa → mục lục (có chú giải "khung cam = chỗ bấm") → mỗi trang **một việc** →
+trang liên hệ. Trang 1 điện thoại: ảnh trái, bước phải. Trang 2 điện thoại: ảnh trên, bước dưới.
+Màu chú thích **cam**, khác màu app (xanh) để người đọc không nhầm khung với nút thật.
+
+## 18.4 Bẫy đã gặp
+
+- **Trang phải chạy ở "chế độ app".** Nhiều nút chỉ hiện khi `Capacitor.isNativePlatform()`
+  (quét giấy tờ, trạng thái thông báo). Nạp `tools/app-stub.js` giả `window.Capacitor` + plugin
+  bằng `addInitScript` — chỉ lúc chụp.
+- **Màn native (đăng nhập) trình duyệt không chụp được** → chụp trên iPhone/giả lập, đặt ảnh vào `shots/`,
+  tự ghi `json` toạ độ. Không có json vẫn build được (ảnh không khung).
+- **Hàm vẽ bất đồng bộ đè nhau**: gọi `go('docs')` rồi `openDoc()` ngay → danh sách vẽ xong sau
+  và đè lên chi tiết. Chờ selector của màn trước rồi mới mở màn sau.
+- **Dữ liệu mẫu phải đi qua đúng cột màn hình đọc**: portal đọc `doc_requests.doc_name`, không đọc tên
+  mẫu → thiếu cột là màn trống. Seed xong phải **nhìn ảnh**, đừng tin "script chạy xanh".
+- **`confirm()`/`alert()`** chặn luồng trong Playwright nếu không bắt `page.on('dialog')`.
+- **Font**: trang portal để `'Hiragino Sans'` đứng đầu → trong Chromium chữ Việt 2 dấu (ồ, ỗ, ề) lệch.
+  Lúc chụp chèn CSS đưa font hệ thống lên trước (`chup.mjs › css`). PDF tiếng Việt dùng `-apple-system`.
+- Seed phải **xoá rồi tạo lại** mỗi lần chạy, để chụp lần sau ra đúng dữ liệu như lần trước.
+- `python3` trên macOS là shim của Xcode — chưa chấp nhận license là **mọi** lệnh python chết. Viết công cụ bằng node.
+
+## 18.5 Checklist trước khi gửi PDF
+
+- [ ] Không có tên/ID/số thẻ người thật trong bất kỳ ảnh nào?
+- [ ] `capture.mjs` không còn dòng ⚠/✘; `build.mjs` không báo `thiếu ảnh`?
+- [ ] Mỗi số trên ảnh khớp đúng bước cùng số? Số không che chữ quan trọng (dùng `badge: 'right'`)?
+- [ ] Mọi câu trong hướng dẫn đã đối chiếu với code (đường menu, nhãn nút, điều kiện hiện nút)?
+- [ ] Hai bản vẫn riêng: không có trang của đối tượng này lọt vào bản kia?
 
 ---
 
