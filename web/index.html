@@ -272,6 +272,23 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .dr-cell.noact .m{color:var(--muted);}
   .dr-cell.q0{margin-left:4px;}
   .drange-help{font-size:10.5px; color:var(--muted); margin-top:5px;}
+  /* 支払推移表 */
+  .suii-wrap{max-height:calc(100vh - 280px); overflow:auto;}
+  .suii-tbl td,.suii-tbl th{font-size:12.5px; padding:6px 8px;}
+  .suii-tbl td a{color:inherit; cursor:pointer;} .suii-tbl td a:hover{color:var(--primary); text-decoration:underline;}
+  .suii-r{cursor:pointer;} .suii-r.d0 td{background:var(--surface-2); font-weight:700;}
+  .suii-r.d1 td.suii-name b{font-weight:650;} .suii-r.d2 td.suii-name b,.suii-r.d3 td.suii-name b{font-weight:500;}
+  .suii-r.dv td{color:var(--text-secondary);}
+  .suii-name{white-space:nowrap;}
+  .suii-lv{display:inline-block; font-size:9.5px; line-height:1.6; padding:0 5px; margin-right:6px; border-radius:4px;
+    background:var(--primary-soft); color:var(--primary); font-weight:700; vertical-align:1px;}
+  .suii-lv.v{background:var(--surface-2); color:var(--muted);}
+  .suii-btn{margin-left:8px; font-size:10.5px; padding:1px 7px; opacity:.55;}
+  .suii-r:hover .suii-btn{opacity:1;}
+  .suii-fc{font-style:italic; color:var(--muted);}
+  .suii-tbl .ar-y{display:block; font-size:9.5px; font-weight:500; color:var(--text-muted);}
+  .suii-fch{display:block; font-size:9px; font-weight:600; color:var(--plan);}
+  .suii-sub td{font-size:11.5px; color:var(--muted); background:var(--bg-subtle);}
   .archk-chips{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin:0 0 12px;}
   .archk-chip{display:flex; flex-direction:column; align-items:flex-start; gap:3px; text-align:left; cursor:pointer;
     background:var(--card); border:1px solid var(--border); border-radius:10px; padding:8px 10px; color:var(--text); font:inherit;}
@@ -670,7 +687,7 @@ const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
 /* 同じ台帳を別の入口から見る画面は、権限も同じにする（二重に設定させない） */
-const PAGE_PERM_ALIAS = { arbook:'invoices', archeck:'invoices', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
+const PAGE_PERM_ALIAS = { arbook:'invoices', archeck:'invoices', apbook:'bills', apsuii:'bills', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
 function permOf(page){
   page = PAGE_PERM_ALIAS[page] || page;
   const role = myRole();
@@ -1075,12 +1092,15 @@ const SECTIONS = [
     {id:'receipts', label:'入金'},
     {id:'archeck',  label:'入金チェック'},
     {id:'dunning',  label:'督促（今日やること）'} ]},
+  /* ★ 2026-09-15 利用者の指示: 買掛金は 売掛金と同じ「支払先×月の残高」、費用は 推移表（大・中・小 › 支払先）。
+       未払（年齢表）・支払先別 はメニューから外しました（買掛金と買掛元帳が同じことを見せるため。コードは残してあります。
+       古いリンクは PAGE_REDIRECT で 買掛金 に案内）。支払請求（一覧）は 作成中の確定に要るので残します。 */
   { id:'sec-ap', label:'支払（買掛金）', icon:'bill', tabs:[
-    {id:'bills',    label:'支払管理'},
+    {id:'apbook',   label:'買掛金'},
+    {id:'apsuii',   label:'支払推移表'},
+    {id:'bills',    label:'支払請求'},
     {id:'payouts',  label:'支払実行'},
-    {id:'apaging',  label:'未払（年齢表）'},
-    {id:'cashflow', label:'資金繰り'},
-    {id:'apco',     label:'支払先別'} ]},
+    {id:'cashflow', label:'資金繰り'} ]},
   { id:'sec-co', label:'取引先', icon:'company', tabs:[
     {id:'companies', label:'一覧（すべて）'},
     {id:'vendors',   label:'支払先'} ]},
@@ -1109,7 +1129,7 @@ const SECTIONS = [
 ];
 const ALL_PAGES  = SECTIONS.flatMap(s=>s.tabs.map(t=>t.id));
 /* メニューから外した画面への古いリンク（ベル・ダッシュボード・ブックマーク）は ここで案内し直す */
-const PAGE_REDIRECT = { invoices:'arbook', aging:'arbook', arco:'arbook' };
+const PAGE_REDIRECT = { invoices:'arbook', aging:'arbook', arco:'arbook', apaging:'apbook', apco:'apbook' };
 const SECTION_OF = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ SECTION_OF[t.id]=sec; }));
 const PAGE_LABEL = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ PAGE_LABEL[t.id]=t.label; }));
 
@@ -1536,6 +1556,8 @@ function renderPage(page){
       case 'invoices':  html=viewInvoices();  break;
       case 'receipts':  html=viewReceipts();  break;
       case 'archeck':   html=viewArCheck();   break;
+      case 'apbook':    html=viewApBook();    break;
+      case 'apsuii':    html=viewApSuii();    break;
       case 'aging':     html=viewAging();     break;
       case 'apaging':   html=viewApAging();   break;
       case 'bills':     html=viewBills();     break;
@@ -3756,6 +3778,448 @@ function confirmBill(id){
   b.status='確定'; b.locked=true; markDirty('bills',b); renderPage(CURRENT_PAGE); toast('確定しました。','ok');
 }
 
+
+/* ============================================================================
+   税込／税抜 の切り替え
+   ----------------------------------------------------------------------------
+   ★ 2026-09-15 利用者の指示: 売上も費用も 既定は 税込（実際に入る・出るお金）。
+     「税抜」を押すと、伝票・費目で選んだ税区分（課税10%／軽減8%／非課税／対象外）から自動で計算。
+     予実・ダッシュボードの損益は 今までどおり税抜（消費税は儲けではないため）。
+   ========================================================================== */
+const TAX_VIEW_KEY='bl_yj_taxview';
+let TAX_VIEW=null;
+function taxView(){
+  if(TAX_VIEW==null){ try{ TAX_VIEW=localStorage.getItem(TAX_VIEW_KEY)||'gross'; }catch(e){ TAX_VIEW='gross'; } }
+  return TAX_VIEW==='net'? 'net' : 'gross';
+}
+function setTaxView(v){
+  TAX_VIEW = v==='net'? 'net' : 'gross';
+  try{ localStorage.setItem(TAX_VIEW_KEY, TAX_VIEW); }catch(e){}
+  renderPage(CURRENT_PAGE);
+}
+const taxLabel = () => taxView()==='net'? '税抜' : '税込';
+function taxViewSeg(){
+  const v=taxView();
+  return `<div class="seg" title="税抜は 伝票・費目の税区分（課税10%・軽減8%・非課税・対象外）から自動で計算します">
+    <button class="${v==='gross'?'on':''}" onclick="setTaxView('gross')">税込</button><button class="${v==='net'?'on':''}" onclick="setTaxView('net')">税抜</button></div>`;
+}
+
+/* ============================================================================
+   支払（買掛金）— 売掛金と同じ形: 支払先 × 月末の残高
+   ----------------------------------------------------------------------------
+   ★ 2026-09-15 利用者の指示: 売掛金の画面と同じように、支払先を縦・月を横に。
+     月末残高 ＝ 前月残高 ＋ 当月の支払請求（計上月・税込）− 当月の支払（支払日）。
+     式は 売掛金の arMonthly をそのまま使う（材料を 支払請求・支払 に替えるだけ）。
+   ========================================================================== */
+const AP_LIVE = b => !!b && b.status!=='取消' && b.status!=='作成中';
+const apYmOfBill = b => ymOfDoc(b) || String(b.recvDate||'').slice(0,7);
+let AP_FILT={ open:false, over:false };
+function apFilt(k, v){ AP_FILT[k]=!!v; renderPage('apbook'); }
+function apFacts(companyId){
+  const id=String(companyId), bills=[], pays=[];
+  (DB.bills||[]).forEach(b=>{
+    if(String(b.companyId)!==id || !AP_LIVE(b)) return;
+    const ym=apYmOfBill(b); if(!ym) return;
+    bills.push({ ym, amount:docTotal(b), due:effDue(b), doc:b });
+  });
+  (DB.payouts||[]).forEach(p=>{
+    if(String(p.companyId)!==id || p.status==='取消' || !p.date) return;
+    pays.push({ ym:String(p.date).slice(0,7), date:String(p.date).slice(0,10), amount:num(p.amount), doc:p });
+  });
+  return { bills, pays };
+}
+function apMonthly(companyId, months, facts){ return arMonthly(companyId, months, facts||apFacts(companyId)); }
+function apCompanyIds(){
+  const ids=new Set();
+  (DB.bills||[]).forEach(b=>{ if(AP_LIVE(b) && b.companyId) ids.add(String(b.companyId)); });
+  (DB.payouts||[]).forEach(p=>{ if(p.status!=='取消' && p.companyId) ids.add(String(p.companyId)); });
+  return [...ids];
+}
+function apTotals(){
+  const tm=thisMonth(); const o={ billed:0, payment:0, balance:0, overdue:0, openN:0, overN:0 };
+  apCompanyIds().forEach(id=>{
+    const r=apMonthly(id,[tm])[0];
+    o.billed+=r.billed; o.payment+=r.payment; o.balance+=r.closing; o.overdue+=r.overdue;
+    if(r.closing>0) o.openN++; if(r.overdue>0) o.overN++;
+  });
+  return o;
+}
+function apStatus(bal, over){ return over>0? '期日超過' : (bal>0? '未払あり' : '正常'); }
+const apStatusBadge = s => `<span class="ar-st ${s==='期日超過'?'s-over':(s==='未払あり'?'s-open':'s-ok')}">${s}</span>`;
+
+function viewApBook(){
+  const p='apbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth();
+  const all=apCompanyIds().map(id=>{
+    const f=apFacts(id), m=apMonthly(id, months, f), now=apMonthly(id,[tm],f)[0];
+    return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:apStatus(now.closing, now.overdue) };
+  });
+  const q=(SEARCH[p]||'').trim().toLowerCase();
+  let rows=all.filter(r=>{
+    if(q){ const c=findById('companies',r.id)||{}; if(!((r.name||'')+(c.kana||'')).toLowerCase().includes(q)) return false; }
+    if(AP_FILT.open && !(r.bal>0)) return false;
+    if(AP_FILT.over && !(r.over>0)) return false;
+    return true;
+  }).sort((a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja'));
+
+  const T=apTotals();
+  const drafts=(DB.bills||[]).filter(b=>b.status==='作成中');
+  const kpis=`<div class="kpi-grid ar-kpis">
+    <div class="kpi"><div class="lbl">今月の支払請求</div><div class="num">¥${moneyPlain(T.billed)}</div><div class="sub">${arYmLabel(tm)}（計上月・税込）</div></div>
+    <div class="kpi"><div class="lbl">今月の支払</div><div class="num plus">¥${moneyPlain(T.payment)}</div><div class="sub">支払日が今月</div></div>
+    <div class="kpi ${T.openN?'clickable':''}" ${T.openN?`onclick="apFilt('open',true)"`:''}><div class="lbl">買掛金残高</div>
+      <div class="num">¥${arAmt(T.balance)}</div><div class="sub">${T.openN? `${T.openN}社`:'なし'}</div></div>
+    <div class="kpi ${T.overdue>0?'clickable':''}" ${T.overdue>0?`onclick="apFilt('over',true)"`:''}><div class="lbl">期日超過額</div>
+      <div class="num ${T.overdue>0?'minus':''}">¥${moneyPlain(T.overdue)}</div><div class="sub">${T.overN? `${T.overN}社`:'なし'}</div></div>
+  </div>`;
+  const draftBar = drafts.length? `<div class="warnbar" style="margin:0 0 10px;">「作成中」の支払請求が ${drafts.length}件（${moneyPlain(drafts.reduce((s,b)=>s+docTotal(b),0))}円）あります。
+      確定すると この表に入ります。 <a onclick="goto('bills')" style="cursor:pointer;color:var(--primary);font-weight:600;">支払請求を開く ›</a></div>` : '';
+
+  const filters=`<div class="ar-filters">
+    ${searchBox(p,'支払先で検索')}
+    <label class="ar-chk"><input type="checkbox" ${AP_FILT.open?'checked':''} onchange="apFilt('open',this.checked)"> 未払のみ</label>
+    <label class="ar-chk"><input type="checkbox" ${AP_FILT.over?'checked':''} onchange="apFilt('over',this.checked)"> 期日超過のみ</label>
+    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の買掛金残高 ・ マスを押すと内訳</span>
+  </div>`;
+
+  const head=`<tr><th class="ar-co">支払先</th>${months.map((ym,i)=>`<th class="r ${ym===tm?'ar-cur':''}" title="${ym}">${
+      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">現在残高</th></tr>`;
+  const cell=(r,x)=>{
+    if(x.future) return `<td class="r ar-c ar-fut">—</td>`;
+    const cls = x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
+    return `<td class="r num ar-c ${cls}${x.ym===tm?' ar-cur':''}" onclick="apCellPop(event,'${attr(r.id)}','${x.ym}')">${arAmt(x.closing)}</td>`;
+  };
+  const body=rows.map(r=>`<tr>
+      <td class="ar-co"><a class="ar-name" onclick="openApLedger('${attr(r.id)}')" title="買掛元帳を開く">${esc(r.name)}</a>${apStatusBadge(r.st)}</td>
+      ${r.m.map(x=>cell(r,x)).join('')}
+      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="openApLedger('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`).join('');
+  const foot = rows.length? `<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${months.map((ym,i)=>{
+      if(ym>tm) return '<td class="r ar-fut">—</td>';
+      const s=rows.reduce((t,r)=>t+r.m[i].closing,0); return `<td class="r num">${arAmt(s)}</td>`; }).join('')}
+      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>` : '';
+  const table = all.length
+    ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${head}</thead><tbody>${body||`<tr><td colspan="${months.length+2}" class="empty">条件に合う支払先はありません。</td></tr>`}${foot}</tbody></table></div>`
+    : `<div class="table-wrap"><div class="empty">まだ支払請求も支払もありません。<br>「定期の支払を作成」または「＋ 支払請求を登録」から始めてください。</div></div>`;
+
+  const tools=`${canCreate('payouts')?`<button class="btn" onclick="openPayout()">＋ 支払を記録</button>`:''}
+    ${canCreate('bills')?`<button class="btn secondary" onclick="openForm('bills')">＋ 支払請求を登録</button>`:''}
+    ${toolsMenu(`${canCreate('bills')&&costItemsSorted().some(isApCost)?`<button class="btn secondary" onclick="openGenBills()">定期の支払を作成（月まとめ）</button><hr>`:''}
+      <button class="btn secondary" onclick="goto('apsuii')">支払推移表（科目 › 支払先）</button>
+      <button class="btn secondary" onclick="exportApBookCsv()">${IC.doc} CSV出力（この表）</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
+  return pageShell({ title:'支払（買掛金）', count:all.length, shown:rows.length,
+    sub:'前月残高 ＋ 当月の支払請求 − 当月の支払 ＝ 月末残高（税込）。家賃・外注など 払う約束のあるお金の残りです。',
+    tools, body: kpis+draftBar+filters+table });
+}
+function exportApBookCsv(){
+  const months=fyMonths(CUR_FY), tm=thisMonth();
+  const out=[['支払先','状態',...months,'現在残高','期日超過額']];
+  apCompanyIds().forEach(id=>{
+    const f=apFacts(id), m=apMonthly(id,months,f), now=apMonthly(id,[tm],f)[0];
+    out.push([arCoName(id), apStatus(now.closing,now.overdue), ...m.map(x=>x.future?'':x.closing), now.closing, now.overdue]);
+  });
+  downloadCsv(`買掛金_${CUR_FY}年度`, out);
+}
+function apCellPop(ev, companyId, ym){
+  if(ev) ev.stopPropagation();
+  arPopClose();
+  const f=apFacts(companyId), r=apMonthly(companyId,[ym],f)[0];
+  const bills=f.bills.filter(b=>b.ym===ym), pays=f.pays.filter(x=>x.ym===ym);
+  const list=(arr, label, fn)=>arr.length? `<div class="ar-pop-l"><div class="muted">${label}</div>${arr.slice(0,6).map(fn).join('')}${arr.length>6?`<div class="muted">他 ${arr.length-6}件</div>`:''}</div>` : '';
+  const pop=document.createElement('div');
+  pop.id='arPop'; pop.className='ar-pop';
+  pop.onclick=e=>e.stopPropagation();
+  pop.innerHTML=`<div class="ar-pop-h"><div><b>${esc(arCoName(companyId))}</b><div class="muted">${arYmLabel(ym)}</div></div>
+      <a class="ar-x" onclick="arPopClose()" aria-label="閉じる">${IC.close}</a></div>
+    <table class="ar-pop-t">
+      <tr><td>前月残高</td><td class="r num">¥${arAmt(r.opening)}</td></tr>
+      <tr><td>支払請求</td><td class="r num">＋ ¥${moneyPlain(r.billed)}</td></tr>
+      <tr><td>支払</td><td class="r num">− ¥${moneyPlain(r.payment)}</td></tr>
+      <tr class="sum"><td>月末残高</td><td class="r num ${r.overdue>0?'minus':''}">¥${arAmt(r.closing)}</td></tr>
+      ${r.overdue>0?`<tr><td class="minus">うち期日超過</td><td class="r num minus">¥${moneyPlain(r.overdue)}</td></tr>`:''}
+    </table>
+    ${list(bills,'支払請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.no||b.doc.bookMonth||'')} <span class="muted">期日 ${esc(b.doc.dueDate||'-')}</span></span>
+      <span class="num">${moneyPlain(b.amount)} <a onclick="arPopClose();openDetail('bills','${attr(b.doc.id)}')">開く</a></span></div>`)}
+    ${list(pays,'支払', x=>`<div class="ar-pop-i"><span>${esc(x.date)}${x.doc.method?` <span class="muted">${esc(x.doc.method)}</span>`:''}</span>
+      <span class="num">${moneyPlain(x.amount)}${canEdit('payouts')?` <a onclick="arPopClose();openPayout('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
+    <div class="ar-pop-f"><a onclick="arPopClose();openApLedger('${attr(companyId)}')">買掛元帳を見る ›</a></div>`;
+  document.body.appendChild(pop);
+  const rc=ev&&ev.currentTarget&&ev.currentTarget.getBoundingClientRect? ev.currentTarget.getBoundingClientRect() : {left:40,bottom:120,top:100};
+  const w=pop.offsetWidth||280, h=pop.offsetHeight||260, vw=window.innerWidth, vh=window.innerHeight;
+  const left=Math.max(8, Math.min(rc.left, vw-w-8));
+  const top = rc.bottom+h+8 < vh ? rc.bottom+4 : Math.max(8, rc.top-h-4);
+  pop.style.left=(left+window.scrollX)+'px'; pop.style.top=(top+window.scrollY)+'px';
+  setTimeout(()=>document.addEventListener('click', arPopClose, { once:true }), 0);
+}
+function openApLedger(companyId){
+  arPopClose();
+  const f=apFacts(companyId), tm=thisMonth();
+  const yms=[...f.bills.map(b=>b.ym), ...f.pays.map(x=>x.ym)].filter(ym=>ym<=tm).sort();
+  const start=yms[0]||tm, MAX=36;
+  const months=[]; for(let ym=start; ym<=tm; ym=addMonths(ym,1)) months.push(ym);
+  const shown=months.slice(-MAX);
+  const rows=apMonthly(companyId, shown, f), now=rows[rows.length-1]||{closing:0,overdue:0};
+  const c=findById('companies',companyId);
+  const g=payGrade(companyId,'ap');
+  openModal(`<div class="ar-led-h"><div><h3>${esc(arCoName(companyId))} ${apStatusBadge(apStatus(now.closing, now.overdue))}</h3>
+      <div class="mdsub">買掛元帳 ・ 月末残高 ＝ 前月残高 ＋ 支払請求 − 支払（税込）</div></div>
+      <button type="button" class="co-x" onclick="closeModal()" aria-label="閉じる">${IC.close}</button></div>
+    <div class="ar-led-k">
+      <div><span class="muted">現在残高</span><b class="num">¥${arAmt(now.closing)}</b></div>
+      <div><span class="muted">期日超過</span><b class="num ${now.overdue>0?'minus':''}">¥${moneyPlain(now.overdue)}</b></div>
+      <div class="ar-led-grade"><span class="muted">評価（自社の支払）</span>
+        <div><span class="badge ${g.cls} ar-grade">${esc(g.g)}</span> <span class="why">${esc(g.why)}</span></div></div>
+    </div>
+    ${months.length>MAX?`<div class="infobar" style="margin:0 0 8px;">直近 ${MAX}か月を表示しています（それより前の分は 前月残高 に含まれます）。</div>`:''}
+    <div class="table-wrap ar-led"><table>
+      <thead><tr><th>年月</th><th class="r">前月残高</th><th class="r">支払請求</th><th class="r">支払</th><th class="r">月末残高</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr class="${r.ym===tm?'ar-cur':''}">
+        <td>${r.ym.replace('-','/')}</td><td class="r num ${r.opening?'':'zero'}">${arAmt(r.opening)}</td>
+        <td class="r num ${r.billed?'':'zero'}">${moneyPlain(r.billed)}</td><td class="r num ${r.payment?'':'zero'}">${moneyPlain(r.payment)}</td>
+        <td class="r num ${r.overdue>0?'ar-over':(r.closing>0?'ar-pos':'zero')}" ${r.overdue>0?`title="うち期日超過 ${moneyPlain(r.overdue)}"`:''}>${arAmt(r.closing)}</td></tr>`).join('')}
+      </tbody></table></div>
+    <div class="modal-actions split">
+      <div style="display:flex;gap:8px;">${c?`<button class="btn secondary" onclick="closeModal();openDetail('companies','${attr(companyId)}')">支払先の情報</button>`:''}</div>
+      <div style="display:flex;gap:8px;">${canCreate('payouts')?`<button class="btn secondary" onclick="closeModal();openPayout(null,{companyId:'${attr(companyId)}'})">＋ 支払を記録</button>`:''}
+        <button class="btn" onclick="closeModal()">閉じる</button></div></div>`,'lg');
+}
+
+/* ============================================================================
+   支払推移表 — 勘定科目（大 › 中 › 小）› 支払先（または物件）× 12か月
+   ----------------------------------------------------------------------------
+   ★ 2026-09-15 利用者の指示（MF の推移表のように）:
+     ・大・中・小 のボタンで 開く深さを決める。行を押すと 1つずつ 開け閉め。
+     ・いちばん下は 支払先（例: 広告宣伝費 › A社・B社）。物件（建物）に切り替えられる。
+     ・「明細」ボタン・金額 を押すと その行の伝票が一覧で出る。
+     ・過ぎた月は 実績（支払請求・経費）。今月以降で まだ実績の無い費目は 見込
+       （定期＝費目の月額予定、変動＝直近3か月の平均）。
+     ・費目に結び付かない経費は「突発」。見込には入れない（毎月来るものではないため）。
+     ・既定は税込（出ていくお金）。税抜は 予実と同じ数字（テストで突き合わせ）。
+   ========================================================================== */
+let SUII_LV=1;              // 0=大 1=中 2=小 3=明細（支払先／物件）
+let SUII_AXIS='vendor';     // vendor=支払先 / property=物件
+let SUII_OPEN={};           // 手で開け閉めした行
+const SUII_Q=[];            // 明細一覧に渡す条件（HTML の属性に JSON を書かないため）
+function setSuiiLv(n){ SUII_LV=Number(n); SUII_OPEN={}; renderPage('apsuii'); }
+function setSuiiAxis(a){ SUII_AXIS=a==='property'?'property':'vendor'; renderPage('apsuii'); }
+function suiiToggle(key, cur){ SUII_OPEN[key]=!cur; renderPage('apsuii'); }
+
+/** 費目ごとの 月の実績（税込）。見込の平均に使う（年度をまたいで見る） */
+function costItemHistory(){
+  const h={};
+  const add=(id, ym, v)=>{ if(!id||!ym||!v) return; (h[id]=h[id]||{}); h[id][ym]=(h[id][ym]||0)+v; };
+  (DB.bills||[]).forEach(b=>{ if(b.status==='取消') return; const ym=(b.bookMonth||'').slice(0,7);
+    (b.items||[]).forEach(it=>{ if(!it.costItemId) return; const n=itemAmount(it); add(it.costItemId, ym, n+Math.floor(n*(TAX_RATE[it.taxCat||'課税10%']||0))); }); });
+  (DB.expenses||[]).forEach(e=>add(e.costItemId, (e.bookMonth||e.date||'').slice(0,7), num(e.amount)));
+  return h;
+}
+/** 今月より前の、実績のある直近3か月の平均 */
+function costAvg3(byYm, beforeYm){
+  if(!byYm) return 0;
+  const ks=Object.keys(byYm).filter(ym=>ym<beforeYm && byYm[ym]).sort().slice(-3);
+  return ks.length? Math.round(ks.reduce((s,k)=>s+byYm[k],0)/ks.length) : 0;
+}
+/** 1行 ＝ 1つの費用（税込 gross・税抜 net）。売上原価・販管費だけ。 */
+function costFlowLines(fy){
+  const months=fyMonths(fy), idx={}; months.forEach((m,i)=>{ idx[m]=i; });
+  const out=[], tm=thisMonth();
+  const isCost = code => { const k=accountKind(code); return k==='cogs' || k==='sga'; };
+  const push = o => { const i=idx[o.ym]; if(i==null || (!o.gross && !o.net)) return; o.i=i; out.push(o); };
+  (DB.bills||[]).forEach(b=>{
+    if(b.status==='取消') return;
+    const ym=(b.bookMonth||'').slice(0,7); if(idx[ym]==null) return;
+    (b.items||[]).forEach(it=>{
+      if(!isCost(it.accountCode)) return;
+      const net=itemAmount(it), gross=net+Math.floor(net*(TAX_RATE[it.taxCat||'課税10%']||0));
+      push({ ym, code:String(it.accountCode), net, gross, companyId:String(b.companyId||''), vendor:'',
+        propertyId:String(it.propertyId||propOfCostItem(it.costItemId)||''), costItemId:String(it.costItemId||''),
+        name:it.name||'', src:{ t:'bills', id:b.id, label:(b.no||'支払請求'), date:b.recvDate||monthEnd(ym) } });
+    });
+  });
+  (DB.expenses||[]).forEach(e=>{
+    const ym=(e.bookMonth||e.date||'').slice(0,7); if(idx[ym]==null || !isCost(e.accountCode)) return;
+    const it=e.costItemId? findById('costItems', e.costItemId) : null;
+    push({ ym, code:String(e.accountCode), net:netOfGross(e.amount, e.taxCat), gross:num(e.amount),
+      companyId:String(e.companyId||(it&&it.companyId)||''), vendor:e.vendor||(it&&it.vendor)||'',
+      propertyId:String(e.propertyId||propOfCostItem(e.costItemId)||''), costItemId:String(e.costItemId||''),
+      name:e.note||(it&&it.name)||'', src:{ t:'expenses', id:e.id, label:'経費', date:e.date||monthEnd(ym) } });
+  });
+  out.forEach(l=>{ l.sudden=!l.costItemId; l.forecast=false; });
+  /* 見込 */
+  const has=new Set(out.map(l=>l.costItemId+'|'+l.ym)), hist=costItemHistory();
+  costItemsSorted().forEach(it=>{
+    if(!isCost(it.accountCode)) return;
+    const rate=TAX_RATE[it.taxCat||'課税10%']||0;
+    months.forEach(ym=>{
+      if(ym<tm || !costItemActive(it, ym) || has.has(String(it.id)+'|'+ym)) return;
+      const avg=costAvg3(hist[it.id], tm);
+      const gross = it.kind==='variable'? avg : (num(it.monthly) || avg);
+      if(!gross) return;
+      push({ ym, code:String(it.accountCode), net:Math.round(gross/(1+rate)), gross, companyId:String(it.companyId||''), vendor:it.vendor||'',
+        propertyId:String(it.propertyId||''), costItemId:String(it.id), name:it.name||'', forecast:true, sudden:false,
+        src:{ t:'costItems', id:it.id, label: it.kind==='variable'? '見込（直近3か月の平均）' : '見込（月額予定）', date:'' } });
+    });
+  });
+  return out;
+}
+const SUII_NOVENDOR='（支払先なし）', SUII_NOPROP='（物件なし）';
+function suiiDetailKey(l){
+  if(SUII_AXIS==='property') return l.propertyId? 'p:'+l.propertyId : '-';
+  if(l.companyId) return 'c:'+l.companyId;
+  return l.vendor? 'v:'+normPerson(l.vendor) : '-';
+}
+function suiiDetailLabel(key, l){
+  if(key==='-') return SUII_AXIS==='property'? SUII_NOPROP : SUII_NOVENDOR;
+  if(key.startsWith('p:')) return (findById('properties', key.slice(2))||{}).name || '(消えた物件)';
+  if(key.startsWith('c:')) return arCoName(key.slice(2));
+  return l.vendor;
+}
+/** 勘定科目の木（使われている科目だけ）。木が無い環境は 区分 を大分類の代わりにする */
+function suiiTree(lines){
+  const used=new Set(lines.map(l=>l.code));
+  const covered=new Set();
+  const mk=(a, depth)=>{
+    const ch=accountChildren(a.id);
+    if(!ch.length){ if(!used.has(String(a.code))) return null; covered.add(String(a.code));
+      return { key:'a:'+a.id, label:a.label, code:a.code, depth, kids:[], leaf:true, codes:[String(a.code)] }; }
+    const kids=ch.map(c=>mk(c, depth+1)).filter(Boolean);
+    if(used.has(String(a.code))){ covered.add(String(a.code));        // 親の科目に直接付いた古い伝票も落とさない
+      kids.unshift({ key:'d:'+a.id, label:a.label+'（直接）', code:a.code, depth:depth+1, kids:[], leaf:true, codes:[String(a.code)] }); }
+    if(!kids.length) return null;
+    return { key:'a:'+a.id, label:a.label, code:a.code, depth, kids, leaf:false, codes:kids.flatMap(k=>k.codes) };
+  };
+  let roots;
+  if(accTreeReady()) roots=accountRoots().filter(r=>['cogs','sga'].includes(accountKindOf(r))).map(r=>mk(r,0)).filter(Boolean);
+  else roots=['cogs','sga'].map(k=>{
+    const kids=accounts().filter(a=>a.kind===k && used.has(String(a.code))).map(a=>{ covered.add(String(a.code));
+      return { key:'a:'+a.code, label:a.label, code:a.code, depth:1, kids:[], leaf:true, codes:[String(a.code)] }; });
+    return kids.length? { key:'k:'+k, label:KIND_LABEL[k], code:'', depth:0, kids, leaf:false, codes:kids.flatMap(x=>x.codes) } : null;
+  }).filter(Boolean);
+  const orphan=[...used].filter(c=>!covered.has(c));
+  if(orphan.length) roots.push({ key:'o:', label:'分類に入っていない科目', code:'', depth:0, leaf:false,
+    kids:orphan.map(c=>({ key:'o:'+c, label:accountLabel(c), code:c, depth:1, kids:[], leaf:true, codes:[c] })), codes:orphan });
+  return roots;
+}
+function suiiData(fy){
+  const lines=costFlowLines(fy), vk=taxView();
+  const byCode={}, detail={};
+  const z=()=>({ v:Array(12).fill(0), f:Array(12).fill(false) });
+  lines.forEach(l=>{
+    const a=(byCode[l.code]=byCode[l.code]||z()); a.v[l.i]+=l[vk]; if(l.forecast) a.f[l.i]=true;
+    const dk=suiiDetailKey(l), byDk=(detail[l.code]=detail[l.code]||{});
+    const d=(byDk[dk]=byDk[dk]||Object.assign(z(), { label:suiiDetailLabel(dk,l), sudden:true }));
+    d.v[l.i]+=l[vk]; if(l.forecast) d.f[l.i]=true; if(!l.sudden) d.sudden=false;
+  });
+  const sumCodes=codes=>{ const a=z(); codes.forEach(c=>{ const s=byCode[c]; if(s) s.v.forEach((v,i)=>{ a.v[i]+=v; if(s.f[i]) a.f[i]=true; }); }); return a; };
+  return { lines, byCode, detail, sumCodes, tree:suiiTree(lines), vk };
+}
+function suiiList(qi, monthIdx){
+  const q=SUII_Q[qi]; if(!q) return;
+  const fy=CUR_FY, vk=taxView();
+  let lines=costFlowLines(fy).filter(l=>q.codes.includes(l.code) && (q.dk==null || suiiDetailKey(l)===q.dk) && (!q.sudden || l.sudden));
+  if(monthIdx!=null) lines=lines.filter(l=>l.i===Number(monthIdx));
+  lines.sort((a,b)=>a.i-b.i || (b.gross-a.gross));
+  const T={ bills:'支払請求', expenses:'経費', costItems:'見込' };
+  const sum=k=>lines.reduce((s,l)=>s+l[k],0);
+  const who=l=>{ const k=suiiDetailKey(l); return k==='-'? '' : suiiDetailLabel(k,l); };
+  const vendorOf=l=> l.companyId? arCoName(l.companyId) : (l.vendor||'');
+  openModal(`<h3>${esc(q.title)}${monthIdx!=null?` <span class="muted" style="font-size:13px;font-weight:400;">${esc(fyMonths(fy)[monthIdx])}</span>`:''}</h3>
+    <div class="mdsub">${esc(fyLabel(fy))}${monthIdx!=null?'':'（12か月）'}の明細 ${lines.length}件 ／ 税込 <b class="num">${moneyPlain(sum('gross'))}</b> 円 ・ 税抜 <b class="num">${moneyPlain(sum('net'))}</b> 円</div>
+    <div class="table-wrap" style="max-height:60vh;overflow:auto;"><table>
+      <thead><tr><th>計上月</th><th>種類</th><th>勘定科目</th><th>内容</th><th>支払先</th><th>物件</th><th class="r">税込</th><th class="r">税抜</th><th></th></tr></thead>
+      <tbody>${lines.map(l=>`<tr class="${l.forecast?'suii-fc':''}">
+        <td>${esc(l.ym.replace('-','/'))}</td>
+        <td><span class="badge ${l.forecast?'b-gray':(l.src.t==='bills'?'b-blue':'b-green')}">${esc(T[l.src.t]||l.src.t)}</span>${l.sudden?' <span class="badge b-amber">突発</span>':''}</td>
+        <td>${esc(accountLabel(l.code))}</td><td>${esc(l.name||'')}</td>
+        <td>${esc(vendorOf(l))}</td><td>${esc(l.propertyId? ((findById('properties',l.propertyId)||{}).name||'') : '')}</td>
+        <td class="r num ${vk==='gross'?'':'muted'}">${moneyPlain(l.gross)}</td><td class="r num ${vk==='net'?'':'muted'}">${moneyPlain(l.net)}</td>
+        <td>${l.src.t==='bills'||l.src.t==='expenses'||l.src.t==='costItems'?`<a class="pillbtn pill-save" onclick="closeModal();openDetail('${l.src.t}','${attr(l.src.id)}')">開く</a>`:''}</td></tr>`).join('')
+        || '<tr><td colspan="9" class="empty">明細がありません。</td></tr>'}</tbody>
+      ${lines.length?`<tfoot><tr class="totrow"><td colspan="6">合計</td><td class="r num">${moneyPlain(sum('gross'))}</td><td class="r num">${moneyPlain(sum('net'))}</td><td></td></tr></tfoot>`:''}
+    </table></div>
+    <div class="fhelp" style="margin-top:6px;">見込 は 費目の月額予定（変動は直近3か月の平均）。突発 は 費目に結び付いていない経費です。</div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+function viewApSuii(){
+  const fy=CUR_FY, months=fyMonths(fy), tm=thisMonth();
+  const D=suiiData(fy), vk=D.vk;
+  SUII_Q.length=0;
+  const q=o=>{ SUII_Q.push(o); return SUII_Q.length-1; };
+  const cells=(a, qi)=>a.v.map((v,i)=>`<td class="r num ${months[i]===tm?'curcol':''} ${a.f[i]?'suii-fc':''}">${v
+      ?`<a onclick="event.stopPropagation();suiiList(${qi},${i})">${moneyPlain(v)}</a>` : '<span class="zero">—</span>'}</td>`).join('')
+    +`<td class="r num"><b>${moneyPlain(a.v.reduce((s,v)=>s+v,0))}</b></td>`;
+  const LV=['大','中','小','明細'];
+  let rows='';
+  const isOpen=(n)=> n.key in SUII_OPEN? SUII_OPEN[n.key] : (n.leaf? SUII_LV>=3 : n.depth<SUII_LV);
+  const walk=n=>{
+    const a=D.sumCodes(n.codes), open=isOpen(n);
+    const detailKeys = n.leaf? Object.keys(D.detail[n.codes[0]]||{}) : [];
+    const canOpen = n.kids.length || detailKeys.length;
+    const qi=q({ title:(n.leaf? accountPathLabel(n.code) : n.label), codes:n.codes });
+    rows+=`<tr class="suii-r d${Math.min(n.depth,3)}" onclick="suiiToggle('${attr(n.key)}',${open})">
+      <td class="suii-name" style="padding-left:${10+n.depth*18}px;"><span class="kbtw" style="${canOpen?'':'visibility:hidden;'}">${open?'▼':'▶'}</span>
+        <span class="suii-lv">${LV[Math.min(n.depth,2)]}</span><b>${esc(n.label)}</b>${n.code?` <span class="muted" style="font-size:10.5px;">${esc(n.code)}</span>`:''}
+        <a class="pillbtn suii-btn" onclick="event.stopPropagation();suiiList(${qi})">明細</a></td>
+      ${cells(a, qi)}</tr>`;
+    if(!open) return;
+    if(n.kids.length){ n.kids.forEach(walk); return; }
+    const det=D.detail[n.codes[0]]||{};
+    detailKeys.sort((x,y)=>det[y].v.reduce((s,v)=>s+v,0)-det[x].v.reduce((s,v)=>s+v,0)).forEach(dk=>{
+      const d=det[dk], qd=q({ title:accountLabel(n.code)+' › '+d.label, codes:n.codes, dk });
+      rows+=`<tr class="suii-r dv" onclick="suiiList(${qd})">
+        <td class="suii-name" style="padding-left:${10+(n.depth+1)*18}px;"><span class="kbtw" style="visibility:hidden;">▶</span>
+          <span class="suii-lv v">${SUII_AXIS==='property'?'物件':'支払先'}</span>${esc(d.label)}${d.sudden?' <span class="badge b-amber">突発</span>':''}
+          <a class="pillbtn suii-btn" onclick="event.stopPropagation();suiiList(${qd})">明細</a></td>
+        ${cells(d, qd)}</tr>`;
+    });
+  };
+  D.tree.forEach(walk);
+
+  /* 合計・内訳の行 */
+  const arr=f=>{ const a={ v:Array(12).fill(0), f:Array(12).fill(false) }; D.lines.filter(f).forEach(l=>{ a.v[l.i]+=l[vk]; if(l.forecast) a.f[l.i]=true; }); return a; };
+  const allCodes=[...new Set(D.lines.map(l=>l.code))];
+  const tot=arr(()=>true), fixed=arr(l=>!l.sudden && !l.forecast), sudden=arr(l=>l.sudden), fc=arr(l=>l.forecast);
+  const qAll=q({ title:'支払合計', codes:allCodes });
+  const foot=`<tr class="totrow"><td class="suii-name"><b>支払合計（${taxLabel()}）</b></td>${cells(tot, qAll)}</tr>
+    <tr class="suii-sub"><td class="suii-name">うち 費目の支払（実績）</td>${cells(fixed, qAll)}</tr>
+    <tr class="suii-sub"><td class="suii-name">うち 突発（費目なし）</td>${cells(sudden, q({ title:'突発（費目なし）', codes:allCodes, sudden:true }))}</tr>
+    <tr class="suii-sub"><td class="suii-name">うち 見込（今月以降）</td>${cells(fc, qAll)}</tr>`;
+
+  const S=a=>a.v.reduce((s,v)=>s+v,0), actMonths=months.filter((ym,i)=>fixed.v[i]||sudden.v[i]).length;
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">支払（実績・${taxLabel()}）</div><div class="num">${moneyPlain(S(fixed)+S(sudden))}</div><div class="sub">${esc(fyLabel(fy))}</div></div>
+    <div class="kpi"><div class="lbl">月平均（実績のある月）</div><div class="num">${actMonths? moneyPlain(Math.round((S(fixed)+S(sudden))/actMonths)) : '—'}</div><div class="sub">定期・変動・突発を含む</div></div>
+    <div class="kpi"><div class="lbl">突発（費目なし）</div><div class="num ${S(sudden)?'minus':''}">${moneyPlain(S(sudden))}</div><div class="sub">${D.lines.filter(l=>l.sudden).length}件</div></div>
+    <div class="kpi"><div class="lbl">見込（今月以降）</div><div class="num">${moneyPlain(S(fc))}</div><div class="sub">定期＝月額予定・変動＝直近3か月平均</div></div>
+  </div>`;
+  const tools=`<div class="seg" title="開く深さ">${LV.map((l,i)=>`<button class="${SUII_LV===i&&!Object.keys(SUII_OPEN).length?'on':''}" onclick="setSuiiLv(${i})">${l}</button>`).join('')}</div>
+    <div class="seg" title="いちばん下の段"><button class="${SUII_AXIS==='vendor'?'on':''}" onclick="setSuiiAxis('vendor')">支払先</button><button class="${SUII_AXIS==='property'?'on':''}" onclick="setSuiiAxis('property')">物件</button></div>
+    ${taxViewSeg()}
+    ${toolsMenu(`<button class="btn secondary" onclick="exportApSuiiCsv()">${IC.doc} CSV出力（この表）</button>
+      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button><hr>
+      <button class="btn secondary" onclick="goto('expenses')">月次費用表（経費を打つ）へ</button>
+      <button class="btn secondary" onclick="goto('accounts')">勘定科目の登録（大・中・小）へ</button>`)}`;
+  return pageShell({ title:'支払推移表', sub:`${esc(fyLabel(fy))} ・ ${taxLabel()} ・ 勘定科目（大 › 中 › 小）› ${SUII_AXIS==='property'?'物件':'支払先'}。今月以降の薄い斜体は見込。`,
+    tools, body: kpis+`<div class="table-wrap suii-wrap"><table class="stick1 suii-tbl">
+      <thead><tr><th style="min-width:300px;">勘定科目 › ${SUII_AXIS==='property'?'物件':'支払先'}</th>
+        ${months.map((ym,i)=>`<th class="r ${ym===tm?'curcol':''}" style="min-width:92px;">${(i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}${ym>tm?'<span class="suii-fch">見込</span>':''}</th>`).join('')}
+        <th class="r" style="min-width:110px;">年間計</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="14" class="empty" style="padding:20px;">${esc(fyLabel(fy))}の費用はまだありません。</td></tr>`}${rows?foot:''}</tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;">行を押すと 1段ずつ開きます。「明細」または金額を押すと、その行の支払請求・経費の一覧が出ます。
+      税抜は 伝票・費目の税区分から計算し、予実の費用と同じ数字になります。</div>` });
+}
+function exportApSuiiCsv(){
+  const fy=CUR_FY, D=suiiData(fy), vk=D.vk;
+  const out=[['大分類','中分類','小分類','勘定科目', SUII_AXIS==='property'?'物件':'支払先', '突発', ...fyMonths(fy), '年間計（'+taxLabel()+'）']];
+  const map={};
+  D.lines.forEach(l=>{
+    const path=accountPath(l.code).map(a=>a.label), dk=suiiDetailKey(l);
+    const k=JSON.stringify([path[0]||'', path[1]||'', path[2]||'', accountLabel(l.code), suiiDetailLabel(dk,l), l.sudden?'突発':(l.forecast?'見込':'')]);
+    (map[k]=map[k]||Array(12).fill(0))[l.i]+=l[vk];
+  });
+  Object.keys(map).sort().forEach(k=>{ const a=map[k]; out.push([...JSON.parse(k), ...a, a.reduce((s,v)=>s+v,0)]); });
+  downloadCsv(`支払推移表_${fy}年度_${taxLabel()}`, out);
+}
+
 /* ---------- 支払実行 ---------- */
 function viewPayouts(){
   const p='payouts';
@@ -4168,10 +4632,12 @@ function propOfCostItem(id){ const it=findById('costItems',id); return it? (it.p
 function moneyLines(fy){
   const months=fyMonths(fy), idx={}; months.forEach((m,i)=>{ idx[m]=i; });
   const out=[];
-  const add=(ym, code, amount, propertyId, src)=>{
+  /* amount＝税抜（予実と突き合わせる数字）。gross＝税込（画面の既定。実際に動くお金） */
+  const add=(ym, code, amount, propertyId, src, gross)=>{
     const i=idx[ym]; if(i==null || !amount) return;
-    out.push({ i, ym, code, amount, propertyId:propertyId||'', kind:accountKind(code), src });
+    out.push({ i, ym, code, amount, gross: gross==null? amount : gross, propertyId:propertyId||'', kind:accountKind(code), src });
   };
+  const grossOfItem = it => itemAmount(it)+Math.floor(itemAmount(it)*(TAX_RATE[it.taxCat||'課税10%']||0));
   /* ★ 取るのは「取消以外」。作成中も入れます — 予実（actualSeries）がそうだからです。
      ここで条件を変えると、同じ会社の同じ月なのに 予実 と 分類別 で数字が違う、という
      いちばん質の悪いズレが起きます。テストで両方を突き合わせています。 */
@@ -4179,19 +4645,19 @@ function moneyLines(fy){
     if(inv.status==='取消') return;
     const ym=(inv.bookMonth||'').slice(0,7);
     (inv.items||[]).forEach(it=>add(ym, it.accountCode, itemAmount(it), it.propertyId,
-      {t:'invoices', id:inv.id, label:(inv.no||'')+' ／ '+String(companyName(inv.companyId)).replace(/<[^>]+>/g,'')}));
+      {t:'invoices', id:inv.id, label:(inv.no||'')+' ／ '+String(companyName(inv.companyId)).replace(/<[^>]+>/g,'')}, grossOfItem(it)));
   });
   (DB.bills||[]).forEach(b=>{
     if(b.status==='取消') return;
     const ym=(b.bookMonth||'').slice(0,7);
     (b.items||[]).forEach(it=>add(ym, it.accountCode, itemAmount(it), it.propertyId||propOfCostItem(it.costItemId),
-      {t:'bills', id:b.id, label:(b.no||'')+' ／ '+String(companyName(b.companyId)).replace(/<[^>]+>/g,'')}));
+      {t:'bills', id:b.id, label:(b.no||'')+' ／ '+String(companyName(b.companyId)).replace(/<[^>]+>/g,'')}, grossOfItem(it)));
   });
   (DB.expenses||[]).forEach(e=>{
     const ym=(e.bookMonth||e.date||'').slice(0,7);
     const rate=TAX_RATE[e.taxCat||'課税10%']||0;
     add(ym, e.accountCode, Math.round(num(e.amount)/(1+rate)), e.propertyId||propOfCostItem(e.costItemId),
-      {t:'expenses', id:e.id, label:(e.note||accountLabel(e.accountCode))+(e.vendor?' ／ '+e.vendor:'')});
+      {t:'expenses', id:e.id, label:(e.note||accountLabel(e.accountCode))+(e.vendor?' ／ '+e.vendor:'')}, num(e.amount));
   });
   (DB.actualAdjust||[]).forEach(a=>{
     if(Number(a.fy)!==Number(fy)) return;
@@ -4204,9 +4670,11 @@ function moneyLines(fy){
 const kbZero = () => Array(12).fill(0);
 const kbSum  = arr => arr.reduce((s,v)=>s+(v||0),0);
 
+/** 画面に出す金額（税込／税抜の切り替えに合わせる）。計算の突き合わせは moneyLines の amount（税抜）で行う */
+const kbShown = lines => taxView()==='net'? lines : lines.map(l=>Object.assign({}, l, { amount:l.gross }));
 function viewKbunrui(){
   const fy=CUR_FY;
-  const lines=moneyLines(fy).filter(l=>!KB_KIND || l.kind===KB_KIND);
+  const lines=kbShown(moneyLines(fy).filter(l=>!KB_KIND || l.kind===KB_KIND));
   const cur=thisMonth(), curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
 
   /* 集計の下ごしらえ（1回だけ回す） */
@@ -4296,12 +4764,13 @@ function viewKbunrui(){
       <button class="${KB_AXIS==='account'?'on':''}" onclick="setKbAxis('account')">科目でまとめる</button>
       <button class="${KB_AXIS==='property'?'on':''}" onclick="setKbAxis('property')">建物でまとめる</button>
     </div>
+    ${taxViewSeg()}
     <select onchange="setKbKind(this.value)" style="margin-left:8px;">${kinds.map(k=>`<option value="${k[0]}" ${KB_KIND===k[0]?'selected':''}>${esc(k[1])}</option>`).join('')}</select>
     ${toolsMenu(`<button class="btn secondary" onclick="exportCsvKbunrui()">${IC.doc} CSV出力</button>
       <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>
       <hr><button class="btn secondary" onclick="goto('accounts')">勘定科目の登録へ</button>`)}`;
 
-  return pageShell({ title:'分類別集計', sub:`${fyLabel(fy)}・税抜。金額は予実と同じ伝票から数えています。`,
+  return pageShell({ title:'分類別集計', sub:`${fyLabel(fy)}・${taxLabel()}。金額は予実と同じ伝票から数えています（税抜は予実と同じ数字）。`,
     tools,
     body:`<div class="table-wrap"><table class="stick1">
         <thead><tr><th style="min-width:270px;">${KB_AXIS==='account'?'勘定科目（大 › 中 › 小 › 建物）':'建物 › 勘定科目'}</th>
@@ -4316,13 +4785,13 @@ function viewKbunrui(){
 /** 金額の裏づけ: その月・その科目・その建物で動いた伝票を出す */
 function kbDrill(code, propKey, monthIdx){
   const fy=CUR_FY;
-  const lines=moneyLines(fy).filter(l=>String(l.code)===String(code) && l.i===Number(monthIdx)
+  const lines=kbShown(moneyLines(fy)).filter(l=>String(l.code)===String(code) && l.i===Number(monthIdx)
     && String(l.propertyId||KB_NOPROP)===String(propKey));
   const total=lines.reduce((s,l)=>s+l.amount,0);
   const T={invoices:'請求書', bills:'支払請求', expenses:'費用', adjust:'実績調整'};
   openModal(`<h3>${esc(accountPathLabel(code))} ／ ${esc(propKey===KB_NOPROP?KB_NOPROP:((findById('properties',propKey)||{}).name||''))}</h3>
-    <div class="mdsub">${esc(fyMonths(fy)[monthIdx])}（${esc(FY_MONTH_LABELS[monthIdx])}）の内訳。税抜。合計 <b class="num">${moneyPlain(total)}</b> 円</div>
-    <div class="table-wrap"><table><thead><tr><th>種類</th><th>伝票</th><th class="r">金額（税抜）</th><th></th></tr></thead>
+    <div class="mdsub">${esc(fyMonths(fy)[monthIdx])}（${esc(FY_MONTH_LABELS[monthIdx])}）の内訳。${taxLabel()}。合計 <b class="num">${moneyPlain(total)}</b> 円</div>
+    <div class="table-wrap"><table><thead><tr><th>種類</th><th>伝票</th><th class="r">金額（${taxLabel()}）</th><th></th></tr></thead>
       <tbody>${lines.map(l=>`<tr><td><span class="badge ${l.src.t==='invoices'?'b-green':'b-blue'}">${esc(T[l.src.t]||l.src.t)}</span></td>
         <td>${esc(l.src.label)}</td><td class="r num">${moneyPlain(l.amount)}</td>
         <td>${['invoices','bills'].includes(l.src.t)?`<a class="pillbtn pill-save" onclick="closeModal();openDetail('${l.src.t}','${attr(l.src.id)}')">開く</a>`:''}</td></tr>`).join('')
@@ -4331,7 +4800,7 @@ function kbDrill(code, propKey, monthIdx){
 }
 function exportCsvKbunrui(){
   const fy=CUR_FY, months=fyMonths(fy);
-  const lines=moneyLines(fy).filter(l=>!KB_KIND || l.kind===KB_KIND);
+  const lines=kbShown(moneyLines(fy).filter(l=>!KB_KIND || l.kind===KB_KIND));
   const map={};
   lines.forEach(l=>{
     const path=accountPath(l.code).map(a=>a.label);
@@ -5848,6 +6317,8 @@ function ledPerfBadge(companyId, side){
 function openLedger(companyId, side){
   /* ★ 2026-09-14: 売掛側は 売掛元帳（月ごとの残高）を開く。請求書の一覧ではない。 */
   if(side!=='ap' && companyId){ openArLedger(companyId); return; }
+  /* ★ 2026-09-15: 買掛側も 買掛元帳（月ごとの残高）を開く */
+  if(side==='ap' && companyId){ openApLedger(companyId); return; }
   /* 台帳は 取引先別／支払先別 の中に移りました。どこの会社名を押しても、そこで開きます。 */
   const sd = side==='ap' ? 'ap' : 'ar';
   if(companyId){ LED_CO=String(companyId); CO_SEL[sd]=String(companyId); }
@@ -7220,7 +7691,7 @@ function viewDashboard(){
       <div class="kpi clickable" onclick="goto('arbook')"><div class="lbl">売掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
         <div class="num">${moneyPlain(bal.ar)}</div>
         <div class="sub ${bal.arOver?'minus':''}">うち期限超過 ${moneyPlain(bal.arOver)}</div></div>
-      <div class="kpi clickable" onclick="goto('bills')"><div class="lbl">買掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
+      <div class="kpi clickable" onclick="goto('apbook')"><div class="lbl">買掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
         <div class="num">${moneyPlain(bal.ap)}</div><div class="sub">${bal.now? '7日以内 '+moneyPlain(dueSoon.reduce((s2,b)=>s2+balanceOfBill(b),0)) : '月末時点'}</div></div>
     </div>
     ${staffTbl}
@@ -7299,7 +7770,7 @@ function notifItems(){
   /* ── 債務: 期日を過ぎた支払（相手の信用に関わる） ── */
   const apOver=openBills().filter(b=>isOverdue(b));
   if(apOver.length) out.push({ sev:'danger', key:'ap-over', label:'支払期日を過ぎた支払',
-    n:apOver.length, amount:apOver.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('apaging')" });
+    n:apOver.length, amount:apOver.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('apbook')" });
 
   const apSoon=openBills().filter(b=>effDue(b)&&effDue(b)>=t&&effDue(b)<=addDays(t,7));
   if(apSoon.length) out.push({ sev:'warn', key:'ap-soon', label:'7日以内に支払う',
@@ -7432,6 +7903,10 @@ const PAGE_GUIDE = {
   aging:      { step:'⑤', what:'（入力なし）どの会社がどれだけ遅れているかを見る',
                 effect:'61日以上は要対応。会社名から台帳へ飛べます' },
 
+  apbook:     { step:'⑤', what:'（入力なし）支払先×月の 月末残高。＋ 支払を記録／＋ 支払請求を登録 もここから。マスを押すと内訳、会社名で 買掛元帳',
+                effect:'前月残高＋支払請求−支払＝月末残高。期日を過ぎた残りは 期日超過（赤）' },
+  apsuii:     { step:'⑥', what:'（入力なし）勘定科目 大 › 中 › 小 › 支払先（または物件）× 12か月。大・中・小 のボタンで開く深さ、「明細」で伝票の一覧',
+                effect:'定期の費用・突発の費用・今月以降の見込 が1枚で分かります。既定は税込、税抜は予実と同じ数字' },
   bills:      { step:'③', what:'<b>定期の支払を作成（月まとめ）</b>、または個別に登録 → <b>確定</b>',
                 effect:'確定して初めて<b>買掛金</b>になります。明細（勘定科目）が無いと予実に入りません' },
   payouts:    { step:'④', what:'支払を記録し、どの支払請求に充てるかを決める',
@@ -7637,7 +8112,9 @@ async function demoSeed(){
     clean:put('companies',{name:DEMO_TAG+'クリーンサポート', kind:'仕入先', closingDay:31, paySite:1, payDay:25, taxCat:'課税10%', note:'寮の共用部清掃'}),
     tsu:  put('companies',{name:DEMO_TAG+'グローバル通訳サービス', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'通訳・翻訳（売上原価）'}),
     gai:  put('companies',{name:DEMO_TAG+'登録支援パートナーズ合同会社', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'支援業務の外注（売上原価）'}),
-    ad:   put('companies',{name:DEMO_TAG+'北関東求人メディア', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'求人広告'}),
+    ad:   put('companies',{name:DEMO_TAG+'北関東求人メディア', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'求人広告（広告宣伝費 A社）'}),
+    web:  put('companies',{name:DEMO_TAG+'ソーシャル広告ラボ株式会社', kind:'仕入先', closingDay:31, paySite:0, payDay:31, taxCat:'課税10%', note:'SNS・Web広告（広告宣伝費 B社）。カードで即払い'}),
+    fix:  put('companies',{name:DEMO_TAG+'小山設備工業', kind:'仕入先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%', note:'寮の修理（突発）'}),
   };
 
   /* ── 請求ルール（月額固定）。今年度の月額 ── */
@@ -7667,6 +8144,7 @@ async function demoSeed(){
     denki:     accOf('6211','電気代','6210').code,
     suido:     accOf('6212','水道代','6210').code,
     gas:       accOf('6213','ガス代','6210').code,
+    repair:    accOf('6420','修繕費','R6').code,
   };
 
   /* ── 物件（建物） ── */
@@ -7702,6 +8180,7 @@ async function demoSeed(){
     companyId:vend.clean.id, propertyId:props[0].id});
   const gaiItem = ci({name:DEMO_TAG+'支援業務の外注', accountCode:'5100', monthly:1265000, payMode:'買掛', companyId:vend.gai.id});
   const adItem  = ci({name:DEMO_TAG+'求人広告', accountCode:'6310', monthly:121000, payMode:'買掛', companyId:vend.ad.id});
+  const tsuItem = ci({name:DEMO_TAG+'通訳・翻訳', accountCode:'5200', monthly:0, payMode:'買掛', kind:'variable', companyId:vend.tsu.id});
   /* 即払い（税込で入力）。tax: 対象外＝給与など消費税のかからないもの */
   const other=[
     { it: ci({name:DEMO_TAG+'役員報酬', accountCode:'6100', monthly:700000, payMode:'即払い', taxCat:'対象外'}), base:700000, tax:'対象外', method:'銀行振込' },
@@ -7714,6 +8193,7 @@ async function demoSeed(){
     { it: ci({name:DEMO_TAG+'接待交際費', accountCode:'6320', monthly:0, payMode:'即払い', kind:'variable'}), base:55000, vary:.5, skip:.2 },
     { it: ci({name:DEMO_TAG+'振込手数料', accountCode:'6400', monthly:0, payMode:'即払い', kind:'variable'}), base:15000, vary:.2, method:'口座振替' },
     { it: ci({name:DEMO_TAG+'消耗品費', accountCode:'6410', monthly:0, payMode:'即払い', kind:'variable'}), base:40000, vary:.4 },
+    { it: ci({name:DEMO_TAG+'SNS・Web広告', accountCode:'6310', monthly:0, payMode:'即払い', kind:'variable', companyId:vend.web.id}), base:80000, vary:.45, method:'クレジット' },
   ];
 
   /* ── 請求・入金 ──
@@ -7807,13 +8287,13 @@ async function demoSeed(){
     payoutFor(vend.oya, rentBill, mi>=months.length-1? null : 0);
     /* 清掃 */
     const cb=billOf(vend.clean, ym, [{accountCode:'6900', costItemId:cleanItem.id, name:'寮 共用部清掃', amount:30000, taxCat:'課税10%'}], '清掃');
-    if(mi < months.length-2) payoutFor(vend.clean, cb, dint(0,4));
+    if(mi < months.length-1) payoutFor(vend.clean, cb, dint(0,4));      // 7月分の清掃だけ 払い忘れ（期日超過の見本）
     /* 支援業務の外注（売上原価）: 毎月 */
     const gb=billOf(vend.gai, ym, [{accountCode:'5100', costItemId:gaiItem.id, name:'支援業務委託', amount:isA?1150000:1250000, taxCat:'課税10%'}], '外注');
     payoutFor(vend.gai, gb, 0);
     /* 通訳・翻訳（売上原価）: 毎月、量が変わる */
-    const tb=billOf(vend.tsu, ym, [{accountCode:'5200', name:'通訳・翻訳費', amount:dvar(240000,.25), taxCat:'課税10%'}], '通訳');
-    if(mi < months.length-2) payoutFor(vend.tsu, tb, dint(-1,2));
+    const tb=billOf(vend.tsu, ym, [{accountCode:'5200', costItemId:tsuItem.id, name:'通訳・翻訳費', amount:dvar(240000,.25), taxCat:'課税10%'}], '通訳');
+    payoutFor(vend.tsu, tb, dint(-1,2));
     /* 求人広告 */
     const ab=billOf(vend.ad, ym, [{accountCode:'6310', costItemId:adItem.id, name:'求人広告 掲載料', amount:110000, taxCat:'課税10%'}], '広告');
     payoutFor(vend.ad, ab, 0);
@@ -7840,6 +8320,14 @@ async function demoSeed(){
       put('expenses',{ costItemId:o.it.id, bookMonth:ym, date:o.tax==='対象外'? ym+'-25' : monthEnd(ym), accountCode:o.it.accountCode,
         amount:amt, taxCat:o.tax||'課税10%', method:o.method||'クレジット', note:o.it.name.replace(DEMO_TAG,'') });
     });
+  });
+
+  /* ── 突発の費用（費目に結び付かない。見込には入らない）── */
+  [[fyMonths(FY_A)[3], A.repair, 88000, vend.fix.id, '', 'さくら寮A棟 エアコン故障の修理', props[0].id],
+   [fyMonths(FY_A)[7], A.repair, 132000, vend.fix.id, '', 'さくら寮B棟 水漏れの修理', props[1].id],
+   [fyMonths(FY_A)[8], '6410', 66000, '', '家電量販店', '寮の冷蔵庫の買い替え', props[0].id],
+   [fyMonths(FY_A)[10], '6900', 55000, '', '行政書士事務所', '在留資格の急ぎの相談料', '']].forEach(([ym,code,amt,co,vendor,note,pr])=>{
+    put('expenses',{ bookMonth:ym, date:ym+'-15', accountCode:code, companyId:co, vendor, propertyId:pr, amount:amt, taxCat:'課税10%', method:'銀行振込', note });
   });
 
   /* ── 前年度を ちょうど 売上 8,000万円・経常利益 20% に合わせる ──

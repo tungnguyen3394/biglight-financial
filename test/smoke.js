@@ -686,7 +686,7 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   await ctx.demoSeed();
   const n = ctx.demoCount();
   eq('デモが入った（件数）', n>300, true);
-  eq('取引先は23社（得意先15・支払先8）', _db.companies.filter(c=>c.demo).length, 23);
+  eq('取引先は25社（得意先15・支払先10）', _db.companies.filter(c=>c.demo).length, 25);
   eq('特定技能者は作らない', _db.workers.filter(w=>w.demo).length, 0);
   eq('物件は4件', _db.properties.filter(p=>p.demo).length, 4);
   eq('前年度の12か月 × 15社 の請求（今年度は作らない）', _db.invoices.filter(i=>i.demo).length, 180);
@@ -732,6 +732,65 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     eq('入金チェックの画面が描ける（過入金だけに絞る）', h.includes('入金チェック') && h.includes('ひかり介護') && !h.includes('みどり農園株式会社</b>'), true);
     ctx.setArchkFilter('over');
     eq('回収のタブに 入金チェック', ctx.__x.SECTIONS.find(x=>x.id==='sec-ar').tabs.some(t=>t.id==='archeck'), true);
+  }
+
+  console.log('\n― 買掛金（支払先×月の残高）・支払推移表 ―');
+  {
+    const S=a=>a.reduce((t,v)=>t+v,0);
+    eq('支払のタブ: 買掛金・支払推移表・支払請求・支払実行・資金繰り', ctx.__x.SECTIONS.find(x=>x.id==='sec-ap').tabs.map(t=>t.id), ['apbook','apsuii','bills','payouts','cashflow']);
+    eq('古い 未払（年齢表）・支払先別 は 買掛金へ', [ctx.__x.PAGE_REDIRECT.apaging, ctx.__x.PAGE_REDIRECT.apco], ['apbook','apbook']);
+    const ids=ctx.apCompanyIds(), tm=ctx.thisMonth();
+    const bal=ids.reduce((t,id)=>t+ctx.apMonthly(id,[tm])[0].closing,0);
+    eq('買掛金の月末残高の合計 ＝ 未払残高（支払をすべて充てているデモ）', bal, ctx.apTotal());
+    const oya=_db.companies.find(c=>c.name.includes('丸山不動産'));
+    const m=ctx.apMonthly(oya.id, ctx.fyMonths(FYA));
+    eq('月末残高 ＝ 前月残高 ＋ 支払請求 − 支払', m.every(r=>r.closing===r.opening+r.billed-r.payment), true);
+    let h=ctx.viewApBook();
+    eq('買掛金の画面: 支払先が行・12か月が列', h.includes('丸山不動産') && (h.match(/apCellPop\(/g)||[]).length>=12, true);
+    el.innerHTML=''; ctx.openLedger(oya.id,'ap');
+    eq('支払先の名前から 買掛元帳（モーダル）', String(el.innerHTML).includes('買掛元帳'), true);
+
+    /* 推移表の税抜 ＝ 予実の費用（1円も違わない） */
+    const L=ctx.costFlowLines(FYA).filter(l=>!l.forecast);
+    const net=Array(12).fill(0); L.forEach(l=>{ net[l.i]+=l.net; });
+    const yj=ctx.actualSeries(FYA,'cogs').map((v,i)=>v+ctx.actualSeries(FYA,'sga')[i]);
+    eq('推移表の税抜 ＝ 予実の 売上原価＋販管費（月ごと）', net, yj);
+    const billGross=_db.bills.filter(b=>b.demo && ctx.fyOf(b.bookMonth)===FYA).reduce((t,b)=>t+ctx.docTotal(b),0);
+    eq('推移表の税込（支払請求の分）＝ 支払請求の税込合計', L.filter(l=>l.src.t==='bills' && (_db.bills.find(b=>b.id===l.src.id)||{}).demo).reduce((t,l)=>t+l.gross,0), billGross);
+    eq('過ぎた年度に 見込 は無い', ctx.costFlowLines(FYA).some(l=>l.forecast), false);
+    eq('突発（費目なし）が入っている', L.filter(l=>l.sudden).length>=4, true);
+    const ads=L.filter(l=>l.code==='6310');
+    eq('広告宣伝費の下に A社・B社（2つの支払先）', new Set(ads.map(l=>l.companyId)).size, 2);
+
+    /* 今年度: 今月以降は見込（定期＝月額予定、変動＝直近3か月平均） */
+    const fc=ctx.costFlowLines(FYA+1).filter(l=>l.forecast);
+    eq('今年度は 今月以降に 見込 がある', fc.length>0 && fc.every(l=>l.ym>=tm), true);
+    const rentIt=_db.costItems.find(c=>c.demo && c.name.includes('本社事務所'));
+    eq('定期の見込 ＝ 費目の月額予定', fc.filter(l=>l.costItemId===rentIt.id).every(l=>l.gross===Number(rentIt.monthly)), true);
+    const tsu=_db.costItems.find(c=>c.demo && c.name.includes('通訳'));
+    const hist=ctx.costItemHistory()[tsu.id], last3=Object.keys(hist).filter(k=>k<tm).sort().slice(-3);
+    eq('変動の見込 ＝ 直近3か月の平均', fc.find(l=>l.costItemId===tsu.id).gross, Math.round(last3.reduce((t,k)=>t+hist[k],0)/3));
+    eq('突発は 見込に入れない', fc.some(l=>!l.costItemId), false);
+
+    /* 大・中・小・明細 */
+    ctx.setTaxView('gross'); ctx.setSuiiAxis('vendor');
+    ctx.setSuiiLv(0); h=ctx.viewApSuii();
+    eq('大: 大分類だけ（販管費は見えて、地代家賃の行は閉じている）', h.includes('販売費及び一般管理費') && !h.includes('>地代家賃<'), true);
+    ctx.setSuiiLv(1); h=ctx.viewApSuii();
+    eq('中: 地代家賃・広告宣伝費 が出る', h.includes('>地代家賃<') && h.includes('>広告宣伝費<'), true);
+    ctx.setSuiiLv(3); h=ctx.viewApSuii();
+    eq('明細: 広告宣伝費 › A社・B社', h.includes('北関東求人メディア') && h.includes('ソーシャル広告ラボ'), true);
+    eq('突発の印', h.includes('突発'), true);
+    ctx.setSuiiAxis('property'); h=ctx.viewApSuii();
+    eq('物件に切り替え: 建物名が出る', h.includes('さくら寮 A棟'), true);
+    ctx.setSuiiAxis('vendor');
+    ctx.setTaxView('net'); h=ctx.viewApSuii();
+    eq('税抜に切り替え', h.includes('税抜'), true);
+    const kb=ctx.viewKbunrui();
+    eq('分類別集計にも 税込／税抜', kb.includes('setTaxView') && kb.includes('税抜'), true);
+    ctx.setTaxView('gross');
+    eq('既定は税込', ctx.viewKbunrui().includes('・税込'), true);
+    ctx.setSuiiLv(1);
   }
 
   console.log('\n― 担当者別の売上 ―');
