@@ -1850,6 +1850,102 @@ function plBook(fy, source){
   return { revenue, cogs, gross, sga, operating, nonop, ordinary };
 }
 const sumRange = (a,s,e)=>{ let t=0; for(let i=s;i<=e&&i<a.length;i++) t+=a[i]||0; return t; };
+/* ============================================================================
+   税込で見る損益（ダッシュボード・予実・期間比較・見込実績表 の表示用）
+   ----------------------------------------------------------------------------
+   ★ 2026-09-15 利用者の指示: 売上も費用も 既定は税込、ボタンで税抜。
+   ・計算の本体（plBook・actualSeries・landing）は 税抜のまま。API・MCP・テストはそちらを使う。
+     画面だけが plView／landingV／seriesByAccountV を通して 税込／税抜 を切り替える。
+   ・実績の税込: 明細ごとに 税抜＋消費税（請求書・支払請求と同じ切り捨て）、経費は入力した税込額。
+   ・予算・見込は税抜で入力している。税込で見るときは 科目ごとの実際の税率
+     （その科目の 実績の税込÷税抜、今年度と前年度）で換算する。実績が無い科目は 費目の税区分、
+     それも無ければ 10%（営業外は 0%）。
+   ・税込の「利益」は 預かった消費税 − 払った消費税 を含む（納税前の手元のお金に近い）。儲けの判断は税抜で。
+   ========================================================================== */
+const grossOfItemV = it => itemAmount(it)+Math.floor(itemAmount(it)*(TAX_RATE[it.taxCat||'課税10%']||0));
+/** 請求書1枚の売上（税込）。明細があれば収益科目の行だけ、無ければ請求額（税込） */
+function invRevenueGross(inv){
+  if(!inv || inv.status==='取消') return 0;
+  if(!(inv.items||[]).length) return docTotal(inv);
+  return inv.items.reduce((t,it)=>t+(accountKind(it.accountCode)==='revenue'? grossOfItemV(it) : 0), 0);
+}
+const invRevenueV = inv => taxView()==='net'? invRevenue(inv) : invRevenueGross(inv);
+/** actualSeries の税込版（拾う伝票・条件は actualSeries と同じ） */
+function actualSeriesGross(fy, kind){
+  const months=fyMonths(fy), idx={}; months.forEach((m,i)=>{ idx[m]=i; });
+  const out=Array(12).fill(0);
+  const addTo=(ym, v)=>{ const i=idx[ym]; if(i!=null) out[i]+=v; };
+  if(kind==='revenue'){
+    (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const ym=ymOfDoc(inv); if(idx[ym]==null) return; addTo(ym, invRevenueGross(inv)); });
+  }else{
+    (DB.bills||[]).forEach(b=>{ if(b.status==='取消') return; const ym=ymOfDoc(b); if(idx[ym]==null) return;
+      (b.items||[]).forEach(it=>{ if(accountKind(it.accountCode)===kind) addTo(ym, grossOfItemV(it)); }); });
+    (DB.expenses||[]).forEach(e=>{ const ym=(e.bookMonth||e.date||'').slice(0,7); if(idx[ym]==null) return;
+      if(accountKind(e.accountCode)===kind) addTo(ym, num(e.amount)); });
+    if(kind==='nonop') (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const ym=ymOfDoc(inv); if(idx[ym]==null) return;
+      (inv.items||[]).forEach(it=>{ if(accountKind(it.accountCode)==='nonop') addTo(ym, grossOfItemV(it)); }); });
+  }
+  (DB.actualAdjust||[]).forEach(a=>{           // 調整は税の情報を持たないので そのまま
+    if(Number(a.fy)!==Number(fy) || accountKind(a.accountCode)!==kind) return;
+    const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount);
+  });
+  return out;
+}
+let _grossRateCache=null;
+function grossRates(fy){
+  const sig=[fy,(DB.invoices||[]).length,(DB.bills||[]).length,(DB.expenses||[]).length,(DB.costItems||[]).length,(DB.accounts||[]).length].join('|');
+  if(_grossRateCache && _grossRateCache.sig===sig) return _grossRateCache.map;
+  const g={}, n={}, ci={};
+  [fy, fy-1].forEach(y=>moneyLines(y).forEach(l=>{ g[l.code]=(g[l.code]||0)+l.gross; n[l.code]=(n[l.code]||0)+l.amount; }));
+  (DB.costItems||[]).forEach(it=>{ if(it && it.accountCode && !(it.accountCode in ci)) ci[it.accountCode]=1+(TAX_RATE[it.taxCat||'課税10%']||0); });
+  _grossRateCache={ sig, map:{ g, n, ci } };
+  return _grossRateCache.map;
+}
+/** 科目の「税込÷税抜」。親の科目なら 下の科目をまとめて */
+function grossRateOf(fy, code){
+  const M=grossRates(fy), codes=accountCodesUnder(code);
+  let g=0, n=0; codes.forEach(c=>{ g+=M.g[c]||0; n+=M.n[c]||0; });
+  if(n>0) return g/n;
+  const c=codes.find(x=>M.ci[x]); if(c) return M.ci[c];
+  return accountKind(code)==='nonop'? 1 : 1.1;
+}
+function planSeriesGross(fy, kind, which){
+  const src = which==='forecast'? (DB.forecasts||[]) : (DB.budgets||[]);
+  const out=Array(12).fill(0);
+  src.forEach(b=>{
+    if(Number(b.fy)!==Number(fy) || accountKind(b.accountCode)!==kind) return;
+    const i=Number(b.mIndex); if(i>=0&&i<12) out[i]+=Math.round(num(b.amount)*grossRateOf(fy, b.accountCode));
+  });
+  return out;
+}
+/** 画面用の損益一式（税込／税抜の切り替えに従う） */
+function plView(fy, source){
+  if(taxView()==='net') return plBook(fy, source);
+  const g = k => source==='actual'? actualSeriesGross(fy,k) : planSeriesGross(fy,k,source);
+  const revenue=g('revenue'), cogs=g('cogs'), sga=g('sga'), nonop=g('nonop');
+  const gross     = revenue.map((v,i)=>v-cogs[i]);
+  const operating = gross.map((v,i)=>v-sga[i]);
+  const ordinary  = operating.map((v,i)=>v+nonop[i]);
+  return { revenue, cogs, gross, sga, operating, nonop, ordinary };
+}
+function landingV(fy, key, uptoIdx){
+  if(taxView()==='net') return landing(fy, key, uptoIdx);
+  const act=plView(fy,'actual')[key], bud=plView(fy,'budget')[key], fc=plView(fy,'forecast')[key];
+  let t=sumRange(act,0,uptoIdx);
+  for(let i=uptoIdx+1;i<12;i++) t += (fc[i]||bud[i]||0);
+  return t;
+}
+function seriesByAccountV(fy, code, source){
+  if(taxView()==='net') return seriesByAccount(fy, code, source);
+  if(source==='budget' || source==='forecast') return seriesByAccount(fy, code, source).map(v=>Math.round(v*grossRateOf(fy, code)));
+  const out=Array(12).fill(0);
+  moneyLines(fy).forEach(l=>{ if(String(l.code)===String(code)) out[l.i]+=l.gross; });
+  return out;
+}
+const taxGrossNote = () => taxView()==='gross'
+  ? `<div class="infobar" style="margin:0 0 10px;">税込で表示中。利益（粗利・営業・経常）は 預かった消費税 − 払った消費税 を含みます（納税前の手元のお金に近い数字）。
+      予算・見込は税抜で入力しているため、科目ごとの実際の税率で税込に換算しています。儲けの判断は <a onclick="setTaxView('net')" style="cursor:pointer;color:var(--primary);">税抜</a> で。</div>` : '';
+
 const sum12 = a => sumRange(a,0,11);
 
 /** 期間比較（公式どおりの1関数。全画面この結果を使う） */
@@ -2391,8 +2487,8 @@ function onPlanInput(el, which, mIndex, accountCode){
 
 function viewYojitsu(){
   const fy=CUR_FY, i=lastActualIdx(fy);
-  const act=plBook(fy,'actual'), bud=plBook(fy,'budget'), fc=plBook(fy,'forecast');
-  const prev=plBook(fy-1,'actual');
+  const act=plView(fy,'actual'), bud=plView(fy,'budget'), fc=plView(fy,'forecast');
+  const prev=plView(fy-1,'actual');
   const cmpRev = compareSeries(act.revenue, prev.revenue, i);
   const cmpOrd = compareSeries(act.ordinary, prev.ordinary, i);
 
@@ -2407,10 +2503,10 @@ function viewYojitsu(){
       <div class="num ${cmpOrd.ytd<0?'minus':'plus'}">${moneyPlain(cmpOrd.ytd)}</div>
       <div class="sub">前年同期 ${pct(cmpOrd.ytd,cmpOrd.lastYearYtd)}</div></div>
     <div class="kpi"><div class="lbl">着地見込 売上</div>
-      <div class="num">${moneyPlain(landing(fy,'revenue',i))}</div>
-      <div class="sub">年間予算 ${moneyPlain(sum12(bud.revenue))}（${sum12(bud.revenue)?((landing(fy,'revenue',i)/sum12(bud.revenue))*100).toFixed(0)+'%':'—'}）</div></div>
+      <div class="num">${moneyPlain(landingV(fy,'revenue',i))}</div>
+      <div class="sub">年間予算 ${moneyPlain(sum12(bud.revenue))}（${sum12(bud.revenue)?((landingV(fy,'revenue',i)/sum12(bud.revenue))*100).toFixed(0)+'%':'—'}）</div></div>
     <div class="kpi"><div class="lbl">着地見込 経常利益</div>
-      <div class="num ${landing(fy,'ordinary',i)<0?'minus':'plus'}">${moneyPlain(landing(fy,'ordinary',i))}</div>
+      <div class="num ${landingV(fy,'ordinary',i)<0?'minus':'plus'}">${moneyPlain(landingV(fy,'ordinary',i))}</div>
       <div class="sub">年間予算 ${moneyPlain(sum12(bud.ordinary))}</div></div>
   </div>`;
 
@@ -2425,7 +2521,7 @@ function viewYojitsu(){
   else if(YJ_TAB==='acct') body = yjAccountTable(fy);
   else                     body = yjInputTable(fy);
 
-  const tools = toolsMenu(`
+  const tools = taxViewSeg()+toolsMenu(`
     <button class="btn secondary" onclick="yjCopyBudget()">前年実績から予算を作成</button>
     <button class="btn secondary" onclick="yjAdjustModal()">実績の調整を入力</button>
     <hr>
@@ -2433,7 +2529,7 @@ function viewYojitsu(){
     <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`);
 
   return pageShell({ title:'予実管理', sub:fyLabel(fy)+' ／ 実績のある最終月：'+FY_MONTH_LABELS[i],
-    tools, body: kpis+tabs+body });
+    tools, body: taxGrossNote()+kpis+tabs+body });
 }
 
 /** 損益表: 行＝損益の科目、列＝12か月＋累計。表示は 予実対比／実績／予算／見込 を切替。 */
@@ -2445,7 +2541,7 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
       <button class="${YJ_VIEW==='budget'?'on':''}" onclick="setYjView('budget')">予算</button>
       <button class="${YJ_VIEW==='forecast'?'on':''}" onclick="setYjView('forecast')">見込</button>
     </div>
-    <span class="muted" style="font-size:11.5px;">金額は税抜。実績は伝票（請求・支払・経費）から自動計算しています。</span></div>`;
+    <span class="muted" style="font-size:11.5px;">金額は${taxLabel()}。実績は伝票（請求・支払・経費）から自動計算しています。</span></div>`;
 
   const cell = (row, mi) => {
     const a=act[row.key]?act[row.key][mi]:0, b=bud[row.key]?bud[row.key][mi]:0, f=fc[row.key]?fc[row.key][mi]:0;
@@ -2483,7 +2579,7 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
   const body = PL_ROWS.map(row=>{
     const strong = row.strong? 'style="font-weight:700;background:var(--surface-2);"' : '';
     const land = row.type==='rate' ? '<span class="zero">—</span>'
-      : `<b class="num">${moneyPlain(landing(fy,row.key,lastIdx))}</b>`;
+      : `<b class="num">${moneyPlain(landingV(fy,row.key,lastIdx))}</b>`;
     return `<tr ${strong}><td ${strong}>${esc(row.label)}</td>
       ${FY_MONTH_LABELS.map((_,mi)=>`<td class="r">${cell(row,mi)}</td>`).join('')}
       <td class="r">${totCell(row)}</td><td class="r">${land}</td></tr>`;
@@ -2501,7 +2597,7 @@ function yjAccountTable(fy){
     const list = accountsOfKind(kind);
     if(!list.length) return;
     const rows = list.map(a=>{
-      const act = seriesByAccount(fy,a.code,'actual'), bud = seriesByAccount(fy,a.code,'budget');
+      const act = seriesByAccountV(fy,a.code,'actual'), bud = seriesByAccountV(fy,a.code,'budget');
       const ta=sum12(act), tb=sum12(bud);
       if(!ta && !tb) return '';
       return `<tr><td>${esc(a.code)} ${esc(a.label)}</td>
@@ -2511,7 +2607,7 @@ function yjAccountTable(fy){
         <td class="r">${tb?`<span class="rate ${ta>=tb?(kind==='revenue'?'plus':'minus'):(kind==='revenue'?'minus':'plus')}">${(ta/tb*100).toFixed(0)}%</span>`:'<span class="zero">—</span>'}</td></tr>`;
     }).join('');
     html += `<div class="panel"><div class="panel-hd"><b>${esc(KIND_LABEL[kind])}</b>
-        <span class="sub">実績（税抜）／ 年度累計と予算比</span></div>
+        <span class="sub">実績（${taxLabel()}）／ 年度累計と予算比</span></div>
       <div class="panel-bd tight"><div class="table-wrap" style="border:0;">
         <table class="stick1"><thead><tr><th style="min-width:160px;">勘定科目</th>
           ${FY_MONTH_LABELS.map(m=>`<th class="r">${m}</th>`).join('')}
@@ -2532,7 +2628,7 @@ function yjInputTable(fy){
       <button class="${which==='forecast'?'on':''}" onclick="setYjView('forecast')">見込を入力</button>
     </div>
     <button class="btn secondary sm" onclick="yjSpread('${which}')">年額をまとめて入力（12等分）</button>
-    <span class="muted" style="font-size:11.5px;">数字を直すとその場で保存されます（税抜）。</span></div>`;
+    <span class="muted" style="font-size:11.5px;">数字を直すとその場で保存されます（入力は いつも税抜。税込の画面では 科目の税率で換算して見せます）。</span></div>`;
   const rows = ['revenue','cogs','sga','nonop'].map(kind=>{
     const accs=accountsOfKind(kind);
     return `<tr class="totrow"><td colspan="14">${esc(KIND_LABEL[kind])}</td></tr>`+
@@ -2623,8 +2719,8 @@ function setCmpIdx(i){ CMP_IDX=Number(i); renderPage('compare'); }
 function viewCompare(){
   const fy=CUR_FY;
   const i = CMP_IDX==null? lastActualIdx(fy) : CMP_IDX;
-  const cur=plBook(fy,'actual')[CMP_KEY], prev=plBook(fy-1,'actual')[CMP_KEY];
-  const bud=plBook(fy,'budget')[CMP_KEY];
+  const cur=plView(fy,'actual')[CMP_KEY], prev=plView(fy-1,'actual')[CMP_KEY];
+  const bud=plView(fy,'budget')[CMP_KEY];
   const c=compareSeries(cur,prev,i);
   const rowsDef=[
     ['当月',            c.month,  '予算', bud[i]],
@@ -2647,15 +2743,15 @@ function viewCompare(){
   // 複数年の並列比較（過去の成績と比べる）
   const years = fyChoices().filter(y=>y<=fy).slice(0,5).sort((a,b)=>a-b);
   const yRows = years.map(y=>{
-    const s=plBook(y,'actual')[CMP_KEY];
+    const s=plView(y,'actual')[CMP_KEY];
     const tot=sum12(s);
     return `<tr><td><b>${y}年度</b></td>
       ${s.map((v,k)=>`<td class="r num" style="${k===i?'background:var(--primary-soft);':''}">${money(v)}</td>`).join('')}
       <td class="r num"><b>${moneyPlain(tot)}</b></td></tr>`;
   }).join('');
-  const maxTot = Math.max(...years.map(y=>Math.abs(sum12(plBook(y,'actual')[CMP_KEY]))),1);
+  const maxTot = Math.max(...years.map(y=>Math.abs(sum12(plView(y,'actual')[CMP_KEY]))),1);
   const bars = years.map(y=>{
-    const t=sum12(plBook(y,'actual')[CMP_KEY]);
+    const t=sum12(plView(y,'actual')[CMP_KEY]);
     return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
       <div style="width:76px;font-size:12px;" class="muted">${y}年度</div>
       <div class="bar" style="flex:1;height:16px;"><i style="width:${Math.abs(t)/maxTot*100}%;${t<0?'background:var(--red);':''}"></i></div>
@@ -2669,9 +2765,9 @@ function viewCompare(){
     <select onchange="setCmpIdx(this.value)" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;">
       ${FY_MONTH_LABELS.map((m,k)=>`<option value="${k}" ${k===i?'selected':''}>${m}を基準に比較</option>`).join('')}</select></div>`;
 
-  return pageShell({ title:'期間比較', sub:fyLabel(fy),
-    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`),
-    body: seg
+  return pageShell({ title:'期間比較', sub:fyLabel(fy)+' ／ '+taxLabel(),
+    tools: taxViewSeg()+toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`),
+    body: taxGrossNote()+seg
       +`<div class="panel"><div class="panel-hd"><b>${esc({revenue:'売上高',gross:'売上総利益',operating:'営業利益',ordinary:'経常利益'}[CMP_KEY])}</b><span class="sub">${FY_MONTH_LABELS[i]} 時点</span></div><div class="panel-bd tight">${cmpTable}</div></div>`
       +`<div class="panel"><div class="panel-hd"><b>年度別の推移</b><span class="sub">過去の成績と並べて見る</span></div>
          <div class="panel-bd tight"><div class="table-wrap" style="border:0;"><table class="stick1">
@@ -2683,7 +2779,7 @@ function viewCompare(){
 /* ============ 見込実績表（会議資料の形） ============ */
 function viewMikomi(){
   const fy=CUR_FY, i=lastActualIdx(fy);
-  const act=plBook(fy,'actual'), bud=plBook(fy,'budget'), fc=plBook(fy,'forecast'), prev=plBook(fy-1,'actual');
+  const act=plView(fy,'actual'), bud=plView(fy,'budget'), fc=plView(fy,'forecast'), prev=plView(fy-1,'actual');
   const keys=[['revenue','売上高'],['gross','売上総利益'],['sga','販管費'],['operating','営業利益'],['ordinary','経常利益']];
   const qBlocks = QUARTERS.map(q=>{
     const cols = [0,1,2].map(k=>q.s+k);
@@ -2710,7 +2806,7 @@ function viewMikomi(){
         <th class="r">累計</th><th class="r">前年累計</th><th class="r">前年比</th>
         <th class="r">年間見込</th><th class="r">年間予算</th><th class="r">達成</th></tr></thead>
       <tbody>${keys.map(([k,lb])=>{
-        const c=compareSeries(act[k],prev[k],i), land=landing(fy,k,i), b=sum12(bud[k]);
+        const c=compareSeries(act[k],prev[k],i), land=landingV(fy,k,i), b=sum12(bud[k]);
         return `<tr><td><b>${esc(lb)}</b></td>
           <td class="r num">${money(c.month)}</td><td class="r num">${money(c.lastYearMonth)}</td><td class="r">${pct(c.month,c.lastYearMonth)}</td>
           <td class="r num"><b>${moneyPlain(c.ytd)}</b></td><td class="r num">${money(c.lastYearYtd)}</td><td class="r">${pct(c.ytd,c.lastYearYtd)}</td>
@@ -2719,9 +2815,9 @@ function viewMikomi(){
           <td class="r">${b?`<span class="rate ${land>=b?'plus':'minus'}">${(land/b*100).toFixed(0)}%</span>`:'<span class="zero">—</span>'}</td></tr>`;
       }).join('')}</tbody></table></div></div></div>`;
 
-  return pageShell({ title:'見込実績表', sub:fyLabel(fy)+' ／ 会議で配る形',
-    tools: toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（A4横）</button>`),
-    body: yearTable+qBlocks });
+  return pageShell({ title:'見込実績表', sub:fyLabel(fy)+' ／ '+taxLabel()+' ／ 会議で配る形',
+    tools: taxViewSeg()+toolsMenu(`<button class="btn secondary" onclick="window.print()">${IC.print} 印刷（A4横）</button>`),
+    body: taxGrossNote()+yearTable+qBlocks });
 }
 
 /* ============================================================================
@@ -7563,7 +7659,7 @@ function staffRevenue(fy, s, e){
   (DB.invoices||[]).forEach(inv=>{
     if(inv.status==='取消') return;
     const ym=ymOfDoc(inv); if(!inRange.has(ym)) return;
-    const v=invRevenue(inv); if(!v) return;
+    const v=invRevenueV(inv); if(!v) return;
     const r=row(staffOf(invStaffRaw(inv)));
     r.revenue+=v; r.n++;
     const cid=String(inv.companyId||''); r.cos.set(cid,(r.cos.get(cid)||0)+v);
@@ -7572,7 +7668,7 @@ function staffRevenue(fy, s, e){
   const prevMonths=new Set(fyMonths(fy-1).slice(s, e+1));
   (DB.invoices||[]).forEach(inv=>{
     if(inv.status==='取消' || !prevMonths.has(ymOfDoc(inv))) return;
-    const v=invRevenue(inv); if(v) row(staffOf(invStaffRaw(inv))).prev+=v;
+    const v=invRevenueV(inv); if(v) row(staffOf(invStaffRaw(inv))).prev+=v;
   });
   const adjust=(DB.actualAdjust||[]).reduce((t,a)=>(Number(a.fy)===Number(fy) && accountKind(a.accountCode)==='revenue'
     && Number(a.mIndex)>=s && Number(a.mIndex)<=e)? t+num(a.amount) : t, 0);
@@ -7596,9 +7692,9 @@ function openStaffCompanies(key){
   const bal=dashBalances(fy, R.e);
   const list=[...r.cos.entries()].map(([id,v])=>({ id, v, c:findById('companies',id)||{} })).sort((a,b)=>b.v-a.v);
   openModal(`<h3>${esc(r.name)} の売上 <span class="muted" style="font-size:12px;font-weight:400;">${esc(dashRangeLabel(fy,R.s,R.e))}</span></h3>
-    <div class="mdsub">請求書の計上月で集計（税抜）。確定したときの担当で数えています。</div>
+    <div class="mdsub">請求書の計上月で集計（${taxLabel()}）。確定したときの担当で数えています。</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>取引先</th><th class="r">売上（税抜）</th><th class="r">構成比</th><th>今の担当</th><th class="r">売掛残高</th></tr></thead>
+      <thead><tr><th>取引先</th><th class="r">売上（${taxLabel()}）</th><th class="r">構成比</th><th>今の担当</th><th class="r">売掛残高</th></tr></thead>
       <tbody>${list.map(x=>{ const b=bal.arByCo[x.id]; const cur=staffOf(x.c.owner);
         return `<tr><td>${esc(x.c.name||'(削除された取引先)')}</td><td class="r num">${moneyPlain(x.v)}</td>
           <td class="r num">${r.revenue? (x.v/r.revenue*100).toFixed(1)+'%' : '—'}</td>
@@ -7612,7 +7708,7 @@ function openStaffCompanies(key){
 function viewDashboard(){
   const fy=CUR_FY, R=dashRange(), s=R.s, e=R.e;
   const lastAct=lastActualIdx(fy), eAct=Math.min(e,lastAct);
-  const act=plBook(fy,'actual'), bud=plBook(fy,'budget'), prev=plBook(fy-1,'actual');
+  const act=plView(fy,'actual'), bud=plView(fy,'budget'), prev=plView(fy-1,'actual');
   const S=(a,from,to)=> to<from? 0 : sumRange(a,from,to);
   const rev=S(act.revenue,s,e), gross=S(act.gross,s,e), ord=S(act.ordinary,s,e);
   const budRev=S(bud.revenue,s,eAct), budOrd=S(bud.ordinary,s,eAct);
@@ -7659,7 +7755,7 @@ function viewDashboard(){
   const staffTbl=`<div class="dash-section c-teal"><div class="dash-head">担当者別 売上
       <span class="cnt">${sr.rows.filter(r=>r.key).length}人 ・ ${moneyPlain(sr.total)}円</span></div>
     <div class="table-wrap" style="border:0;border-radius:0;"><table>
-      <thead><tr><th>BIGLIGHT担当者</th><th class="r">売上（税抜）</th><th style="width:22%;">構成比</th><th class="r">前年同期</th>
+      <thead><tr><th>BIGLIGHT担当者</th><th class="r">売上（${taxLabel()}）</th><th style="width:22%;">構成比</th><th class="r">前年同期</th>
         <th class="r">取引先</th><th class="r">売掛残高（${bal.now?'今日':esc(Number(bal.ym.slice(5))+'月末')}）</th><th class="r">うち期限超過</th></tr></thead>
       <tbody>${sr.rows.length? sr.rows.map(r=>{ const b=staffArr[r.key]||{bal:0,over:0};
         return `<tr onclick="openStaffCompanies('${attr(r.key)}')" style="cursor:pointer;">
@@ -7677,15 +7773,16 @@ function viewDashboard(){
         : '<tr><td colspan="7" class="empty">この月の売上はまだありません。</td></tr>'}</tbody></table></div>
     <div class="fhelp" style="padding:6px 14px 10px;">担当者は 取引先の「BIGLIGHT担当者」（CRM 所属機関情報と同じ）。請求書は確定したときの担当で数えます。行を押すと取引先ごとの内訳。</div></div>`;
 
-  return pageShell({ title:'ダッシュボード', sub:fyLabel(fy)+' ／ '+esc(dashRangeLabel(fy,s,e)),
-    body: guide+strip+`
+  return pageShell({ title:'ダッシュボード', sub:fyLabel(fy)+' ／ '+esc(dashRangeLabel(fy,s,e))+' ／ '+taxLabel(),
+    tools: taxViewSeg(),
+    body: guide+strip+taxGrossNote()+`
     <div class="kpi-grid">
-      <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上高</div>
+      <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上高（${taxLabel()}）</div>
         <div class="num">${moneyPlain(rev)}</div>
         <div class="sub">予算比 ${budRev? (actRevCmp/budRev*100).toFixed(0)+'%' : '—'} ／ 前年同期 ${pct(actRevCmp, prevRev)}</div></div>
       <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上総利益</div>
         <div class="num ${gross<0?'minus':''}">${moneyPlain(gross)}</div><div class="sub">粗利率 ${rate(gross,rev)}</div></div>
-      <div class="kpi clickable" onclick="goto('compare')"><div class="lbl">経常利益（税引前）</div>
+      <div class="kpi clickable" onclick="goto('compare')"><div class="lbl">経常利益（税引前・${taxLabel()}）</div>
         <div class="num ${ord<0?'minus':'plus'}">${moneyPlain(ord)}</div>
         <div class="sub">利益率 ${rate(ord,rev)} ／ 予算比 ${budOrd? (actOrdCmp/budOrd*100).toFixed(0)+'%' : '—'} ／ 前年 ${pct(actOrdCmp, prevOrd)}</div></div>
       <div class="kpi clickable" onclick="goto('arbook')"><div class="lbl">売掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>

@@ -796,9 +796,15 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   console.log('\n― 担当者別の売上 ―');
   {
     const sum=(a,s,e)=>a.slice(s,e+1).reduce((t,v)=>t+v,0);
+    ctx.setTaxView('net');
     [[0,11],[7,8],[0,9],[4,4],[11,11]].forEach(([s,e])=>{
       eq(`担当者別の合計＝予実の売上（${s}〜${e}）`, ctx.staffRevenue(FYA,s,e).total, sum(ctx.actualSeries(FYA,'revenue'),s,e));
     });
+    ctx.setTaxView('gross');
+    [[0,11],[7,8]].forEach(([s,e])=>{
+      eq(`税込でも 担当者別の合計＝税込の売上（${s}〜${e}）`, ctx.staffRevenue(FYA,s,e).total, sum(ctx.actualSeriesGross(FYA,'revenue'),s,e));
+    });
+    ctx.setTaxView('net');
     const sr=ctx.staffRevenue(FYA,0,11);
     const names=sr.rows.map(r=>r.name);
     eq('4人に分かれる（山田・佐々木・中村・自分）', ['デモ 山田','デモ 佐々木','デモ 中村'].every(x=>names.includes(x)) && sr.rows.some(r=>r.key==='test@biglight.jp'), true);
@@ -824,6 +830,7 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   console.log('\n― ダッシュボード: 集計する月 ―');
   {
     eq('デモのあとは 前年度を通期で開く', [ctx.__x.CUR_FY, ctx.__x.DASH_RANGE.s, ctx.__x.DASH_RANGE.e], [FYA,0,11]);
+    ctx.setTaxView('net');
     let h=ctx.viewDashboard();
     eq('在籍者 の数は出さない', h.includes('在籍者'), false);
     eq('担当者別 売上 が出る', h.includes('担当者別 売上') && h.includes('デモ 山田'), true);
@@ -842,6 +849,27 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     const b=ctx.dashBalances(FYA,8), tot=ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[`${FYA+1}-04`])[0].closing,0);
     eq('売掛残高（4月末）＝ 売掛金の画面の月末残高の合計', b.ar, tot);
     ctx.setDashRange(0,11);
+
+    console.log('\n― 税込／税抜（ダッシュボード・予実・期間比較・見込実績表）―');
+    const S=a=>a.reduce((t,v)=>t+v,0);
+    ctx.setTaxView('gross');
+    const demoInvGross=_db.invoices.filter(i=>i.demo).reduce((t,i)=>t+ctx.docTotal(i),0);
+    const realInvGross=_db.invoices.filter(i=>!i.demo && i.status!=='取消' && ctx.fyOf((i.bookMonth||'').slice(0,7))===FYA).reduce((t,i)=>t+ctx.invRevenueGross(i),0);
+    eq('税込の売上 ＝ 請求書の税込合計（前年度）', S(ctx.plView(FYA,'actual').revenue), demoInvGross+realInvGross);
+    eq('デモの税込売上 ＝ 88,000,000（課税10%）', demoInvGross, 88000000);
+    eq('税抜に戻すと 計算の本体と同じ', (ctx.setTaxView('net'), S(ctx.plView(FYA,'actual').ordinary)), S(ctx.plBook(FYA,'actual').ordinary));
+    ctx.setTaxView('gross');
+    const salary=ctx.grossRateOf(FYA,'6110'), rent=ctx.grossRateOf(FYA,'6201');
+    eq('予算の換算: 給与（対象外）は 1.0、家賃（課税10%）は 約1.1', [salary, Math.round(rent*100)/100], [1, 1.1]);
+    const hd=ctx.viewDashboard();
+    eq('ダッシュボードに 税込／税抜 のボタン', hd.includes('setTaxView') && hd.includes('売上高（税込）'), true);
+    eq('ダッシュボードの売上（税込）', hd.includes(ctx.__x.moneyPlain(S(ctx.plView(FYA,'actual').revenue))), true);
+    ['viewYojitsu','viewCompare','viewMikomi'].forEach(fn=>{
+      const h=ctx[fn](); eq(fn+' に 税込／税抜 のボタンと注意書き', h.includes('setTaxView') && h.includes('税込で表示中'), true);
+    });
+    ctx.setTaxView('net');
+    eq('税抜では 注意書きを出さない', ctx.viewYojitsu().includes('税込で表示中'), false);
+    ctx.setTaxView('gross');
   }
 
   /* 会社ごとに払い方のくせが違う ＝ タイムラインの色が全部見られる */
