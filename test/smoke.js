@@ -682,15 +682,16 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   /* デモを入れる前の数字（本物の分）。デモの分だけで 8,000万・20% になっているかを見る */
   const FYA = ctx.fyOf(ctx.thisMonth())-1;
   const S12 = a => a.reduce((t,v)=>t+v,0);
-  const pre = { rev:S12(ctx.plBook(FYA,'actual').revenue), ord:S12(ctx.plBook(FYA,'actual').ordinary) };
+  const pre = { rev:S12(ctx.plBook(FYA,'actual').revenue), ord:S12(ctx.plBook(FYA,'actual').ordinary), brev:S12(ctx.plBook(FYA,'budget').revenue), bord:S12(ctx.plBook(FYA,'budget').ordinary) };
   await ctx.demoSeed();
   const n = ctx.demoCount();
   eq('デモが入った（件数）', n>300, true);
   eq('取引先は23社（得意先15・支払先8）', _db.companies.filter(c=>c.demo).length, 23);
   eq('特定技能者は作らない', _db.workers.filter(w=>w.demo).length, 0);
   eq('物件は4件', _db.properties.filter(p=>p.demo).length, 4);
-  const demoMonths = (()=>{ let n=0; for(let ym=ctx.fyMonths(FYA)[0]; ym<=ctx.thisMonth(); ym=ctx.addMonths(ym,1)) n++; return n; })();
-  eq('前年度の期首から今月まで × 15社 の請求', _db.invoices.filter(i=>i.demo).length, demoMonths*15);
+  eq('前年度の12か月 × 15社 の請求（今年度は作らない）', _db.invoices.filter(i=>i.demo).length, 180);
+  eq('デモの請求は全部 前年度', _db.invoices.filter(i=>i.demo).every(i=>ctx.fyOf(i.bookMonth)===FYA), true);
+  eq('まだ来ていない日の入金は無い', _db.payments.filter(x=>x.demo).every(x=>x.date<=ctx.today()), true);
   eq('全部に【デモ】の印', _db.companies.filter(c=>c.demo).every(c=>c.name.startsWith('【デモ】')), true);
 
   console.log('\n― デモの数字: 前年度 売上 8,000万円・経常利益 20% ―');
@@ -700,8 +701,37 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     eq('前年度の経常利益（デモの分）＝ 16,000,000（20%）', S12(bk.ordinary)-pre.ord, 16000000);
     eq('前年度は12か月すべてに売上がある', bk.revenue.every(v=>v>0), true);
     eq('前年度は12か月すべてに費用がある', bk.sga.every(v=>v>0) && bk.cogs.every(v=>v>0), true);
-    eq('予算も2年度ぶん', [FYA, FYA+1].every(fy=>S12(ctx.plBook(fy,'budget').revenue)>0), true);
+    const bu=ctx.plBook(FYA,'budget');
+    eq('予算の売上（デモの分）＝ 65,000,000', S12(bu.revenue)-pre.brev, 65000000);
+    eq('予算の経常利益（デモの分）＝ 11,700,000（18%）', S12(bu.ordinary)-pre.bord, 11700000);
+    eq('予算は12か月すべてにある', bu.revenue.every(v=>v>0), true);
     eq('OKR の見本がある', (_db.objectives||[]).filter(o=>o.demo).length, 2);
+  }
+
+  console.log('\n― 入金チェック（全額・不足・過入金…） ―');
+  {
+    const rows=ctx.arCheckRows(FYA).filter(r=>r.inv.demo), by=k=>rows.filter(r=>r.kind===k);
+    const co=n=>_db.companies.find(c=>c.name.includes(n)).id;
+    eq('請求1枚に1行', rows.length, 180);
+    eq('8つの判定が全部そろう', ['ok','late','split','fee','over','short','none','wait'].every(k=>by(k).length>0), true);
+    const hik=rows.filter(r=>r.companyId===co('ひかり介護')).sort((a,b)=>a.ym.localeCompare(b.ym));
+    eq('過入金: ひかり 12月分で +100,000', [hik[4].kind, hik[4].diff], ['over', 100000]);
+    eq('過入金の分は 翌月の請求に充当', hik[5].prepaid, 100000);
+    eq('過入金の翌月は 残りだけ振り込み（残高0）', [hik[5].bal, hik[5].cash], [0, hik[5].total-100000]);
+    const mid=rows.filter(r=>r.companyId===co('みどり農園'));
+    eq('手数料差引: 振込額＋手数料＝請求額、残高0', mid.every(r=>r.kind!=='fee' || (r.cash+r.fee===r.total && r.bal===0 && r.fee===660)), true);
+    const kan=rows.filter(r=>r.companyId===co('関東精密')).sort((a,b)=>a.ym.localeCompare(b.ym));
+    eq('不足→翌月に不足分も: 11月分は2回で全額', [kan[3].kind, kan[3].nPay, kan[3].bal], ['split', 2, 0]);
+    eq('二重振込: 宇都宮 3月分が過入金', rows.filter(r=>r.companyId===co('宇都宮')).some(r=>r.kind==='over'), true);
+    eq('不足: 那須は 期日を過ぎて半分だけ', rows.some(r=>r.companyId===co('那須') && r.kind==='short'), true);
+    eq('未入金: 北関東の直近分', rows.some(r=>r.companyId===co('北関東') && r.kind==='none'), true);
+    eq('差額 ＝ 入った額 − 請求額（不足は 残高のマイナス）', rows.every(r=>r.kind==='over' || r.diff===-r.bal), true);
+    eq('どの請求にも充てていない入金は残らない（多い分は次へ）', ctx.unAllocated(), 0);
+    ctx.setArchkFilter('over');
+    const h=ctx.viewArCheck();
+    eq('入金チェックの画面が描ける（過入金だけに絞る）', h.includes('入金チェック') && h.includes('ひかり介護') && !h.includes('みどり農園株式会社</b>'), true);
+    ctx.setArchkFilter('over');
+    eq('回収のタブに 入金チェック', ctx.__x.SECTIONS.find(x=>x.id==='sec-ar').tabs.some(t=>t.id==='archeck'), true);
   }
 
   console.log('\n― 担当者別の売上 ―');
