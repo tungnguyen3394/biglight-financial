@@ -1403,6 +1403,17 @@ Giá trị hiển thị bằng mắt giống hệt nhưng khác byte → chọn 
 ### ❌ `overflow:hidden` trên `<table>` để bo góc
 Giết luôn `position:sticky` của `<th>`. **→ Dùng `overflow:clip`.**
 
+### ❌ `colspan` trên ô đầu của bảng có cột đầu `sticky`
+Hàng tiêu đề nhóm / hàng 合計 hay được viết `<td colspan="3">売上原価</td>`. Nếu cột đầu là
+`position:sticky; left:0` thì ô gộp đó **dính bên trái với bề rộng của cả 3 cột**: cuộn ngang một
+cái là nó trượt lên trên và **che mất các số của chính hàng đó** — người dùng thấy số biến mất, số
+bị cắt (`2,036,920` hiện thành `6,920`) và một mảng màu lạ chạy theo. Trong bảng tiền thì đây là
+lỗi nguy hiểm vì số bị cắt **trông vẫn giống một con số thật**.
+**→ Không gộp ô ở hàng dữ liệu: nhãn nằm ở cột 1, các cột còn lại để `<td></td>` rỗng.
+Chỉ `colspan` cho hàng "không có dữ liệu" (empty state). Sự kiện click thì gắn lên `<tr>`.**
+Kèm theo: `.stick1 td:first-child` (đặc tả 0,2,1) mạnh hơn `.totrow td` (0,1,1) → ô đầu của hàng
+tổng bị trắng trong khi phần còn lại xám. Phải viết thêm `.stick1 tr.totrow td:first-child`.
+
 ### ❌ Render lại rồi quên trả focus
 Ô lọc mất focus sau mỗi ký tự. **→ Sau render, `focus()` + `setSelectionRange(len,len)`.**
 

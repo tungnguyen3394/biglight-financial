@@ -228,6 +228,9 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .stick1 th:first-child,.stick1 td:first-child{position:sticky; left:0; background:var(--card); z-index:1;}
   .stick1 th:first-child{z-index:3; background:var(--thead);}
   .stick1 tr:hover td:first-child{background:var(--row-hover);}
+  /* ★ 2026-09-16: 合計・区分の見出しの行は 1列目（sticky）も同じ色にする。
+     .stick1 td:first-child の方が強く、白く抜けて「そこだけ別の行」に見えていた。 */
+  .stick1 tr.totrow td:first-child,.stick1 tr.grprow td:first-child{background:var(--surface-2);}
 
   /* ===== Panel / KPI ===== */
   .panel{border:1px solid var(--border); border-radius:12px; background:var(--card); box-shadow:var(--shadow-sm); margin-bottom:16px; overflow:hidden;}
@@ -2683,10 +2686,22 @@ function yjInputTable(fy){
       <button class="${which==='actual'?'on':''}" onclick="setYjView('actual')">実績</button>
     </div>
     ${which==='actual'?'':`<button class="btn secondary sm" onclick="yjSpread('${which}')">年額をまとめて入力（12等分）</button>`}</div>`;
+  /* ★ 2026-09-16 利用者の指示「ここに何を打つのか分からない」:
+     はじめかたガイドにしか書いていなかったので、入力する画面そのものに1行で出す。 */
+  const help = {
+    budget:  `<b>予算</b>＝この年度の計画。年度のはじめに1回入れます。
+      「年額をまとめて入力（12等分）」や ツール › 前年実績から予算を作成 が使えます。金額は<b>税抜</b>。`,
+    forecast:`<b>見込</b>＝今の見通し（着地見込）。月が進むたびに直します。予算は動かしません。金額は<b>税抜</b>。`,
+    actual:  `<b>実績</b>＝会計事務所の<b>試算表</b>の数字。毎月 試算表が届いたら、費用の行（売上原価・販管費・営業外）を
+      その月のマスに<b>税抜</b>で打ちます。<b>売上の行は請求書から自動</b>なので灰色で、ここでは直せません。
+      費用表（予定）や 支払請求 は「約束」であって会計の数字ではないので、実績には入りません。`,
+  }[which];
+  const helpBar = `<div class="infobar">${help}</div>`;
   const rows = ['revenue','cogs','sga','nonop'].map(kind=>{
     const accs=accountsOfKind(kind);
     const ro = which==='actual' && kind==='revenue';        // 収益の実績は請求書から（直せない）
-    return `<tr class="totrow"><td colspan="14">${esc(KIND_LABEL[kind])}${ro?' <span class="muted" style="font-weight:400;">請求書から</span>':''}</td></tr>`+
+    /* ★ colspan + sticky は 横スクロールで右にかぶさる（費用表と同じ理由）。1列目だけにする。 */
+    return `<tr class="totrow"><td>${esc(KIND_LABEL[kind])}${ro?' <span class="muted" style="font-weight:400;">請求書から</span>':''}</td>${'<td></td>'.repeat(13)}</tr>`+
       accs.map(a=>{
         const auto = ro? seriesByAccount(fy, a.code, 'actual') : null;
         const cells = FY_MONTH_LABELS.map((_,mi)=>{
@@ -2700,7 +2715,7 @@ function yjInputTable(fy){
       }).join('');
   }).join('');
   /* 数字が切れないだけの幅を確保する（足りないと 5,750,000 が「5,75」に見えてしまう） */
-  return seg+`<div class="table-wrap"><table class="stick1"><thead><tr><th style="min-width:150px;">勘定科目</th>
+  return seg+helpBar+`<div class="table-wrap"><table class="stick1"><thead><tr><th style="min-width:150px;">勘定科目</th>
     ${FY_MONTH_LABELS.map(m=>`<th class="r" style="min-width:104px;">${m}</th>`).join('')}<th class="r" style="min-width:100px;">年間</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
@@ -6932,9 +6947,11 @@ function viewExpenses(){
   /* ---- 科目の行（大・中・小）＋ その下 ---- */
   const nodeRows = node => {
     const open=costIsOpen(node.key), sum=costNodeSum(node);
-    const head=`<tr class="cgrp d${Math.min(node.depth,2)}">
-      <td colspan="3" style="padding-left:${6+node.depth*14}px;cursor:pointer;" onclick="costToggle('${attr(node.key)}')">
+    /* ★ colspan にしない。1列目だけが sticky なので、まとめると 横スクロールで右の数字を隠す。 */
+    const head=`<tr class="cgrp d${Math.min(node.depth,2)}" style="cursor:pointer;" onclick="costToggle('${attr(node.key)}')">
+      <td style="padding-left:${6+node.depth*14}px;">
         <span class="ctw">${open?'▼':'▶'}</span>${esc(node.label)}${node.code?` <span class="muted" style="font-weight:400;font-size:11px;">${esc(node.code)}</span>`:''}</td>
+      <td></td><td></td>
       ${sum.map((v,i)=>mcell(v,i)).join('')}
       <td class="r num"><b>${moneyPlain(sumOf(sum))}</b></td><td></td></tr>`;
     if(!open) return head;
@@ -6952,7 +6969,7 @@ function viewExpenses(){
         <th class="r" style="min-width:100px;">年間計</th><th style="min-width:52px;"></th></tr></thead>
       <tbody>
         ${tree.map(nodeRows).join('')}
-        <tr class="totrow"><td colspan="3"><b>合計（税込）</b></td>
+        <tr class="totrow"><td><b>合計（税込）</b></td><td></td><td></td>
           ${total.map((v,i)=>mcell(v,i)).join('')}
           <td class="r num"><b>${moneyPlain(sumOf(total))}</b></td><td></td></tr>
       </tbody></table></div>`
