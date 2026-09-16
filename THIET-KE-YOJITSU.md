@@ -142,6 +142,11 @@ Công ty không có quy tắc nào → không bị bỏ sót: màn hình 請求�
 Mỗi ô = **1 dòng `costPlans`** khoá bằng `costItemId + ym`, nhập **税込** và là **số dự kiến, không phải thực tế**.
 Ô = 0/để trống → xoá luôn dòng đó. Ngoài `startYm`〜`endYm` → `—`, không nhập được.
 Hàng 科目 là tổng của các con, đóng/mở bằng ▼ (nhớ trong `localStorage: bl_yj_cost_open`, mặc định mở hết).
+Cột: `勘定科目 › 対象 · 支払先 · 月額 · 12 tháng · 年間計`. **Cột 物件 đã bỏ khỏi bảng (2026-09-16)** —
+nhiều loại chi phí (通信・リース・給与…) không gắn với toà nhà nào nên cột đó luôn trống và gây rối.
+Trường `costItems.propertyId` vẫn còn trong form và vẫn là nguồn của màn 物件（建物）.
+Ô nhập 12 tháng trong bảng này **không vẽ khung** (khung chỉ hiện khi rê chuột/focus) — 27 hàng × 12 ô
+mà vẽ khung hết thì đọc số rất mệt. Bảng nhập 予実 vẫn giữ khung như cũ (`.cellin.ed`).
 Nút **「→12」** (hàng 定期) và **「定期をすべて→12」** (toolbar): từ tháng hiện tại (nếu `CUR_FY` là năm hiện tại, không thì tháng đầu)
 tới hết năm, **chỉ điền các ô trống** bằng số của tháng gần nhất bên trái (không có thì `monthly`) — ô đã có số không đổi.
 Đối tượng 買掛 dùng chính ô đó để sinh 支払請求 (`apPlanFor`: ô của tháng → không có thì `monthly`).
@@ -224,6 +229,12 @@ autoSource: { type:'workers', metric:'active' }                 // 在籍者数
 ---
 
 ## 5. SƠ ĐỒ MÀN HÌNH
+
+**Thứ tự menu trái đang chạy (`SECTIONS`, đổi 2026-09-16 theo chỉ thị người dùng):**
+`ダッシュボード → 予実管理 → 回収（売掛金）→ 支払（買掛金）→ 費用 → 取引先 → 設定`.
+Xem tình hình trước (予実), rồi tiền vào–tiền ra, cuối cùng mới tới sổ đối tác và cài đặt.
+Chỉ đổi thứ tự — ID màn hình, phân quyền, link, chuông đều giữ nguyên.
+Sơ đồ dưới đây là bản ý niệm ban đầu (nhóm theo nghiệp vụ), không phải thứ tự menu.
 
 ```
 ダッシュボード      ① 予実サマリー ② 資金繰り(今週/今月) ③ 延滞債権 ④ OKR信号

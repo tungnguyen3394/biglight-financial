@@ -543,22 +543,29 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   /* 直せないマス（収益の実績＝請求書から自動）。灰色にして「ここは触らない」と分かるように */
   .cellin.ro{background:transparent; color:var(--muted); cursor:default; border-color:transparent;}
   .cellin.ro:hover{background:transparent; border-color:transparent;}
-  /* 入力表（予実の入力・費用表）のマスは、触れると分かるように薄い枠を常に出す。 */
+  /* 入力表（予実の入力）のマスは、触れると分かるように薄い枠を常に出す。 */
   .cellin.ed{border-color:var(--border); background:var(--input-bg);}
   .cellin.ed:hover{border-color:var(--border-strong);}
-  /* 費用表: 勘定科目の木（大›中›小）と 対象の行 */
+  /* ★ 2026-09-16 利用者の指示「費用表は飾りが多くて目が疲れる」:
+     費用表だけは 12か月ぶんの枠を消して、数字だけを並べます。マスに触れると枠が出るので
+     「ここは直せる」ことは分かります（枠 27行×12か月＝324個が同時に見えるのをやめる）。 */
+  .cost-table .cellin.ed{border-color:transparent; background:transparent;}
+  .cost-table .cellin.ed:hover{border-color:var(--border-strong); background:var(--input-bg);}
+  /* 費用表: 勘定科目の木（大›中›小）と 対象の行。
+     色の帯は 大分類（d0）の1段だけ。中・小は 字の太さと 下げ幅で見分けます。 */
   .ctw{display:inline-block; width:14px; color:var(--muted); cursor:pointer;}
-  tr.cgrp>td{background:var(--surface-2);}
-  tr.cgrp.d0>td{font-weight:700;}
-  tr.cgrp.d1>td{font-weight:600;}
-  tr.cgrp.d2>td{font-weight:500;}
+  tr.cgrp.d0>td{background:var(--surface-2); font-weight:700;}
+  tr.cgrp.d1>td{font-weight:650;}
+  tr.cgrp.d2>td{font-weight:500; color:var(--text-secondary);}
   /* マスの数字が切れないように、金額の列だけ詰める（1,265,000 が「1,265,00」に見えてしまうため） */
   .cost-table td.r,.cost-table th.r{padding-left:5px; padding-right:5px;}
   .cellin.over{background:var(--danger-soft); color:var(--danger-hover); font-weight:700;
     box-shadow:inset 3px 0 0 var(--danger);}
   .cellin.under{background:var(--success-soft); color:var(--success); box-shadow:inset 3px 0 0 var(--success);}
   .grprow td{background:var(--surface-2); font-weight:700; font-size:11.5px; color:var(--muted); letter-spacing:.03em;}
-  td.curcol{box-shadow:inset 0 0 0 1px var(--primary-soft);}
+  /* ★ 2026-09-16: 今月の列は「マスごとの四角」ではなく、列の左右に1本ずつ線を引くだけにする
+     （四角が行の数だけ縦に並ぶと、はしごのように見えて数字が読みにくいため）。 */
+  td.curcol,th.curcol{box-shadow:inset 1px 0 0 var(--primary), inset -1px 0 0 var(--primary);}
 
   /* ===== 取引先台帳: 12か月の帯 =====
      色は「その伝票の期日（取引先ごとに違う）」と比べて決める。計上からの日数では決めない。 */
@@ -571,6 +578,8 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .attbtn{display:inline-flex; align-items:center; gap:2px; color:var(--text-muted); cursor:pointer; padding:2px 4px; border-radius:6px;}
   .attbtn:hover{background:var(--bg-hover); color:var(--primary);}
   .attbtn.has{color:var(--primary);}
+  .cost-table .attbtn{opacity:.3;}
+  .cost-table .attbtn.has,.cost-table .attbtn:hover,.cost-table tr:hover .attbtn{opacity:1;}
   .attbtn span{font-size:11px; font-weight:700; font-variant-numeric:tabular-nums;}
   .attdrop{display:block; border:2px dashed var(--border-strong); border-radius:12px; padding:18px; text-align:center;
     cursor:pointer; background:var(--bg-subtle); font-size:13px; line-height:1.8;}
@@ -1109,6 +1118,15 @@ const ICONS = {
 const SECTIONS = [
   { id:'dashboard', label:'ダッシュボード', icon:'dashboard', tabs:[
     {id:'dashboard', label:'ダッシュボード'} ]},
+  /* ★ 2026-09-16 利用者の指示: 左メニューの並び順は
+       予実管理 → 回収（売掛金）→ 支払（買掛金）→ 費用 → 取引先 → 設定。
+       まず「今どうなっているか（予実）」を見て、そのあと お金の出入り、最後に 台帳・設定。
+       画面ID・権限・リンク・ベルは一切変えていません（順番だけ）。 */
+  { id:'sec-yj', label:'予実管理', icon:'target', tabs:[
+    {id:'yojitsu', label:'予実'},
+    {id:'compare', label:'期間比較'},
+    {id:'mikomi',  label:'見込実績表'},
+    {id:'okr',     label:'目標 OKR'} ]},
   /* ★ 2026-09-14 利用者の指示: 請求書の管理は Money Forward 請求書 が持つ。ここは「取引先×月の残高」が中心。
        請求管理・未回収（年齢表）・取引先別 はメニューから外しました（コードとデータは残してあります。
        古いリンクは PAGE_REDIRECT で 売掛金 に案内します）。戻すときは下の行を tabs に足すだけ:
@@ -1130,6 +1148,13 @@ const SECTIONS = [
     {id:'bills',    label:'支払請求'},
     {id:'payouts',  label:'支払実行'},
     {id:'cashflow', label:'資金繰り'} ]},
+  /* ★ 2026-09-16 利用者の指示: 費用＝これから出ていくお金の「予定表」。1枚の表にまとめました。
+       分類別集計（kbunrui）はメニューから外しました（費用表と予実で足りるため）。
+       コードは残してあります（公式 §16）。戻すときは次の1行を tabs に足すだけ:
+         {id:'kbunrui', label:'分類別集計'} */
+  { id:'sec-cost', label:'費用', icon:'expense', tabs:[
+    {id:'expenses',   label:'費用表'},
+    {id:'properties', label:'物件（建物）'} ]},
   { id:'sec-co', label:'取引先', icon:'company', tabs:[
     {id:'companies', label:'一覧（すべて）'},
     {id:'vendors',   label:'支払先'} ]},
@@ -1139,18 +1164,6 @@ const SECTIONS = [
          {id:'workers', label:'特定技能者'}
        この1行を上の tabs に戻せば、画面も機能もそのまま復活します。
        コードとデータは残してあります（公式 §16「menuから外すときコードは消さない」）。 */
-  /* ★ 2026-09-16 利用者の指示: 費用＝これから出ていくお金の「予定表」。1枚の表にまとめました。
-       分類別集計（kbunrui）はメニューから外しました（費用表と予実で足りるため）。
-       コードは残してあります（公式 §16）。戻すときは次の1行を tabs に足すだけ:
-         {id:'kbunrui', label:'分類別集計'} */
-  { id:'sec-cost', label:'費用', icon:'expense', tabs:[
-    {id:'expenses',   label:'費用表'},
-    {id:'properties', label:'物件（建物）'} ]},
-  { id:'sec-yj', label:'予実管理', icon:'target', tabs:[
-    {id:'yojitsu', label:'予実'},
-    {id:'compare', label:'期間比較'},
-    {id:'mikomi',  label:'見込実績表'},
-    {id:'okr',     label:'目標 OKR'} ]},
   { id:'sec-sys', label:'設定', icon:'gear', tabs:[
     {id:'accounts', label:'勘定科目の登録'},
     {id:'settings', label:'基本設定'},
@@ -6894,12 +6907,11 @@ function viewExpenses(){
   const curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
   const tree = costTree(rows);
 
-  const NCOL = 4+12+2;
   const sumOf = arr => arr.reduce((s,v)=>s+(v||0),0);
   const mcell = (v,i,extra) => `<td class="r num ${i===curIdx?'curcol':''} ${extra||''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`;
 
   /* ---- 対象の1行 ---- */
-  const itemRow = r => {
+  const itemRow = (r, depth=0) => {
     const tot = sumOf(r.cells);
     const cells = r.cells.map((v,i)=>{
       if(v==null) return `<td class="r"><span class="zero">—</span></td>`;
@@ -6908,10 +6920,9 @@ function viewExpenses(){
         inputmode="numeric" oninput="onCostInput(this,'${attr(r.it.id)}',${i})"></td>`;
     }).join('');
     return `<tr>
-      <td style="padding-left:26px;">${attBtn('costItems', r.it.id)} <a onclick="openForm('costItems','${attr(r.it.id)}')" style="cursor:pointer;font-weight:600;">${esc(r.it.name||'(名称なし)')}</a>
+      <td style="padding-left:${20+depth*14}px;">${attBtn('costItems', r.it.id)} <a onclick="openForm('costItems','${attr(r.it.id)}')" style="cursor:pointer;font-weight:500;">${esc(r.it.name||'(名称なし)')}</a>
         ${r.ap?' <span class="badge b-blue" title="毎月の支払請求を作る対象">買掛</span>':''}</td>
       <td style="font-size:11.5px;">${r.it.companyId? coLink(r.it.companyId,'ap') : '<span class="zero">—</span>'}</td>
-      <td class="muted" style="font-size:11.5px;">${r.it.propertyId? esc((findById('properties',r.it.propertyId)||{}).name||'') : '<span class="zero">—</span>'}</td>
       <td class="r num muted">${num(r.it.monthly)?moneyPlain(r.it.monthly):'<span class="zero">—</span>'}</td>
       ${cells}
       <td class="r num"><b>${moneyPlain(tot)}</b></td>
@@ -6922,12 +6933,12 @@ function viewExpenses(){
   const nodeRows = node => {
     const open=costIsOpen(node.key), sum=costNodeSum(node);
     const head=`<tr class="cgrp d${Math.min(node.depth,2)}">
-      <td colspan="4" style="padding-left:${6+node.depth*14}px;cursor:pointer;" onclick="costToggle('${attr(node.key)}')">
+      <td colspan="3" style="padding-left:${6+node.depth*14}px;cursor:pointer;" onclick="costToggle('${attr(node.key)}')">
         <span class="ctw">${open?'▼':'▶'}</span>${esc(node.label)}${node.code?` <span class="muted" style="font-weight:400;font-size:11px;">${esc(node.code)}</span>`:''}</td>
       ${sum.map((v,i)=>mcell(v,i)).join('')}
       <td class="r num"><b>${moneyPlain(sumOf(sum))}</b></td><td></td></tr>`;
     if(!open) return head;
-    return head + node.kids.map(nodeRows).join('') + node.items.map(itemRow).join('');
+    return head + node.kids.map(nodeRows).join('') + node.items.map(it=>itemRow(it, node.depth)).join('');
   };
 
   const total=Array(12).fill(0);
@@ -6936,12 +6947,12 @@ function viewExpenses(){
   const table = rows.length? `<div class="table-wrap"><table class="stick1 cost-table">
       <thead><tr>
         <th style="min-width:196px;">勘定科目 › 対象</th><th style="min-width:104px;">支払先</th>
-        <th style="min-width:92px;">物件</th><th class="r" style="min-width:84px;">月額</th>
+        <th class="r" style="min-width:84px;">月額</th>
         ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:92px;">${m}</th>`).join('')}
         <th class="r" style="min-width:100px;">年間計</th><th style="min-width:52px;"></th></tr></thead>
       <tbody>
         ${tree.map(nodeRows).join('')}
-        <tr class="totrow"><td colspan="4"><b>合計（税込）</b></td>
+        <tr class="totrow"><td colspan="3"><b>合計（税込）</b></td>
           ${total.map((v,i)=>mcell(v,i)).join('')}
           <td class="r num"><b>${moneyPlain(sumOf(total))}</b></td><td></td></tr>
       </tbody></table></div>`
@@ -7008,10 +7019,9 @@ function costReflectGo(){
 
 function exportCsvCost(){
   const { rows } = costRowsOf(CUR_FY);
-  const out=[['勘定科目','対象','区分','支払先','物件','税区分','月額',...FY_MONTH_LABELS,'年間計']];
+  const out=[['勘定科目','対象','区分','支払先','税区分','月額',...FY_MONTH_LABELS,'年間計']];
   rows.forEach(r=>out.push([ accountPathLabel(r.it.accountCode), r.it.name, r.kind==='fixed'?'定期':'変動',
     String(companyName(r.it.companyId)).replace(/<[^>]+>/g,''),
-    (findById('properties', r.it.propertyId)||{}).name||'',
     r.it.taxCat||'課税10%', num(r.it.monthly)||'',
     ...r.cells.map(c=>c==null?'':c), r.cells.reduce((s,c)=>s+(c||0),0) ]));
   downloadCsv(`費用表_${CUR_FY}年度`, out);
