@@ -1684,8 +1684,8 @@ Rollback: chạy lại với `enable=false`; cắt một người: 失効 khoá 
 
 # §18. HƯỚNG DẪN SỬ DỤNG BẰNG HÌNH ẢNH → PDF
 
-> Làm lần đầu cho app BIGLIGHT (2026-09-15): **2 bản riêng** — 企業ポータル tiếng Nhật, 本人ポータル
-> tiếng Việt. Mã nguồn: `guide/` trong repo CRM (`guide/README.md` là cách dùng chi tiết).
+> Làm lần đầu cho app BIGLIGHT (2026-09-15): **3 bản riêng** — 企業ポータル tiếng Nhật, 本人ポータル
+> tiếng Việt, 本人ポータル tiếng Nhật. Mã nguồn: `guide/` trong repo CRM (`guide/README.md` là cách dùng chi tiết).
 > Không gộp hai đối tượng vào một tài liệu: người đọc khác nhau, ngôn ngữ khác nhau, việc cần làm khác nhau.
 
 ## 18.1 Ba quyết định, đừng làm ngược
@@ -1735,6 +1735,8 @@ Màu chú thích **cam**, khác màu app (xanh) để người đọc không nh�
 - **Font**: trang portal để `'Hiragino Sans'` đứng đầu → trong Chromium chữ Việt 2 dấu (ồ, ỗ, ề) lệch.
   Lúc chụp chèn CSS đưa font hệ thống lên trước (`chup.mjs › css`). PDF tiếng Việt dùng `-apple-system`.
 - Seed phải **xoá rồi tạo lại** mỗi lần chạy, để chụp lần sau ra đúng dữ liệu như lần trước.
+- **Cùng một cổng, khác ngôn ngữ = khác dữ liệu mẫu.** Bản 本人ポータル tiếng Nhật mà tin nhắn mẫu tiếng Việt thì
+  trông như lỗi. `capture.mjs` nạp lại seed theo `chup.mjs › seedLang` trước mỗi lần chụp, nên thứ tự chụp các bản không ảnh hưởng nhau.
 - `python3` trên macOS là shim của Xcode — chưa chấp nhận license là **mọi** lệnh python chết. Viết công cụ bằng node.
 
 ## 18.5 Checklist trước khi gửi PDF
