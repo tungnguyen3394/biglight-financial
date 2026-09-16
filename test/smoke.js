@@ -689,6 +689,33 @@ console.log('\n― 振込手数料の差引き・入金の不足（2026-09-16）
   _db.invoices=keep.inv; _db.payments=keep.pay; _db.companies=keep.co;
 }
 
+console.log('\n― 回収のツール・請求の手入力（複数行）・CSV（2026-09-17） ―');
+{
+  const cos=(_db.companies||[]).filter(c=>c.kind!=='仕入先');
+  const c1=cos[0], before=_db.invoices.length;
+  el.innerHTML=''; const h=ctx.viewArBook();
+  eq('ツール: 並び順・絞り込み・担当・手入力・CSV・MF・出力', ['並び順','未回収のみ','期限超過のみ','担当','請求を手入力（複数行）','CSVテンプレート','CSVを取り込む','Money Forward から取り込む','CSV出力'].every(x=>h.includes(x)), true);
+  eq('ツールの外に Money Forward のボタンは無い', /<\/summary>/.test(h) && h.split('<details')[0].includes('openMfImport'), false);
+  const r=ctx.abBlank(); r.companyId=c1.id; r.total=110000; ctx.abFill(r);
+  eq('手入力: 取引先の税区分・期日が入り、税抜は自動', [r.taxCat, r.net, !!r.dueDate], [c1.taxCat||'課税10%', 100000, true]);
+  const nt={ ...ctx.abBlank(), companyId:c1.id, total:50000, taxCat:'非課税' }; ctx.abFill(nt);
+  eq('非課税は 税抜＝税込', nt.net, 50000);
+  eq('新しい行は 取引先を引き継がない', ctx.abBlank(r).companyId, '');
+  eq('足りない行は 理由を返す', ctx.abIssues(ctx.abBlank()).length>0, true);
+  const rec=ctx.arBillRec(r);
+  eq('保存の形（1件の画面と同じ）', [rec.subtotal, rec.taxCat, rec.status, /^INV-/.test(rec.no), rec.items.length], [100000, r.taxCat, '確定', true, 0]);
+  const csv='\ufeff取引先名,計上月,請求日,税区分,請求額(税込),税抜,入金期日,請求番号,備考\n例）見本,2026-09,,,1,,,,\n'
+    +'"'+c1.name+'",2026/9,2026/09/30,非課税,"55,000",,2026/10/15,X-1,メモ\n知らない会社,2026-09,,,1000,,,,\n';
+  const res=ctx.arCsvToRows(csv);
+  eq('CSV: 「例）」の行は読まない', res.rows.length, 2);
+  eq('CSV: 取引先・月・税区分・金額・期日（手で決めた期日は そのまま）', [res.rows[0].companyId, res.rows[0].bookMonth, res.rows[0].taxCat, res.rows[0].total, res.rows[0].net, res.rows[0].dueDate, res.rows[0].no],
+    [c1.id, '2026-09', '非課税', 55000, 55000, '2026-10-15', 'X-1']);
+  eq('CSV: 見つからない取引先は 名前を残して 取引先を空に', [res.rows[1].companyId, res.rows[1].hint], ['', '知らない会社']);
+  eq('CSV: 必要な列が無ければ理由を返す', !!ctx.arCsvToRows('a,b\n1,2\n').error, true);
+  eq('手入力では まだ保存していない', _db.invoices.length, before);
+  eq('並び順: 残高が大きい順', ctx.arSorter('bal')({bal:1,name:'a',staff:{key:'',name:''}},{bal:5,name:'b',staff:{key:'',name:''}})>0, true);
+}
+
 console.log('\n― 取引先モーダル（得意先／支払先・横3列） ―');
 /* ★ 2026-09-14: 新規登録・編集・詳細 を同じ3列にした。
    見た目を変えても、フォームから項目が1つでも落ちると 保存でその値が消える。だから全項目を数える。 */

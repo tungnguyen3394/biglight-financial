@@ -75,8 +75,8 @@ export default {
     ar: {
       page: 'arbook',
       marks: {
-        tabs: '.sectabs', add: tool('入金を記録'), mf: tool('Money Forward'), tools: '.toolbar-left summary',
-        kpi: '.ar-kpis', filter: '.ar-filters label.ar-chk >> nth=0', per: '.ar-filters .seg >> nth=0', cum: '.ar-filters .seg >> nth=1',
+        tabs: '.sectabs', add: tool('入金を記録'), tools: '.toolbar-left summary',
+        kpi: '.ar-kpis', filter: '.ar-filters input[data-sb]', per: '.ar-filters .seg >> nth=0', cum: '.ar-filters .seg >> nth=1',
         name: '.ar-tbl tbody tr >> nth=0 >> .ar-name', cell: '.ar-tbl tbody tr >> nth=0 >> td.ar-c >> nth=3',
         total: '.ar-tbl tr.totrow', flow: '.ar-tbl tr.ar-flow >> nth=0', flow2: '.ar-tbl tr.ar-flow >> nth=1', now: '.ar-tbl th.ar-now',
       },
@@ -120,7 +120,24 @@ export default {
     },
     arbill: {
       page: 'arbook', run: async p => { await p.click('.toolbar-left summary'); await p.waitForTimeout(200) },
-      marks: { item: '.more-panel button:has-text("請求額を手入力")', csv: '.more-panel button:has-text("CSV出力")' },
+      clip: '.more-panel', clipPad: 14,
+      marks: { sort: '.tp-row >> nth=0', filt: '.tp-row >> nth=1', owner: '.tp-row >> nth=2', item: '.more-panel button:has-text("請求を手入力")',
+        tpl: '.more-panel button:has-text("CSVテンプレート")', up: '.more-panel .tp-file', mf: '.more-panel button:has-text("Money Forward")', out: '.tp-two' },
+    },
+    ab_bulk: {
+      page: 'arbook',
+      run: async p => {
+        await p.evaluate(() => {
+          const cs = abCustomers();
+          const mk = (c, total, tax) => { const r = abBlank(); r.companyId = c.id; r.total = total; if (tax) r.taxCat = tax; abFill(r); return r };
+          const bad = abBlank(); bad.hint = '株式会社みらい（見つからない）'; bad.total = 88000; abFill(bad);
+          openArBillBulk([mk(cs[0], 110000), mk(cs[1], 50000, '非課税'), mk(cs[2], 330000), bad])
+        }); await p.waitForTimeout(400)
+      },
+      clip: '#modal',
+      marks: { co: '#abBox tbody tr >> nth=0 >> td >> nth=1', tax: '#abBox tbody tr >> nth=1 >> td >> nth=4', auto: '#abBox tbody tr >> nth=0 >> td >> nth=6',
+        due: '#abBox tbody tr >> nth=0 >> td >> nth=7', bad: '#abBox tbody tr >> nth=3', add: '#modal button:has-text("行を追加")', copy: '#modal button:has-text("最後の行をコピー")',
+        del: '#abBox tbody tr >> nth=0 >> .ab-x', save: '#abSave' },
     },
     receipts: { page: 'receipts', marks: { add: tool('入金を記録'), filter: '#main th >> nth=1' } },
     archeck: { page: 'archeck', height: 1000, marks: { cards: '#main .kpi-grid >> nth=0' } },
@@ -178,17 +195,6 @@ export default {
       marks: { fee: '#modal select[name="feeBurden"]' },
     },
     /* ── 証憑（ファイル）── */
-    arbill_form: {
-      page: 'arbook',
-      run: async p => {
-        await p.evaluate(() => openArBillForm()); await p.waitForTimeout(300)
-        const sel = p.locator('#abCo'); await sel.selectOption(await sel.evaluate(s => [...s.options].find(o => o.text.includes('あおば')).value))
-        await p.fill('#abTotal', '330000'); await p.dispatchEvent('#abTotal', 'input')
-        await p.selectOption('#abTax', '非課税'); await p.dispatchEvent('#abTax', 'change')
-      },
-      clip: '#modal',
-      marks: { tax: '#abTax', total: '#abTotal', net: '#abNet', files: '#modal .attpend' },
-    },
     att_window: {
       page: 'arbook',
       run: async p => {

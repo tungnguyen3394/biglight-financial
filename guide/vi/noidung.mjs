@@ -241,7 +241,7 @@ export default {
               { mark: 'pills', text: 'Các màn trong 予実管理: `予実` · `期間比較` · `見込実績表` · `目標 OKR`.' },
               { mark: 'kpi', text: 'Doanh thu tháng gần nhất, luỹ kế năm, và **着地見込** (dự báo cả năm = thực tế các tháng đã qua + dự báo các tháng còn lại).' },
               { mark: 'tabs', text: '`損益（予実対比）` bảng lãi lỗ · `勘定科目別` theo từng tài khoản · `入力` **nơi nhập số**.' },
-              { mark: 'seg', text: 'Chọn xem `予実対比` (thực tế + ngân sách + chênh lệch) hoặc chỉ `実績` / `予算` / `見込`.' },
+              { mark: 'seg', text: 'Chọn xem `予実対比` (thực tế + ngân sách + chênh lệch) hoặc chỉ `実績` / `予算` / `見込`. Trong `予実対比`, **tháng chưa có thực tế hiện `見` + số 見込** (chữ nghiêng).' },
               { mark: 'table', text: 'Mỗi ô: số thực tế, dòng `予` là ngân sách, dòng dưới là chênh lệch (**xanh** = tốt hơn kế hoạch, **đỏ** = kém hơn).' },
               { mark: 'tax', text: '`税込` / `税抜` đổi cách xem.' },
             ],
@@ -344,9 +344,9 @@ export default {
             steps: [
               { mark: 'tabs', text: '4 màn: `売掛金` · `入金` · `入金チェック` · `督促（今日やること）`.' },
               { mark: 'add', text: '`＋ 入金を記録`: ghi tiền khách chuyển vào.' },
-              { mark: 'mf', text: '`Money Forward から取り込む`: lấy hoá đơn từ MF (Admin / Manager).' },
               { mark: 'kpi', text: 'Tiền đã xuất hoá đơn, tiền đã thu, số dư và **số quá hạn** (bấm ô đỏ để chỉ xem công ty quá hạn).' },
-              { mark: 'filter', text: '`未回収のみ` / `期限超過のみ`: chỉ hiện công ty còn nợ / đã quá hạn.' },
+              { mark: 'tools', text: '`ツール`: sắp xếp, lọc, nhập hoá đơn, CSV, Money Forward, xuất file (trang sau).' },
+              { mark: 'filter', text: 'Tìm công ty. Bên cạnh hiện **chip** các bộ lọc đang bật — bấm × để bỏ.' },
               { mark: 'per', text: 'Gom cột theo `月` · `四半期` · `上期・下期` · `通期` (trang sau).' },
               { mark: 'name', text: 'Bấm **tên công ty** → mở 売掛元帳 (sổ chi tiết).' },
               { mark: 'cell', text: 'Bấm **một ô** → xem hoá đơn và tiền vào của tháng đó.' },
@@ -405,36 +405,63 @@ export default {
           tip: 'Công thức mỗi tháng: `前月残高` + `請求額（税込）` − `入金額` = `月末残高`. In sổ chi tiết ra là có ngay **bảng đối chiếu công nợ** để gửi khách.',
         },
         {
+          title: 'Menu ツール của 売掛金',
+          lead: 'Mọi chức năng phụ gom vào nút `ツール`. Bên ngoài chỉ còn `＋ 入金を記録` (dùng hằng ngày).',
+          screens: [{
+            shot: 'arbill', modal: true, maxH: 118,
+            steps: [
+              { mark: 'sort', text: '**並び順**: quá hạn lên trên · số dư lớn nhất · tên công ty · người phụ trách.' },
+              { mark: 'filt', text: '**絞り込み**: `未回収のみ` (còn nợ) · `期限超過のみ` (quá hạn).' },
+              { mark: 'owner', text: '**担当**: chỉ xem công ty của một người phụ trách.' },
+              { mark: 'item', text: '`＋ 請求を手入力（複数行）`: nhập hoá đơn không có trong MF (trang sau).' },
+              { mark: 'tpl', text: '`CSVテンプレート`: tải file mẫu để điền nhiều hoá đơn bằng Excel.' },
+              { mark: 'up', text: '`CSVを取り込む`: tải file lên → mở bảng nhập để **kiểm tra trước khi lưu**.' },
+              { mark: 'mf', text: '`Money Forward から取り込む` (Admin / Manager).' },
+              { mark: 'out', text: 'Xuất CSV (theo tháng, kèm 請求額 / 入金額) · In.' },
+            ],
+          }],
+        },
+        {
+          title: 'Nhập nhiều hoá đơn một lần',
+          lead: 'Mỗi dòng là một hoá đơn. Dùng cho hoá đơn **không làm ở Money Forward**.',
+          screens: [{
+            shot: 'ab_bulk', modal: true, maxH: 92,
+            steps: [
+              { mark: 'co', text: 'Chọn **取引先** → `税区分` và `入金期日` tự điền theo công ty. Nếu công ty đã có hoá đơn cùng tháng sẽ hiện ⚠.' },
+              { mark: 'tax', text: '`税区分`: `課税10%` · `軽減8%` · `非課税` · `対象外（不課税）`. Khoản không chịu thuế thì **税抜 = 税込** — doanh thu 予実 không bị trừ thuế oan.' },
+              { mark: 'auto', text: '`税抜` **tự tính** (ô xám). Gõ tay nếu hoá đơn lẫn nhiều loại thuế.', badge: 'right' },
+              { mark: 'due', text: '`入金期日` tự tính theo 締日・サイト, sửa được.', badge: 'right' },
+              { mark: 'bad', text: 'Dòng **đỏ** = thiếu thông tin (VD tên công ty trong CSV không tìm thấy) → chọn lại. Dòng đỏ không được lưu.' },
+              { mark: 'add', text: '`＋ 行を追加`: thêm dòng trống (giữ tháng và ngày).' },
+              { mark: 'copy', text: '`↓ 最後の行をコピー`: chép nguyên dòng cuối.' },
+              { mark: 'del', text: '× xoá dòng.', badge: 'right' },
+              { mark: 'save', text: 'Nút hiện **số dòng sẽ lưu**. Bấm để lưu; dòng lỗi được giữ lại để sửa tiếp.', badge: 'right' },
+            ],
+          }],
+          blocks: [
+            { h: 'Nhập bằng CSV' },
+            { list: [
+              '`ツール` › `CSVテンプレート` → mở bằng Excel, điền từ dòng 2 (dòng bắt đầu bằng `例）` sẽ bị bỏ qua).',
+              'Cột bắt buộc: `取引先名` · `計上月` · `請求額(税込)`. Để trống `税抜` / `入金期日` / `請求番号` → tự tính.',
+              '`ツール` › `CSVを取り込む` → bảng trên hiện ra → kiểm tra → lưu.',
+            ] },
+          ],
+          note: 'File chứng từ (PDF hoá đơn) đính **sau khi lưu**, bằng 📎 trong sổ chi tiết.',
+        },
+        {
           title: 'Lấy hoá đơn từ Money Forward',
-          lead: 'Hoá đơn được làm ở **Money Forward クラウド請求書**. Hệ thống này chỉ lấy về **tên công ty, ngày, hạn, số tiền** — không lấy chi tiết hay PDF.',
+          lead: 'Hoá đơn được làm ở **Money Forward クラウド請求書**. Mở: `ツール` › `Money Forward から取り込む`. Hệ thống chỉ lấy về **tên công ty, ngày, hạn, số tiền** — không lấy chi tiết hay PDF.',
           screens: [
-            { shot: 'mf', modal: true, maxH: 70, label: 'Money Forward から取り込む', steps: [
+            { shot: 'mf', modal: true, maxH: 70, steps: [
               { mark: 'api', text: '**Cách 1 — qua API**: chọn khoảng ngày xuất hoá đơn.' },
               { mark: 'fetch', text: 'Bấm `請求書を取得`, kiểm tra danh sách rồi lưu.' },
               { mark: 'csv', text: '**Cách 2 — CSV**: xuất danh sách hoá đơn từ MF rồi kéo file vào đây.' },
-            ] },
-            { shot: 'arbill', maxH: 70, label: 'Hoá đơn không có trong MF', crop: 520, steps: [
-              { mark: 'item', text: '`ツール` › `＋ 請求額を手入力（MF にない分）`: gõ tay số tiền cho hoá đơn **không làm ở MF** (trang sau).' },
             ] },
           ],
           blocks: [
             { p: 'Hoá đơn lấy từ MF được **tự gắn loại thuế**: nếu 税込 = 税抜 thì là `対象外` (hoặc `非課税` theo 取引先), tỉ lệ 10% → `課税10%`, 8% → `軽減8%`, lẫn nhiều loại → `混在`.' },
           ],
           note: 'Hoá đơn đã có trong MF thì **luôn lấy từ MF**, đừng gõ tay — sẽ bị tính hai lần. File PDF của hoá đơn MF **không tự lấy về** — đính tay bằng 📎.',
-        },
-        {
-          title: 'Nhập tay hoá đơn và chọn loại thuế',
-          lead: 'Dùng cho hoá đơn **không làm ở Money Forward**. Có những khoản **không chịu thuế** — chọn đúng `税区分` để doanh thu 予実 không bị trừ thuế oan.',
-          screens: [{
-            shot: 'arbill_form', modal: true, maxH: 118,
-            steps: [
-              { mark: 'tax', text: '`税区分`: `課税10%` · `軽減8%` · `非課税` · `対象外（不課税）`. Mặc định theo 取引先.' },
-              { mark: 'total', text: '`請求額（税込）`: số tiền trên hoá đơn (đã gồm thuế nếu có).' },
-              { mark: 'net', text: '`うち税抜`: **tự tính** theo loại thuế — `非課税`/`対象外` thì bằng đúng số 税込. Hoá đơn lẫn nhiều loại thuế → gõ tay.' },
-              { mark: 'files', text: 'Kéo thả **file PDF hoá đơn** vào đây — file được gửi cùng lúc bấm `保存`.' },
-            ],
-          }],
-          note: 'Doanh thu 予実 lấy số `うち税抜`. Trước đây hệ thống luôn chia 1.1 — hoá đơn không chịu thuế cần chọn đúng `税区分`.',
         },
         {
           title: 'Ghi tiền vào (入金を記録)',

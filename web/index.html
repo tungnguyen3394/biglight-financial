@@ -527,6 +527,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .ar-led-grade .why{font-size:12.5px;}
   .ar-led{max-height:58vh; overflow:auto;}
   .ar-led td,.ar-led th{padding:6px 12px;}
+  .yj-fc span{color:var(--text-secondary); font-style:italic;}
   /* 元帳の月の中身（2026-09-16） */
   .ar-led tr.ledrow{cursor:pointer;}
   .ar-led tr.leddet>td{background:var(--surface-2); padding:6px 12px 10px 34px;}
@@ -614,6 +615,32 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .attprev iframe{width:100%; height:100%; min-height:62vh; border:0; background:#fff;}
   .attprev img{max-width:100%; max-height:66vh; object-fit:contain;}
   @media(max-width:900px){ .attwin{grid-template-columns:1fr;} .attprev,.attprev iframe{min-height:50vh;} }
+  /* ツールのパネル（2026-09-17） */
+  .tp{display:flex; flex-direction:column; gap:6px; min-width:290px;}
+  .tp-h{font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.04em; margin:6px 0 0; padding-top:6px; border-top:1px solid var(--border);}
+  .tp-h:first-child{border-top:0; margin-top:0; padding-top:0;}
+  .tp-row{display:grid; grid-template-columns:64px 1fr; align-items:center; gap:8px; font-size:12.5px;}
+  .tp-row select{padding:5px 8px; border:1px solid var(--border-strong); border-radius:7px; font-size:12.5px;}
+  .tp-chk{display:flex; flex-direction:column; gap:3px;}
+  .tp-chk label{display:flex; gap:6px; align-items:center; cursor:pointer;}
+  .tp-two{display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+  .tp-file{position:relative; cursor:pointer;}
+  .tp-file input{display:none;}
+  .fchip{border:1px solid var(--primary); color:var(--primary); background:var(--primary-soft); border-radius:999px; padding:3px 10px; font-size:12px; cursor:pointer;}
+  /* 請求の手入力（複数行） */
+  .ab-wrap{max-height:56vh; overflow:auto;}
+  .ab-tbl th{white-space:nowrap; font-size:11.5px;}
+  .ab-tbl td{padding:4px 5px; vertical-align:top;}
+  .ab-tbl input,.ab-tbl select{width:100%; padding:5px 6px; border:1px solid var(--border); border-radius:6px; font-size:12.5px; background:var(--input-bg); color:var(--text);}
+  .ab-tbl input[type=month]{min-width:118px;} .ab-tbl input[type=date]{min-width:128px;}
+  .ab-tbl td:nth-child(5) select{min-width:98px;}
+  .ab-tbl td:nth-child(6) input,.ab-tbl td:nth-child(7) input{min-width:104px;}
+  .ab-tbl td:nth-child(2) select{min-width:190px;}
+  .ab-tbl .ab-auto{color:var(--text-secondary); background:var(--surface-2);}
+  .ab-tbl tr.ab-bad td{background:var(--danger-soft);}
+  .ab-n{color:var(--muted); font-size:11px; text-align:right; padding-top:10px !important;}
+  .ab-x{cursor:pointer; color:var(--danger); font-weight:700; font-size:16px; display:inline-block; padding:4px 6px;}
+  .ab-warn{font-size:10.5px; color:var(--warning,#b45309); margin-top:2px;}
   /* 入金の差額（2026-09-16） */
   .pdiff{margin-top:12px; border-radius:10px; padding:10px 14px; font-size:13px; line-height:1.6; border:1px solid var(--border);}
   .pdiff.ok{background:var(--success-soft,#eaf7ee); border-color:#bfe3c9;}
@@ -2210,7 +2237,8 @@ function pageShell(o){
     </div>${o.body||''}`;
 }
 function toolsMenu(inner){
-  return `<details class="more-tools"><summary class="btn secondary">
+  const keep=TOOLS_KEEP; TOOLS_KEEP=false;
+  return `<details class="more-tools"${keep?' open':''}><summary class="btn secondary">
     <svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
     ツール</summary><div class="more-panel">${inner}</div></details>`;
 }
@@ -2700,6 +2728,14 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
     if(YJ_VIEW==='actual')   return money(a);
     if(YJ_VIEW==='budget')   return money(b);
     if(YJ_VIEW==='forecast') return money(f||b);
+    /* ★ 2026-09-17 利用者の指示: 予実対比でも 見込 が見えるように。
+       実績のまだ無い月（最後の実績月より後）は 実績0 ではなく「見 見込（無ければ予算）」を出す。 */
+    if(mi>lastIdx && !a && !(f||b)) return '<span class="zero">—</span>';
+    if(mi>lastIdx && !a){
+      return `<div class="num yj-fc" style="line-height:1.35;" title="${f?'見込':'見込が無いので予算'}">
+        <span>見 ${moneyPlain(f||b)}</span>
+        <div style="font-size:10.5px;color:var(--muted);">予 ${moneyPlain(b)}</div></div>`;
+    }
     // 予実対比: 実績 / 予算 と 差異
     const diff = a-b;
     const good = row.good===false ? diff<0 : diff>0;
@@ -2715,7 +2751,7 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
     const a=sum12(act[row.key]), b=sum12(bud[row.key]);
     if(YJ_VIEW==='actual') return `<b class="num">${moneyPlain(a)}</b>`;
     if(YJ_VIEW==='budget') return `<b class="num">${moneyPlain(b)}</b>`;
-    if(YJ_VIEW==='forecast') return `<b class="num">${moneyPlain(sum12(fc[row.key]))}</b>`;
+    if(YJ_VIEW==='forecast') return `<b class="num">${moneyPlain(fc[row.key].reduce((t,v,i)=>t+(v||bud[row.key][i]||0),0))}</b>`;
     return `<div class="num"><b>${moneyPlain(a)}</b>
       <div style="font-size:10.5px;color:var(--muted);">予 ${moneyPlain(b)}</div>
       ${b?`<div style="font-size:10.5px;" class="rate">${(a/b*100).toFixed(0)}%</div>`:''}</div>`;
@@ -3010,7 +3046,10 @@ function viewMikomi(){
 const AR_LIVE = inv => !!inv && inv.status!=='取消' && inv.status!=='作成中';
 const arYmOfInv = inv => ymOfDoc(inv) || String(inv.issueDate||'').slice(0,7);
 const arCoName = id => String(companyName(id)).replace(/<[^>]+>/g,'') || '-';
-let AR_FILT = { open:false, over:false };
+let AR_FILT = { open:false, over:false, owner:'', sort:'over' };
+/* ★ 2026-09-17: 並び順と担当の絞り込み。ツールのパネルで選ぶ */
+const AR_SORTS = [['over','期限超過が上'],['bal','残高が大きい順'],['name','取引先名順'],['owner','担当者順']];
+let TOOLS_KEEP=false;          // 選んだあと ツールのパネルを開いたままにする
 
 /** 1社ぶんの材料 — 請求と入金を月に振り分けたもの */
 function arFacts(companyId){
@@ -3160,12 +3199,14 @@ function viewArBook(){
     return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:arStatus(now.closing, now.overdue) };
   });
   const q=(SEARCH[p]||'').trim().toLowerCase();
+  all.forEach(r=>{ const c=findById('companies',r.id)||{}; r.staff=staffOf(c.owner); });
   let rows=all.filter(r=>{
     if(q){ const c=findById('companies',r.id)||{}; if(!((r.name||'')+(c.kana||'')).toLowerCase().includes(q)) return false; }
     if(AR_FILT.open && !(r.bal>0)) return false;
     if(AR_FILT.over && !(r.over>0)) return false;
+    if(AR_FILT.owner && r.staff.key!==AR_FILT.owner) return false;
     return true;
-  }).sort((a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja'));
+  }).sort(arSorter(AR_FILT.sort));
 
   const T=arTotals(A.ym);
   const L = A.now
@@ -3181,8 +3222,7 @@ function viewArBook(){
 
   const filters=`<div class="ar-filters">
     ${searchBox(p,'取引先で検索')}
-    <label class="ar-chk"><input type="checkbox" ${AR_FILT.open?'checked':''} onchange="arFilt('open',this.checked)"> 未回収のみ</label>
-    <label class="ar-chk"><input type="checkbox" ${AR_FILT.over?'checked':''} onchange="arFilt('over',this.checked)"> 期限超過のみ</label>
+    ${arFiltChips(all)}
     ${bookViewBar()}
     <span class="muted ar-note">${bookNote(fy,'売掛金残高','請求と入金')}</span>
   </div>`;
@@ -3194,16 +3234,47 @@ function viewArBook(){
     : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「Money Forward から取り込む」で請求を取り込むか、入金を記録してください。</div></div>`;
 
   const mgr = myRole()==='Admin' || myRole()==='Manager';
+  /* ★ 2026-09-17 利用者の指示: 表示・請求の入れ方・出力を ツール に集める。外は「入金を記録」だけ */
+  const owners=[...new Map(all.filter(r=>r.staff.key).map(r=>[r.staff.key, r.staff.name])).entries()].sort((a,b)=>a[1].localeCompare(b[1],'ja'));
   const tools=`${canCreate('receipts')?`<button class="btn" onclick="openPayment()">＋ 入金を記録</button>`:''}
-    ${mgr&&canCreate('invoices')?`<button class="btn secondary" onclick="openMfImport()">Money Forward から取り込む</button>`:''}
-    ${toolsMenu(`${canCreate('invoices')?`<button class="btn secondary" onclick="openArBillForm()">＋ 請求額を手入力（MF にない分）</button><hr>`:''}
-      <button class="btn secondary" onclick="exportArBookCsv()">${IC.doc} CSV出力（この表）</button>
-      <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
+    ${toolsMenu(`<div class="tp">
+      <div class="tp-h">表示</div>
+      <label class="tp-row"><span>並び順</span><select onchange="arFilt('sort',this.value)">${AR_SORTS.map(([k,l])=>`<option value="${k}" ${AR_FILT.sort===k?'selected':''}>${l}</option>`).join('')}</select></label>
+      <div class="tp-row"><span>絞り込み</span><div class="tp-chk">
+        <label><input type="checkbox" ${AR_FILT.open?'checked':''} onchange="arFilt('open',this.checked)"> 未回収のみ</label>
+        <label><input type="checkbox" ${AR_FILT.over?'checked':''} onchange="arFilt('over',this.checked)"> 期限超過のみ</label></div></div>
+      <label class="tp-row"><span>担当</span><select onchange="arFilt('owner',this.value)"><option value="">すべて</option>
+        ${owners.map(([k,n])=>`<option value="${attr(k)}" ${AR_FILT.owner===k?'selected':''}>${esc(n)}</option>`).join('')}</select></label>
+      ${canCreate('invoices')? `<div class="tp-h">請求を入れる</div>
+      <button class="btn secondary" onclick="openArBillBulk()">＋ 請求を手入力（複数行）</button>
+      <button class="btn secondary" onclick="arCsvTemplate()">${IC.doc} CSVテンプレート</button>
+      <label class="btn secondary tp-file">${IC.doc} CSVを取り込む<input type="file" accept=".csv,text/csv" onchange="arCsvUpload(this.files[0]);this.value=''"></label>
+      ${mgr? `<button class="btn secondary" onclick="openMfImport()">Money Forward から取り込む</button>` : ''}` : ''}
+      <div class="tp-h">出力</div>
+      <div class="tp-two"><button class="btn secondary" onclick="exportArBookCsv()">${IC.doc} CSV出力</button>
+        <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button></div>
+    </div>`)}`;
   return pageShell({ title:'回収（売掛金）', count:all.length, shown:rows.length,
     
     tools, body: kpis+filters+table });
 }
-function arFilt(k, v){ AR_FILT[k]=!!v; renderPage('arbook'); }
+function arFilt(k, v){ AR_FILT[k] = (k==='open'||k==='over')? !!v : String(v||''); TOOLS_KEEP=(k!=='chip'); renderPage('arbook'); }
+function arFiltClear(k){ AR_FILT[k] = (k==='open'||k==='over')? false : ''; renderPage('arbook'); }
+function arSorter(k){
+  if(k==='bal')   return (a,b)=>(b.bal-a.bal)||a.name.localeCompare(b.name,'ja');
+  if(k==='name')  return (a,b)=>a.name.localeCompare(b.name,'ja');
+  if(k==='owner') return (a,b)=>(a.staff.key? 0:1)-(b.staff.key? 0:1) || a.staff.name.localeCompare(b.staff.name,'ja') || (b.bal-a.bal);
+  return (a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja');
+}
+/** 今かかっている絞り込み・並び順（押すと外れる） */
+function arFiltChips(all){
+  const c=[];
+  if(AR_FILT.open) c.push(['open','未回収のみ']);
+  if(AR_FILT.over) c.push(['over','期限超過のみ']);
+  if(AR_FILT.owner){ const r=all.find(x=>x.staff.key===AR_FILT.owner); c.push(['owner','担当: '+(r? r.staff.name : '?')]); }
+  if(AR_FILT.sort && AR_FILT.sort!=='over') c.push(['sort','並び: '+((AR_SORTS.find(x=>x[0]===AR_FILT.sort)||[])[1]||'')]);
+  return c.map(([k,l])=>`<button type="button" class="fchip" onclick="arFiltClear('${k}')" title="押すと外れます">${esc(l)} ×</button>`).join('');
+}
 /* ★ 2026-09-16: 右に 月ごとの 請求額・入金額 を足した（今までの列の名前と並びは そのまま）。 */
 function exportArBookCsv(){
   const months=fyMonths(CUR_FY), A=bookAnchor(CUR_FY);
@@ -3490,6 +3561,7 @@ function arApplyUnallocated(companyId){
 /* ---------- 請求額の手入力（Money Forward にない分だけ）----------
    明細・税・発行は持たない。取引先・計上月・金額・期日だけ。 */
 function openArBillForm(id, preset){
+  if(!id) return openArBillBulk(preset? [Object.assign(abBlank(), preset)] : null);   // preset（元帳などから）は そのまま使う
   const inv=id? findById('invoices',id) : null;
   if(inv && (inv.source==='mf' || (inv.items||[]).length)){
     toast(inv.source==='mf'? 'Money Forward の請求です。MF で直してから取り込み直してください。' : '明細のある請求（旧画面で作成）はここでは直せません。','err'); return; }
@@ -3520,6 +3592,190 @@ function openArBillForm(id, preset){
   if(!inv) arBillDue();
 }
 /** 税抜を 税区分から自動で入れる（手で直した後は触らない。税区分を変えたときは入れ直す） */
+/* ============================================================================
+   請求の手入力（複数行）・CSV — 2026-09-17 利用者の指示
+   ----------------------------------------------------------------------------
+   ・1行 ＝ 請求1件。取引先を選ぶと 税区分・入金期日 が入る。税抜は税区分から（手で直せる）。
+   ・CSV は同じ列。取り込むと この表に入って、確かめてから保存する（いきなり保存しない）。
+   ・保存は 1件ずつ arBillRec（1件の画面と同じ作り方）。
+   ========================================================================== */
+let AB_ROWS=[];
+const abCustomers = () => (DB.companies||[]).filter(x=>!x._gone && x.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+function abBlank(from){
+  const ym=(from&&from.bookMonth)||thisMonth();
+  /* 新しい行は 月と請求日だけ 前の行から引き継ぐ（取引先は選び直す）。まるごと写すのは「最後の行をコピー」 */
+  return { companyId:(from&&from.preset&&from.companyId)||'', hint:'', bookMonth:ym, issueDate:(from&&from.issueDate)||today(), taxCat:(from&&from.preset&&from.taxCat)||'',
+    total:'', net:'', netTouched:false, dueDate:'', dueTouched:false, no:'', note:'' };
+}
+function openArBillBulk(rows){
+  if(!canCreate('invoices')){ toast('権限がありません。','err'); return; }
+  document.querySelectorAll('details.more-tools[open]').forEach(d=>d.open=false);
+  AB_ROWS = rows && rows.length? rows : [abBlank()];
+  AB_ROWS.forEach(abFill);
+  openModal(`<h3>請求を手入力</h3>
+    <div class="mdsub">Money Forward に無い請求を入れます。1行が請求1件です。取引先を選ぶと 税区分と入金期日が入ります。</div>
+    <div id="abBox">${abTableHtml()}</div>
+    <div class="modal-actions split">
+      <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="abAdd()">＋ 行を追加</button>
+        <button class="btn secondary" onclick="abAdd(true)">↓ 最後の行をコピー</button></div>
+      <div style="display:flex;gap:8px;align-items:center;"><span id="abSum" class="muted"></span>
+        <button class="btn secondary" onclick="closeModal()">キャンセル</button>
+        <button class="btn" id="abSave" onclick="abSave()">保存</button></div></div>`,'xl');
+  abPaint();
+}
+/** 取引先から 税区分・期日を入れる（手で直したものは触らない）。税抜も合わせる。 */
+function abFill(r){
+  const c=findById('companies', r.companyId);
+  if(c && !r.taxCat) r.taxCat = TAX_RATE[c.taxCat]!=null? c.taxCat : '課税10%';
+  if(!r.taxCat) r.taxCat='課税10%';
+  if(c && r.bookMonth && !r.dueTouched) r.dueDate = dueDateOf(r.bookMonth, c.closingDay, c.paySite, c.payDay);
+  if(!r.netTouched) r.net = num(r.total)? Math.round(num(r.total)/(1+(TAX_RATE[r.taxCat]||0))) : '';
+}
+function abIssues(r){
+  const e=[];
+  if(!r.companyId) e.push(r.hint? `取引先「${r.hint}」が見つかりません` : '取引先');
+  if(!/^\d{4}-\d{2}$/.test(r.bookMonth||'')) e.push('計上月');
+  if(!(num(r.total)>0)) e.push('請求額');
+  return e;
+}
+function abDupOf(r){
+  if(!r.companyId || !r.bookMonth) return 0;
+  return (DB.invoices||[]).filter(i=>String(i.companyId)===String(r.companyId) && arYmOfInv(i)===r.bookMonth && AR_LIVE(i)).length;
+}
+function abTableHtml(){
+  const cos=abCustomers();
+  const tr=(r,i)=>{
+    const bad=abIssues(r), dup=abDupOf(r);
+    return `<tr class="${bad.length&&(r.total||r.companyId)?'ab-bad':''}">
+      <td class="ab-n">${i+1}</td>
+      <td><select onchange="abSet(${i},'companyId',this.value)"><option value="">${r.hint? '⚠ '+esc(r.hint) : '選ぶ'}</option>
+        ${cos.map(c=>`<option value="${attr(c.id)}" ${String(c.id)===String(r.companyId)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        ${dup? `<div class="ab-warn" title="同じ取引先・同じ計上月の請求がすでにあります">⚠ 同じ月に ${dup}件あり</div>` : ''}</td>
+      <td><input type="month" value="${attr(r.bookMonth)}" onchange="abSet(${i},'bookMonth',this.value)"></td>
+      <td><input type="date" value="${attr(r.issueDate)}" onchange="abSet(${i},'issueDate',this.value)"></td>
+      <td><select onchange="abSet(${i},'taxCat',this.value)">${TAX_CATS.map(t=>`<option ${t===r.taxCat?'selected':''}>${esc(t)}</option>`).join('')}</select></td>
+      <td><input class="num" style="text-align:right;" value="${r.total!==''?moneyPlain(r.total):''}" placeholder="0" oninput="fmtMoneyInput(this);abSet(${i},'total',this.value,true)"></td>
+      <td><input class="num ${r.netTouched?'':'ab-auto'}" style="text-align:right;" value="${r.net!==''?moneyPlain(r.net):''}" title="税区分から自動。手で直せます" oninput="fmtMoneyInput(this);abSet(${i},'net',this.value,true)"></td>
+      <td><input type="date" class="${r.dueTouched?'':'ab-auto'}" value="${attr(r.dueDate)}" onchange="abSet(${i},'dueDate',this.value)"></td>
+      <td><input value="${attr(r.no)}" placeholder="自動" onchange="abSet(${i},'no',this.value)"></td>
+      <td><input value="${attr(r.note)}" onchange="abSet(${i},'note',this.value)"></td>
+      <td><a class="ab-x" onclick="abDel(${i})" title="この行を消す">×</a></td></tr>`;
+  };
+  return `<div class="table-wrap ab-wrap"><table class="ab-tbl">
+    <thead><tr><th></th><th style="min-width:210px;">取引先 *</th><th>計上月 *</th><th>請求日</th><th>税区分</th>
+      <th class="r">請求額（税込）*</th><th class="r">税抜 <span class="muted">自動</span></th><th>入金期日 <span class="muted">自動</span></th><th>請求番号</th><th>備考</th><th></th></tr></thead>
+    <tbody>${AB_ROWS.map(tr).join('')}</tbody></table></div>`;
+}
+/** 入力のたびに全部描き直すと カーソルが飛ぶので、数字の入力（soft）は 合計と自動の欄だけ直す */
+function abSet(i, k, v, soft){
+  const r=AB_ROWS[i]; if(!r) return;
+  if(k==='total'||k==='net') v = v===''? '' : num(v);
+  r[k]=v;
+  if(k==='net') r.netTouched = v!=='';
+  if(k==='dueDate') r.dueTouched = !!v;
+  if(k==='companyId'){ r.hint=''; r.taxCat=''; r.dueTouched=false; }
+  if(k==='companyId'||k==='bookMonth'||k==='taxCat'||k==='total') abFill(r);
+  if(soft){
+    const tr=document.querySelectorAll('#abBox tbody tr')[i];
+    if(tr && k==='total' && !r.netTouched){ const n=tr.querySelectorAll('input.num')[1]; if(n) n.value = r.net!==''? moneyPlain(r.net) : ''; }
+    abPaint(); return;
+  }
+  abRedraw();
+}
+function abRedraw(){ const b=document.getElementById('abBox'); if(b) b.innerHTML=abTableHtml(); abPaint(); }
+function abAdd(copy){
+  const last=AB_ROWS[AB_ROWS.length-1];
+  const r = copy && last? Object.assign({}, last, { no:'', note:last.note }) : abBlank(last);
+  AB_ROWS.push(r); abFill(r); abRedraw();
+  const rows=document.querySelectorAll('#abBox tbody tr'); const el=rows[rows.length-1]; if(el){ el.scrollIntoView({block:'nearest'}); const f=el.querySelector('select'); if(f && !copy) f.focus(); }
+}
+function abDel(i){ AB_ROWS.splice(i,1); if(!AB_ROWS.length) AB_ROWS.push(abBlank()); abRedraw(); }
+function abPaint(){
+  const ok=AB_ROWS.filter(r=>!abIssues(r).length), bad=AB_ROWS.filter(r=>abIssues(r).length && (r.total||r.companyId));
+  const sum=ok.reduce((t,r)=>t+num(r.total),0);
+  const el=document.getElementById('abSum');
+  if(el) el.innerHTML = `保存できる ${ok.length}件 ・ <b class="num">${moneyPlain(sum)}</b>円（税込）${bad.length? ` ・ <span class="minus">未入力あり ${bad.length}件</span>` : ''}`;
+  const b=document.getElementById('abSave'); if(b){ b.textContent = ok.length? `${ok.length}件を保存` : '保存'; b.disabled=!ok.length; }
+}
+/** 1件の請求の形（1件の画面と 複数行 で同じ） */
+function arBillRec(r){
+  const total=num(r.total), taxCat=r.taxCat||'課税10%', rate=TAX_RATE[taxCat]||0;
+  const subtotal = r.net===''||r.net==null? Math.round(total/(1+rate)) : num(r.net);
+  let no=String(r.no||'').trim();
+  if(!no){ const ym=r.bookMonth.replace('-',''); const n=(DB.invoices||[]).filter(x=>String(x.no||'').startsWith('INV-'+ym)).length+1; no=`INV-${ym}-${String(n).padStart(3,'0')}`; }
+  return { companyId:r.companyId, bookMonth:r.bookMonth, issueDate:r.issueDate||'', dueDate:r.dueDate||'', total, subtotal, taxCat,
+    no, note:r.note||'', items:[], status:'確定', locked:true };
+}
+function abSave(){
+  const ok=AB_ROWS.filter(r=>!abIssues(r).length);
+  const skip=AB_ROWS.filter(r=>abIssues(r).length && (r.total||r.companyId));
+  if(!ok.length){ toast('保存できる行がありません（取引先・計上月・請求額 が必要です）。','err'); return; }
+  const dup=ok.filter(abDupOf);
+  const zeroTax=ok.filter(r=>!(TAX_RATE[r.taxCat]>0) && r.netTouched && num(r.net)!==num(r.total));
+  const msg=[`${ok.length}件・${moneyPlain(ok.reduce((t,r)=>t+num(r.total),0))}円 を保存します。`];
+  if(skip.length) msg.push(`未入力の ${skip.length}件 は保存しません（表に残ります）。`);
+  if(dup.length) msg.push(`⚠ 同じ取引先・同じ計上月の請求がすでにある行：${dup.length}件（二重になっていないか確認してください）`);
+  if(zeroTax.length) msg.push(`⚠ 非課税・対象外なのに 税抜と税込が違う行：${zeroTax.length}件`);
+  if(!confirm(msg.join('\n'))) return;
+  const cos=new Set();
+  ok.forEach(r=>{ const rec=arBillRec(r); stampStaff(rec); commitRecord('invoices', rec, {}); cos.add(String(r.companyId)); });
+  cos.forEach(arApplyUnallocated);
+  AB_ROWS=skip;
+  if(skip.length){ abRedraw(); toast(`${ok.length}件を保存しました。残りの ${skip.length}件を直してください。`,'ok'); }
+  else { closeModal(); toast(`${ok.length}件を保存しました。`,'ok'); }
+  renderPage(CURRENT_PAGE);
+}
+/* ── CSV ── */
+const AB_CSV_HEAD=['取引先名','計上月','請求日','税区分','請求額(税込)','税抜','入金期日','請求番号','備考'];
+function arCsvTemplate(){
+  const c=abCustomers()[0];
+  downloadCsv('請求の取り込みテンプレート', [AB_CSV_HEAD,
+    ['例）'+(c? c.name : '株式会社サンプル'), thisMonth(), today(), '課税10%', 110000, '', '', '', '「例）」で始まる行は取り込みません'],
+    ['例）'+(c? c.name : '株式会社サンプル'), thisMonth(), today(), '非課税', 50000, '', '', '', '税抜・入金期日・請求番号 は空欄で自動']]);
+}
+function arCsvUpload(file){
+  if(!file) return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    const buf=fr.result; let text=new TextDecoder('utf-8').decode(buf);
+    if(text.includes('\uFFFD')){ try{ text=new TextDecoder('shift_jis').decode(buf); }catch(e){} }
+    const res=arCsvToRows(text);
+    if(res.error){ toast(res.error,'err'); return; }
+    openArBillBulk(res.rows);
+    toast(`${res.rows.length}行を読み込みました。確かめてから保存してください。`,'ok');
+  };
+  fr.readAsArrayBuffer(file);
+}
+function arCsvToRows(text){
+  const rows=arCsvRows(text); if(rows.length<2) return { error:'CSV に行がありません。' };
+  const head=rows[0].map(h=>String(h).trim().normalize('NFKC').replace(/[()（）]/g,''));
+  const col=names=>{ for(const n of names){ const k=n.normalize('NFKC').replace(/[()（）]/g,''); const i=head.findIndex(h=>h===k); if(i>=0) return i; } return -1; };
+  const C={ co:col(['取引先名','取引先','請求先']), ym:col(['計上月','売上月']), date:col(['請求日','発行日']), tax:col(['税区分']),
+    total:col(['請求額(税込)','請求額','合計金額','税込金額']), net:col(['税抜','税抜金額','小計']), due:col(['入金期日','支払期限','期日']),
+    no:col(['請求番号','請求書番号']), note:col(['備考','メモ']) };
+  const miss=[['取引先名',C.co],['計上月',C.ym],['請求額(税込)',C.total]].filter(x=>x[1]<0).map(x=>x[0]);
+  if(miss.length) return { error:`CSV に必要な列がありません：${miss.join('・')}（テンプレートをお使いください）` };
+  const v=(r,i)=>i>=0? String(r[i]??'').trim() : '';
+  const d=x=>{ const m=String(x||'').match(/^(\d{4})[\/\-年.](\d{1,2})(?:[\/\-月.](\d{1,2}))?/); return m? { ym:`${m[1]}-${m[2].padStart(2,'0')}`, date: m[3]? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : '' } : null; };
+  const byName={}; abCustomers().forEach(c=>{ const k=arNormName(c.name); (byName[k]=byName[k]||[]).push(c); });
+  const out=rows.slice(1).filter(r=>!/^例[)）]/.test(v(r,C.co))).map(r=>{
+    const name=v(r,C.co), hit=byName[arNormName(name)]||[];
+    const row=abBlank();
+    row.companyId = hit.length===1? String(hit[0].id) : '';
+    row.hint = hit.length===1? '' : name + (hit.length>1? '（候補が複数）' : '');
+    const ym=d(v(r,C.ym)); row.bookMonth = ym? ym.ym : '';
+    const dt=d(v(r,C.date)); row.issueDate = dt&&dt.date? dt.date : '';
+    const tx=v(r,C.tax).normalize('NFKC'); row.taxCat = TAX_CATS.find(t=>t.normalize('NFKC')===tx) || (/^不課税/.test(tx)? '対象外' : '');
+    row.total = v(r,C.total)!==''? num(v(r,C.total)) : '';
+    if(v(r,C.net)!==''){ row.net=num(v(r,C.net)); row.netTouched=true; }
+    const du=d(v(r,C.due)); if(du&&du.date){ row.dueDate=du.date; row.dueTouched=true; }
+    row.no=v(r,C.no); row.note=v(r,C.note);
+    abFill(row);
+    return row;
+  }).filter(r=>r.hint||r.companyId||r.total);
+  return out.length? { rows:out } : { error:'取り込める行がありません。' };
+}
+
 function arBillNet(force){
   const n=document.getElementById('abNet'); if(!n) return;
   if(force) delete n.dataset.touched;
