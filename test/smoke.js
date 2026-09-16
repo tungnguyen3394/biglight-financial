@@ -110,7 +110,13 @@ eq('I2 は入金済', ctx.invoiceStatus(_db.invoices[1]), '入金済');
 eq('I1 は一部入金', ctx.invoiceStatus(_db.invoices[0]), '一部入金');
 eq('売掛残高', ctx.arTotal(), 32000);
 
-console.log('\n― 予実: 実績は伝票から計算される ―');
+console.log('\n― 予実: 売上は請求書から・費用は試算表から手入力 ―');
+/* ★ 2026-09-16: 費用の実績は actuals（会計事務所の試算表・税抜）だけ。
+   支払請求・費用表（予定）は実績に入らない。売上は今までどおり請求書から。 */
+_db.actuals = [
+  { id:'AT1', fy:2025, mIndex:0, accountCode:'6110', amount:1000000 },
+  { id:'AT2', fy:2025, mIndex:1, accountCode:'6200', amount:200000 },
+];
 _db.expenses = [
   { id:'E1', date:'2025-09-10', bookMonth:'2025-09', accountCode:'6200', amount:220000, taxCat:'課税10%' },
   { id:'E2', date:'2025-08-05', bookMonth:'2025-08', accountCode:'6110', amount:1000000, taxCat:'対象外' },
@@ -118,10 +124,14 @@ _db.expenses = [
 const rev = ctx.actualSeries(2025,'revenue');
 eq('8月 売上（税抜）', rev[0], 60000);
 eq('9月 売上（税抜）', rev[1], 60000);
+eq('売上の実績 ＝ 請求書の合計（invRevenue）', ctx.actualSeries(2025,'revenue').reduce((s,v)=>s+v,0),
+  _db.invoices.reduce((s,i)=>s+ctx.invRevenue(i),0));
 const sga = ctx.actualSeries(2025,'sga');
-eq('8月 販管費（対象外はそのまま）', sga[0], 1000000);
-eq('9月 販管費（税込→税抜）', sga[1], 200000);
+eq('8月 販管費 ＝ 手入力の実績', sga[0], 1000000);
+eq('9月 販管費 ＝ 手入力の実績', sga[1], 200000);
+eq('旧・経費（expenses）は実績に入らない', sga[1], 200000);
 eq('8月 営業利益', ctx.plBook(2025,'actual').operating[0], -940000);
+eq('科目別の実績も actuals から', ctx.seriesByAccount(2025,'6200','actual')[1], 200000);
 
 console.log('\n― 予算・過去との比較 ―');
 _db.budgets = [{ id:'B1', fy:2025, mIndex:0, accountCode:'4100', amount:100000 },
@@ -147,7 +157,7 @@ _db.keyResults = [{ id:'K1', objectiveId:'O1', title:'年度売上', target:2400
 eq('KR の現在値は実績から', ctx.krCurrent(_db.keyResults[0]), 120000);
 eq('達成率 50%', Math.round(ctx.krRate(_db.keyResults[0])), 50);
 
-console.log('\n― 費用管理（月次費用表）―');
+console.log('\n― 費用表（勘定科目 大›中›小›対象 × 12か月・予定）―');
 _db.costItems = [
   { id:'CI1', name:'事務所家賃',     accountCode:'6200', kind:'fixed',    monthly:220000, taxCat:'課税10%', vendor:'大家' },
   { id:'CI2', name:'クラウド利用料', accountCode:'6220', kind:'fixed',    monthly:33000,  taxCat:'課税10%' },
@@ -157,17 +167,47 @@ _db.costItems = [
 eq('終了月の月までは入力できる', ctx.costItemActive(_db.costItems[3],'2025-09'), true);
 eq('終了月を過ぎたら入力できない', ctx.costItemActive(_db.costItems[3],'2025-10'), false);
 ctx.setCostCell('CI1','2025-10',231000);
-eq('マスを打つと expenses が1行できる', _db.expenses.filter(e=>e.costItemId==='CI1').length, 1);
+eq('マスを打つと costPlans が1行できる', (_db.costPlans||[]).filter(p=>p.costItemId==='CI1').length, 1);
 eq('マスの値（税込）', ctx.costCellAmount('CI1','2025-10'), 231000);
-eq('税抜は予実と同じ式', ctx.netOfGross(231000,'課税10%'), 210000);
-eq('10月の販管費（税抜）に入る', ctx.actualSeries(2025,'sga')[2], 210000);
-eq('表の行は費目マスタの数', ctx.costRowsOf(2025).rows.length, 4);
+eq('税抜に直す式は今までどおり', ctx.netOfGross(231000,'課税10%'), 210000);
+/* ★ いちばん大事: 費用表は「予定」。打っても予実の実績は動かない（実績は試算表から手入力） */
+eq('マスを打っても予実の実績は動かない', ctx.actualSeries(2025,'sga')[2], 0);
+eq('表の行は対象の数', ctx.costRowsOf(2025).rows.length, 4);
 eq('定期が先・変動が後に並ぶ', ctx.costRowsOf(2025).rows.map(r=>r.it.id), ['CI1','CI2','CI4','CI3']);
 eq('期間外のマスは null（旧リースの10月）', ctx.costRowsOf(2025).rows[2].cells[2], null);
-eq('費目なしの経費は別行にまとまる', ctx.costOtherByMonth(2025).n, 2);
+
+/* 木: 大 › 中 › 小 › 対象。対象のない科目は出さない */
+{
+  const tree = ctx.costTree(ctx.costRowsOf(2025).rows);
+  const names = [];
+  (function walk(ns){ ns.forEach(n=>{ names.push(n.label); walk(n.kids); }); })(tree);
+  eq('木に 販管費（大分類）が出る', names.some(x=>x.includes('販管費')||x.includes('販売費')), true);
+  const itemsIn = n => { let a=n.items.length; n.kids.forEach(k=>a+=itemsIn(k)); return a; };
+  eq('4つの対象が全部どこかの枝に入る', tree.reduce((s,n)=>s+itemsIn(n),0), 4);
+  /* 親の行の合計 ＝ 下にぶら下がる対象の合計 */
+  const sum12 = a => a.reduce((s,v)=>s+(v||0),0);
+  const cellsOf = n => { let t=0; n.items.forEach(r=>t+=sum12(r.cells)); n.kids.forEach(k=>t+=cellsOf(k)); return t; };
+  eq('親の行の合計 ＝ 子の合計', tree.map(n=>sum12(ctx.costNodeSum(n))), tree.map(cellsOf));
+}
+
+/* 「→12」: 空いているマスだけ埋める。入っている数字は変えない */
+{
+  ctx.setCostCell('CI2','2025-08',30000);
+  ctx.setCostCell('CI2','2025-11',44000);          // 途中に「入っているマス」
+  const n = ctx.costFill12Go(_db.costItems[1], 0, 2025);
+  eq('→12 は空いているマスだけを埋める', n, 10);
+  eq('入っているマスは上書きしない（11月）', ctx.costCellAmount('CI2','2025-11'), 44000);
+  eq('左の直近の数字を写す（9月＝8月の30,000）', ctx.costCellAmount('CI2','2025-09'), 30000);
+  eq('入っているマスの右はその数字を写す（12月＝11月の44,000）', ctx.costCellAmount('CI2','2025-12'), 44000);
+  const lease = ctx.costFill12Go(_db.costItems[3], 0, 2025);
+  eq('期間外（終了月の後）は埋めない', lease, 2);
+  eq('終了月の後のマスは空のまま', ctx.costCellAmount('CI4','2025-10'), 0);
+  /* 片付け */
+  ['2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07']
+    .forEach(ym=>{ ctx.setCostCell('CI2',ym,0); ctx.setCostCell('CI4',ym,0); });
+}
 ctx.setCostCell('CI1','2025-10',0);
 eq('0にするとマスごと消える', ctx.costCellAmount('CI1','2025-10'), 0);
-eq('消したら予実からも消える', ctx.actualSeries(2025,'sga')[2], 0);
 
 console.log('\n― 定期の支払（買掛）―');
 /* 「費用＝ある会社に定期的に払うお金」。支払先を選び、払い方を 買掛 にすると
@@ -186,14 +226,22 @@ eq('作った支払請求の数', ctx.apCreateBills('2025-11', plan), 1);
 const nb = _db.bills.find(b=>b.bookMonth==='2025-11');
 eq('期日は取引先の条件から（20日締・翌々月25日）', nb.dueDate, '2026-01-25');
 eq('自動作成は「作成中」から', nb.status, '作成中');
-eq('月次費用表は支払請求から読む（税込）', ctx.costBillCell('CI5','2025-11').gross, 110000);
+eq('作った支払請求の明細は 費用表の対象に紐づく（税込）', ctx.costBillCell('CI5','2025-11').gross, 110000);
 eq('同じ月に二度は作らない', ctx.apPlanFor('2025-11').filter(p=>p.items.length).length, 0);
 
-/* 二重計上しないこと: 買掛の費目は経費（expenses）を作らない */
+/* ★ 2026-09-16: 費用表は予定の表。買掛の対象のマスも打てる（打っても実績は動かない） */
 const exBefore = _db.expenses.length;
 ctx.setCostCell('CI5','2025-11', 99000);
-eq('買掛の費目に経費は作られない', _db.expenses.length, exBefore);
-eq('買掛の月は費用表でも支払請求の額のまま', ctx.costRowsOf(2025).rows.find(r=>r.it.id==='CI5').cells[3], 110000);
+eq('買掛の対象でもマスに打てる', ctx.costRowsOf(2025).rows.find(r=>r.it.id==='CI5').cells[3], 99000);
+eq('旧・経費（expenses）は増えない', _db.expenses.length, exBefore);
+eq('費用表に打っても予実の実績は動かない', ctx.actualSeries(2025,'sga')[3], 0);
+/* 支払請求を作るときの金額は 費用表のマス（予定）→ 無ければ月額 */
+ctx.setCostCell('CI5','2025-12', 99000);
+eq('支払請求の金額は費用表のマスから', ctx.apPlanFor('2025-12').find(p=>p.company.id==='C2').items[0].amount,
+  ctx.netOfGross(99000,'課税10%'));
+ctx.setCostCell('CI5','2025-12', 0);
+eq('マスが空なら月額から', ctx.apPlanFor('2025-12').find(p=>p.company.id==='C2').items[0].amount, 100000);
+ctx.setCostCell('CI5','2025-11', 0);
 
 console.log('\n― 営業日（期日が土日祝のとき） ―');
 {
@@ -579,6 +627,36 @@ console.log('\n― 取引先モーダル（得意先／支払先・横3列） �
   el.innerHTML='';
 }
 
+console.log('\n― 画面に説明文を置かない・入力は1画面で見える ―');
+/* ★ 2026-09-16 利用者の指示: 説明は 入力ガイドに1か所だけ。画面には数字と操作だけを置く。 */
+{
+  const sh = ctx.pageShell({ title:'見出し', count:3, sub:'これは説明です', body:'<i>x</i>' });
+  eq('pageShell は sub を出さない', /これは説明です|page-sub/.test(sh), false);
+  eq('pageShell は 画面名と件数を出す', sh.includes('見出し') && sh.includes('(3件'), true);
+  ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewExpenses','viewProperties','viewArBook','viewApBook',
+   'viewBills','viewReceipts','viewCashflow','viewInvoices'].forEach(fn=>{
+    let h=''; try{ h=String(ctx[fn]()); }catch(e){ console.log('  NG  '+fn+' → '+e.message); fail++; return; }
+    eq(fn+' に説明の帯（infobar）が無い', h.includes('class="infobar"'), false);
+  });
+  /* 横3列・モーダルの幅（1画面で見えるように） */
+  const css = html.slice(0, html.indexOf('</style>'));
+  eq('モーダルは既定 960px・高さ92vh', /\.modal\{[^}]*width:960px/.test(css) && /\.modal\{[^}]*max-height:92vh/.test(css), true);
+  eq('フォームは横3列', /\.form-grid\{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/.test(css), true);
+  eq('900px以下は2列・700px以下は1列', /max-width:900px\)\{ \.form-grid\{grid-template-columns:repeat\(2/.test(css)
+    && /max-width:700px\)\{ \.form-grid\{grid-template-columns:minmax\(0,1fr\)/.test(css), true);
+  eq('詳細（見るだけ）も横3列', /\.kvgrid\{[^}]*grid-template-columns:repeat\(3/.test(css), true);
+  /* 対象のフォーム: 説明文を並べない・支払方法は出さない */
+  el.innerHTML=''; ctx.openForm('costItems','CI1');
+  const f=String(el.innerHTML);
+  /* 残ってよいのは「科目が足りないとき どこへ行くか」の案内だけ（説明ではなく道案内） */
+  eq('対象のフォームに項目の説明文を並べない', (f.match(/class="fhelp"/g)||[]).length, 1);
+  eq('残るのは 勘定科目の登録への案内だけ', f.includes('勘定科目の登録'), true);
+  eq('対象のフォームに vendor・method は出さない', /name="vendor"|name="method"/.test(f), false);
+  eq('対象のフォームは 勘定科目・支払先・物件・月額・税区分を持つ',
+    ['accountCode','companyId','propertyId','monthly','taxCat'].every(n=>f.includes('name="'+n+'"')), true);
+  el.innerHTML='';
+}
+
 console.log('\n― 画面の入れ替えは1回だけ ―');
 /* ★ 2026-09-13 の不具合の再発防止:
    画面を入れたあとに もう一度 innerHTML を組み直すと、先に作った要素が DOM から
@@ -734,11 +812,13 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     eq('回収のタブに 入金チェック', ctx.__x.SECTIONS.find(x=>x.id==='sec-ar').tabs.some(t=>t.id==='archeck'), true);
   }
 
-  console.log('\n― 買掛金（支払先×月の残高）・支払推移表 ―');
+  console.log('\n― 買掛金（支払先×月の残高）―');
   {
-    const S=a=>a.reduce((t,v)=>t+v,0);
-    eq('支払のタブ: 買掛金・支払推移表・支払請求・支払実行・資金繰り', ctx.__x.SECTIONS.find(x=>x.id==='sec-ap').tabs.map(t=>t.id), ['apbook','apsuii','bills','payouts','cashflow']);
+    eq('支払のタブ: 買掛金・支払請求・支払実行・資金繰り', ctx.__x.SECTIONS.find(x=>x.id==='sec-ap').tabs.map(t=>t.id), ['apbook','bills','payouts','cashflow']);
     eq('古い 未払（年齢表）・支払先別 は 買掛金へ', [ctx.__x.PAGE_REDIRECT.apaging, ctx.__x.PAGE_REDIRECT.apco], ['apbook','apbook']);
+    /* ★ 2026-09-16 にメニューから外した画面は 費用表へ案内（コードは残っている） */
+    eq('支払推移表・分類別集計は 費用表へ案内', [ctx.__x.PAGE_REDIRECT.apsuii, ctx.__x.PAGE_REDIRECT.kbunrui], ['expenses','expenses']);
+    eq('費用のタブは 費用表・物件 の2つ', ctx.__x.SECTIONS.find(x=>x.id==='sec-cost').tabs.map(t=>t.id), ['expenses','properties']);
     const ids=ctx.apCompanyIds(), tm=ctx.thisMonth();
     const bal=ids.reduce((t,id)=>t+ctx.apMonthly(id,[tm])[0].closing,0);
     eq('買掛金の月末残高の合計 ＝ 未払残高（支払をすべて充てているデモ）', bal, ctx.apTotal());
@@ -749,48 +829,27 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     eq('買掛金の画面: 支払先が行・12か月が列', h.includes('丸山不動産') && (h.match(/apCellPop\(/g)||[]).length>=12, true);
     el.innerHTML=''; ctx.openLedger(oya.id,'ap');
     eq('支払先の名前から 買掛元帳（モーダル）', String(el.innerHTML).includes('買掛元帳'), true);
+  }
 
-    /* 推移表の税抜 ＝ 予実の費用（1円も違わない） */
-    const L=ctx.costFlowLines(FYA).filter(l=>!l.forecast);
-    const net=Array(12).fill(0); L.forEach(l=>{ net[l.i]+=l.net; });
-    const yj=ctx.actualSeries(FYA,'cogs').map((v,i)=>v+ctx.actualSeries(FYA,'sga')[i]);
-    eq('推移表の税抜 ＝ 予実の 売上原価＋販管費（月ごと）', net, yj);
-    const billGross=_db.bills.filter(b=>b.demo && ctx.fyOf(b.bookMonth)===FYA).reduce((t,b)=>t+ctx.docTotal(b),0);
-    eq('推移表の税込（支払請求の分）＝ 支払請求の税込合計', L.filter(l=>l.src.t==='bills' && (_db.bills.find(b=>b.id===l.src.id)||{}).demo).reduce((t,l)=>t+l.gross,0), billGross);
-    eq('過ぎた年度に 見込 は無い', ctx.costFlowLines(FYA).some(l=>l.forecast), false);
-    eq('突発（費目なし）が入っている', L.filter(l=>l.sudden).length>=4, true);
-    const ads=L.filter(l=>l.code==='6310');
-    eq('広告宣伝費の下に A社・B社（2つの支払先）', new Set(ads.map(l=>l.companyId)).size, 2);
-
-    /* 今年度: 今月以降は見込（定期＝月額予定、変動＝直近3か月平均） */
-    const fc=ctx.costFlowLines(FYA+1).filter(l=>l.forecast);
-    eq('今年度は 今月以降に 見込 がある', fc.length>0 && fc.every(l=>l.ym>=tm), true);
-    const rentIt=_db.costItems.find(c=>c.demo && c.name.includes('本社事務所'));
-    eq('定期の見込 ＝ 費目の月額予定', fc.filter(l=>l.costItemId===rentIt.id).every(l=>l.gross===Number(rentIt.monthly)), true);
-    const tsu=_db.costItems.find(c=>c.demo && c.name.includes('通訳'));
-    const hist=ctx.costItemHistory()[tsu.id], last3=Object.keys(hist).filter(k=>k<tm).sort().slice(-3);
-    eq('変動の見込 ＝ 直近3か月の平均', fc.find(l=>l.costItemId===tsu.id).gross, Math.round(last3.reduce((t,k)=>t+hist[k],0)/3));
-    eq('突発は 見込に入れない', fc.some(l=>!l.costItemId), false);
-
-    /* 大・中・小・明細 */
-    ctx.setTaxView('gross'); ctx.setSuiiAxis('vendor');
-    ctx.setSuiiLv(0); h=ctx.viewApSuii();
-    eq('大: 大分類だけ（販管費は見えて、地代家賃の行は閉じている）', h.includes('販売費及び一般管理費') && !h.includes('>地代家賃<'), true);
-    ctx.setSuiiLv(1); h=ctx.viewApSuii();
-    eq('中: 地代家賃・広告宣伝費 が出る', h.includes('>地代家賃<') && h.includes('>広告宣伝費<'), true);
-    ctx.setSuiiLv(3); h=ctx.viewApSuii();
-    eq('明細: 広告宣伝費 › A社・B社', h.includes('北関東求人メディア') && h.includes('ソーシャル広告ラボ'), true);
-    eq('突発の印', h.includes('突発'), true);
-    ctx.setSuiiAxis('property'); h=ctx.viewApSuii();
-    eq('物件に切り替え: 建物名が出る', h.includes('さくら寮 A棟'), true);
-    ctx.setSuiiAxis('vendor');
-    ctx.setTaxView('net'); h=ctx.viewApSuii();
-    eq('税抜に切り替え', h.includes('税抜'), true);
-    const kb=ctx.viewKbunrui();
-    eq('分類別集計にも 税込／税抜', kb.includes('setTaxView') && kb.includes('税抜'), true);
+  console.log('\n― 費用表（デモの量で）―');
+  {
     ctx.setTaxView('gross');
-    eq('既定は税込', ctx.viewKbunrui().includes('・税込'), true);
-    ctx.setSuiiLv(1);
+    const S=a=>a.reduce((t,v)=>t+v,0);
+    const rows=ctx.costRowsOf(FYA).rows;
+    eq('対象が全部 行になる', rows.length, ctx.costItemsSorted().length);
+    /* 木の合計 ＝ 対象のマスの合計（1円も違わない） */
+    const tree=ctx.costTree(rows);
+    const treeTotal=tree.reduce((t,n)=>t+S(ctx.costNodeSum(n)),0);
+    const cellTotal=rows.reduce((t,r)=>t+S(r.cells),0);
+    eq('木の合計 ＝ マスの合計', treeTotal, cellTotal);
+    /* 買掛の対象: 費用表の予定 ＝ その月の支払請求（税込） */
+    const rentIt=_db.costItems.find(c=>c.demo && c.name.includes('本社事務所'));
+    const ym=ctx.fyMonths(FYA)[2];
+    eq('買掛の対象の予定 ＝ 支払請求の税込', ctx.costCellAmount(rentIt.id, ym), ctx.costBillCell(rentIt.id, ym).gross);
+    const h=ctx.viewExpenses();
+    eq('費用表に 大分類・対象・→12 が出る', h.includes('販売費及び一般管理費') && h.includes('本社事務所') && h.includes('→12'), true);
+    eq('費用表に 色分け・KPI・税抜行は出さない', /うち消費税|月次費用表|個別に経費/.test(h), false);
+    ctx.setTaxView('net');
   }
 
   console.log('\n― 担当者別の売上 ―');
@@ -865,10 +924,11 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     eq('ダッシュボードに 税込／税抜 のボタン', hd.includes('setTaxView') && hd.includes('売上高（税込）'), true);
     eq('ダッシュボードの売上（税込）', hd.includes(ctx.__x.moneyPlain(S(ctx.plView(FYA,'actual').revenue))), true);
     ['viewYojitsu','viewCompare','viewMikomi'].forEach(fn=>{
-      const h=ctx[fn](); eq(fn+' に 税込／税抜 のボタンと注意書き', h.includes('setTaxView') && h.includes('税込で表示中'), true);
+      const h=ctx[fn](); eq(fn+' に 税込／税抜 のボタン', h.includes('setTaxView'), true);
+      /* ★ 2026-09-16: 画面に説明文は置かない（説明は 入力ガイドへ） */
+      eq(fn+' に説明の帯は出さない', /class="infobar"|税込で表示中/.test(h), false);
     });
     ctx.setTaxView('net');
-    eq('税抜では 注意書きを出さない', ctx.viewYojitsu().includes('税込で表示中'), false);
     ctx.setTaxView('gross');
   }
 
@@ -992,30 +1052,50 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
     ctx.__x.setSession({ email:'test@biglight.jp', role:'Admin', status:'active' });
   }
 
-  /* ── 分類別集計: いちばん大事なのは「予実と1円も違わない」こと ── */
-  console.log('\n― 分類別集計（デモの量で） ―');
-  [2025, 2026].forEach(fy=>{
-    ['revenue','cogs','sga','nonop'].forEach(kind=>{
-      const a=Array(12).fill(0);
-      ctx.moneyLines(fy).filter(l=>l.kind===kind).forEach(l=>{ a[l.i]+=l.amount; });
-      eq(`分類別の合計＝予実（${fy}/${kind}）`, a, ctx.actualSeries(fy,kind));
+  /* ── 予実の実績: 費用は actuals だけ（伝票では動かない） ── */
+  console.log('\n― 実績の出どころ（デモの量で） ―');
+  {
+    const S=a=>a.reduce((t,v)=>t+v,0);
+    [FYA, FYA+1].forEach(fy=>{
+      ['cogs','sga','nonop'].forEach(kind=>{
+        const a=Array(12).fill(0);
+        (_db.actuals||[]).forEach(x=>{ if(Number(x.fy)===fy && ctx.accountKind(x.accountCode)===kind){ a[Number(x.mIndex)]+=Number(x.amount); } });
+        eq(`費用の実績 ＝ 手入力の合計（${fy}/${kind}）`, ctx.actualSeries(fy,kind), a);
+      });
+      const r=Array(12).fill(0);
+      _db.invoices.forEach(i=>{ if(ctx.fyOf((i.bookMonth||'').slice(0,7))===fy) r[ctx.fyIndexOf(i.bookMonth)]+=ctx.invRevenue(i); });
+      eq(`売上の実績 ＝ 請求書の合計（${fy}）`, ctx.actualSeries(fy,'revenue'), r);
     });
-  });
-  /* 建物ごとに分かれているか（A棟の電気・水道・ガス・家賃） */
-  const aTou=_db.properties.find(p=>p.name.includes('A棟'));
-  const aLines=ctx.moneyLines(2025).filter(l=>String(l.propertyId)===String(aTou.id));
-  eq('A棟に費用が紐づく', aLines.length>0, true);
-  eq('A棟には複数の科目がある（家賃・電気・水道・ガス）', new Set(aLines.map(l=>l.code)).size>=3, true);
-  eq('デモは 地代家賃 の下に建物別の小分類を作る', !!ctx.__x.accountByCode('6201'), true);
-  eq('水道光熱費 の下は 電気・水道・ガス', ctx.__x.accountChildren(ctx.__x.accountByCode('6210').id).length, 3);
-  eq('電気代の道筋', ctx.__x.accountPathLabel('6211').includes('水道光熱費'), true);
-  eq('小分類でも区分は受け継ぐ', ctx.accountKind('6211'), 'sga');
-  eq('建物なしの行もちゃんと残る', ctx.moneyLines(2025).some(l=>!l.propertyId), true);
-  ['account','property'].forEach(ax=>{
-    try{ ctx.setKbAxis(ax); const h=ctx.viewKbunrui(); const ok=h.length>1000;
-      console.log((ok?'  ok  ':'  NG  ')+`viewKbunrui(${ax}）  →  `+h.length+' 文字'); ok?pass++:fail++;
-    }catch(e){ console.log(`  NG  viewKbunrui(${ax}） → `+e.message); fail++; }
-  });
+    /* 支払請求を増やしても 実績は動かない（予定と実績を分けた意味） */
+    const before=S(ctx.actualSeries(FYA,'cogs'));
+    _db.bills.push({ id:'BX-TEST', companyId:_db.companies[0].id, bookMonth:ctx.fyMonths(FYA)[0], status:'確定',
+      dueDate:'2030-01-31', items:[{accountCode:'5100', amount:1234567, taxCat:'課税10%'}] });
+    eq('支払請求を足しても 費用の実績は変わらない', S(ctx.actualSeries(FYA,'cogs')), before);
+    _db.bills=_db.bills.filter(b=>b.id!=='BX-TEST');
+    /* 費用表（予定）を打っても 実績は動かない */
+    const it=_db.costItems.find(c=>c.demo && c.kind!=='variable');
+    const ym=ctx.fyMonths(FYA)[0], keep=ctx.costCellAmount(it.id, ym);
+    const beforeSga=S(ctx.actualSeries(FYA,'sga'));
+    ctx.setCostCell(it.id, ym, keep+50000);
+    eq('費用表に打っても 実績は変わらない', S(ctx.actualSeries(FYA,'sga')), beforeSga);
+    ctx.setCostCell(it.id, ym, keep);
+  }
+
+  /* ── 予実 › 入力 › 実績: 収益の行は直せない ── */
+  console.log('\n― 予実の入力タブ（実績） ―');
+  {
+    ctx.setYjTab('input'); ctx.setYjView('actual');
+    const h=ctx.viewYojitsu();
+    eq('実績のセグメントがある', h.includes('>実績</button>'), true);
+    const rows=h.split('<tr').filter(x=>x.includes('cellin'));
+    const roRow=rows.find(x=>x.includes('readonly'));
+    eq('収益の行は readonly（請求書から）', !!roRow, true);
+    eq('費用の行は打てる（onPlanInput に actual）', h.includes(`onPlanInput(this,'actual'`), true);
+    eq('年額をまとめて入力は 実績には出さない', h.includes('12等分'), false);
+    ctx.setYjView('budget');
+    eq('予算の入力には 12等分がある', ctx.viewYojitsu().includes('12等分'), true);
+    ctx.setYjTab('pl'); ctx.setYjView('compare');
+  }
 
   /* 消す: デモだけが消え、本物は残る */
   await ctx.demoRemove(true);

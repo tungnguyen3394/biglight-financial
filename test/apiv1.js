@@ -130,6 +130,17 @@ const state = {
   ],
   forecasts: [{ id: 'FC1', fy: 2025, mIndex: 4, accountCode: '4100', amount: 700000 }],
   actualAdjust: [{ id: 'AJ1', fy: 2025, mIndex: 0, accountCode: '7100', amount: 12345 }],
+  /* ★ 2026-09-16: 費用の実績は 会計事務所の試算表から手入力（税抜）。伝票からは作らない。 */
+  actuals: [
+    { id: 'AT1', fy: 2025, mIndex: 2, accountCode: '5100', amount: 200000 },
+    { id: 'AT2', fy: 2025, mIndex: 2, accountCode: '6200', amount: 220000 },
+    { id: 'AT3', fy: 2025, mIndex: 3, accountCode: '6310', amount: 50000 },
+  ],
+  costPlans: [
+    { id: 'CP1', costItemId: 'CI1', ym: '2025-10', amount: 242000 },
+    { id: 'CP2', costItemId: 'CI1', ym: '2025-11', amount: 242000 },
+  ],
+  costItems: [{ id: 'CI1', name: '事務所家賃', accountCode: '6200', kind: 'fixed', monthly: 242000, taxCat: '課税10%' }],
   objectives: [], keyResults: [], checkins: [], departments: [],
   accounts: [], settings: { cashStart: 1000000 }, userPerms: {},
 };
@@ -193,9 +204,20 @@ ok('期日前は「未到来」', F.agingBucket(state.invoices[2], state) === '�
   ok('売上は計上月に入る（2025-09 は index 1）', rev[1] === 60000, `rev[1]=${rev[1]}`);
   ok('売上は税抜（60,000 で 66,000 ではない）', rev[1] === 60000);
   const cogs = F.actualSeries(state, 2025, 'cogs');
-  /* 2025-10（index 2）の原価: 支払請求 B2 の 5200=40,000 ＋ B3 の 5300=60,000
-     ＋ 経費 E2（税込110,000 → 税抜100,000）。B4 は取消なので入らない。 */
-  ok('経費の税込を税抜に直して原価に入れる', cogs[2] === 40000 + 60000 + 100000, `cogs[2]=${cogs[2]}`);
+  /* ★ 2026-09-16: 費用の実績は actuals（試算表からの手入力）だけ。
+     2025-10（index 2）の原価は AT1 の 200,000。支払請求 B2・B3（明細あり）や
+     旧・経費 E1〜E3 は もう実績に入らない（予定・約束であって実績ではないため）。 */
+  ok('費用の実績は手入力の actuals だけ', cogs[2] === 200000, `cogs[2]=${cogs[2]}`)
+  ok('明細のある支払請求でも実績にはならない', F.actualSeries(state, 2025, 'cogs')[2] === 200000)
+  ok('旧・経費（expenses）は実績に入らない', F.actualSeries(state, 2025, 'sga')[3] === 50000, `sga[3]=${F.actualSeries(state, 2025, 'sga')[3]}`)
+  {
+    /* actuals を1行足すと、その月・その区分だけが増える */
+    const before = F.actualSeries(state, 2025, 'sga')[5]
+    state.actuals.push({ id: 'ATX', fy: 2025, mIndex: 5, accountCode: '6220', amount: 77000 })
+    ok('actuals を足すと実績が増える', F.actualSeries(state, 2025, 'sga')[5] === before + 77000)
+    ok('画面と連携で同じ数字', H.actualSeries(2025, 'sga')[5] === F.actualSeries(state, 2025, 'sga')[5])
+    state.actuals = state.actuals.filter(a => a.id !== 'ATX')
+  }
   ok('入金しても損益は動かない', F.actualSeries(state, 2025, 'revenue')[0] === 90000);
 }
 
