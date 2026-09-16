@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, setBookView:v=>{BOOK_VIEW=v}, get DASH_RANGE(){return DASH_RANGE} };';
+code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, setBookView:v=>{BOOK_VIEW=v}, feeBurdenOf, get DASH_RANGE(){return DASH_RANGE} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -614,6 +614,81 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   _db.invoices=keep.inv; _db.payments=keep.pay; _db.companies=keep.co;
 }
 
+console.log('\n― 振込手数料の差引き・入金の不足（2026-09-16） ―');
+{
+  const keep={ inv:_db.invoices.slice(), pay:_db.payments.slice(), co:_db.companies.slice() };
+  _db.invoices=[]; _db.payments=[];
+  _db.companies.push({ id:'FS', name:'先方負担社', kind:'得意先', dueAdjust:'そのまま' }, { id:'FT', name:'当社負担社', kind:'得意先', dueAdjust:'そのまま', feeBurden:'当社' });
+  const bill=(id,cid,ym,total)=>_db.invoices.push({ id, companyId:cid, bookMonth:ym, issueDate:ym+'-25', dueDate:ym.slice(0,5)+String(Number(ym.slice(5))+1).padStart(2,'0')+'-20', status:'確定', total, items:[] });
+  /* 保存と同じ手順（paySave の中身）で入金を入れる */
+  const pay=(id,cid,date,amount)=>{
+    const pv=ctx.payShortPreview(cid, amount, null);
+    let fee=0, feeShort=0;
+    if(pv.kind==='fee'){ if(pv.burden==='当社') fee=pv.left; else feeShort=pv.left; }
+    _db.payments.push({ id, companyId:cid, date, amount, fee, feeShort, status:'確定', allocations: ctx.arFifoAlloc(cid, amount+fee, null) });
+    return pv;
+  };
+  bill('FS1','FS','2025-04',110000); bill('FS2','FS','2025-05',110000); bill('FS3','FS','2025-06',110000);
+  eq('既定は 先方負担', ctx.__x.feeBurdenOf('FS'), '先方');
+  const p1=pay('P1','FS','2025-05-20',109560);
+  eq('440円少ない → 手数料の差引き（先方負担）', [p1.kind, p1.left, p1.burden, p1.target], ['fee', 440, '先方', 110000]);
+  eq('先方負担: 差引きは売掛金に残る', ctx.balanceOfInvoice(_db.invoices[0]), 440);
+  eq('先方負担: feeShort に記録', _db.payments[0].feeShort, 440);
+  const p2=pay('P2','FS','2025-06-20',109560);
+  eq('翌月も440円少ない → 次の請求に充てる（前の440円に食われない）', [p2.kind, p2.left, ctx.balanceOfInvoice(_db.invoices[1])], ['fee', 440, 440]);
+  eq('手数料の残りは 督促に入れない', ctx.dunStatus('FS').overdue.map(i=>i.id).includes('FS1'), false);
+  eq('残りは 2件 × 440円（ずれて増えていかない）', ctx.feeResiduals('FS').map(x=>x.bal), [440, 440]);
+  const pS=ctx.payShortPreview('FS', 60000, null);
+  eq('1,000円を超えて足りない → 不足', [pS.kind, pS.left], ['short', 50000]);
+  eq('ぴったり → ok', ctx.payShortPreview('FS', 110000, null).kind, 'ok');
+  eq('多い → over（差引きの残りへ充てる）', ctx.payShortPreview('FS', 110880+110000, null).kind, 'over');
+  eq('1,000円ちょうどは 手数料', ctx.payShortPreview('FS', 109000, null).kind, 'fee');
+  eq('1,001円は 不足', ctx.payShortPreview('FS', 108999, null).kind, 'short');
+  const chk=ctx.arCheckRows(2024).filter(r=>r.companyId==='FS');
+  eq('入金チェック: 差し引かれた2件は feeShort', chk.filter(r=>r.kind==='feeShort').length, 2);
+
+  /* 片付け: 次回請求に加算 */
+  ctx.__x.setSession({ email:'admin@x', role:'Admin', status:'active' });
+  ctx.feeResolve('FS','carry','FS1');
+  eq('次回請求に加算 → その請求は残高0', ctx.balanceOfInvoice(_db.invoices[0]), 0);
+  eq('次回請求に加算 → 「足す額」に出る', ctx.feeCarryPending('FS').map(x=>x.a.amount), [440]);
+  eq('入金チェック: 次回請求に加算', ctx.arCheckRows(2024).find(r=>r.inv.id==='FS1').kind, 'carry');
+  const sum1=ctx.feeSummary(2024).find(r=>r.companyId==='FS');
+  eq('まとめ: 2回・880円 差し引かれ、未処理440・足す額440', [sum1.n, sum1.deducted, sum1.open, sum1.carry], [2, 880, 440, 440]);
+  ctx.feeCarryDone('FS');
+  eq('MFに入れた → 足す額から消える', ctx.feeCarryPending('FS').length, 0);
+  /* 片付け: 当社負担 */
+  ctx.feeResolve('FS','absorb');
+  eq('当社負担 → 残りなし', ctx.feeResiduals('FS').length, 0);
+  eq('入金チェック: 当社負担', ctx.arCheckRows(2024).find(r=>r.inv.id==='FS2').kind, 'fee');
+  eq('会社の売掛残高 ＝ まだ払われていない FS3 だけ', ctx.arMonthly('FS',['2025-07'])[0].closing, 110000);
+  ctx.__x.setSession({ email:'staff@x', role:'Staff', status:'active' });
+  bill('FS4','FS','2025-07',110000); pay('P3','FS','2025-07-20',110000+109560);
+  ctx.feeResolve('FS','absorb');
+  eq('当社負担は スタッフではできない', ctx.feeResiduals('FS').length, 1);
+  ctx.__x.setSession({ email:'admin@x', role:'Admin', status:'active' });
+
+  /* 当社負担の会社 */
+  bill('FT1','FT','2025-04',110000);
+  const t1=pay('Q1','FT','2025-05-20',109560);
+  eq('当社負担の会社: 差引きは fee にして残高0', [t1.burden, _db.payments.find(x=>x.id==='Q1').fee, ctx.balanceOfInvoice(_db.invoices.find(x=>x.id==='FT1'))], ['当社', 440, 0]);
+  eq('当社負担の会社: 未処理にならない', ctx.feeResiduals('FT').length, 0);
+
+  /* 画面 */
+  ctx.__x.setFY(2024);
+  el.innerHTML=''; const h=ctx.viewArShort();
+  eq('差額の画面: 会社・回数・未処理・足す額・不足・対応', ['先方負担社','当社負担社','差引き回数','未処理','次回請求に足す','不足','次回請求に加算','当社負担にする'].every(x=>h.includes(x)), true);
+  eq('差額の画面はメニューの 回収 にある', ctx.__x.SECTIONS.find(x=>x.id==='sec-ar').tabs.some(t=>t.id==='arshort'), true);
+  eq('差額の権限は 請求と同じ', ctx.canSee('arshort'), ctx.canSee('invoices'));
+  eq('取引先に「振込手数料」の欄', ctx.__x.ENTITIES.companies.fields.some(f=>f.name==='feeBurden'), true);
+  const v=ctx.mailVars('ar','FS');
+  eq('メールの差し込み: 回数・額', [v['手数料差引回数'], v['手数料差引額']], ['3', '1,320']);
+  eq('ベル: 未処理の差引き', ctx.notifItems().some(x=>x.key==='fee-short'), true);
+
+  ctx.__x.setFY(2025);
+  _db.invoices=keep.inv; _db.payments=keep.pay; _db.companies=keep.co;
+}
+
 console.log('\n― 取引先モーダル（得意先／支払先・横3列） ―');
 /* ★ 2026-09-14: 新規登録・編集・詳細 を同じ3列にした。
    見た目を変えても、フォームから項目が1つでも落ちると 保存でその値が消える。だから全項目を数える。 */
@@ -1057,7 +1132,7 @@ try{ const h=ctx.viewAccounts(); const ok=h.length>500;
   console.log('\n― メール ―');
   {
     const kita3=_db.companies.find(c=>c.name.includes('北関東物流'));
-    eq('回収のテンプレは6つ（督促1〜3を含む）', ctx.mailTemplates('ar').length, 6);
+    eq('回収のテンプレは7つ（督促1〜3・手数料差引きを含む）', ctx.mailTemplates('ar').length, 7);
     eq('支払のテンプレは2つ', ctx.mailTemplates('ap').length, 2);
     const v=ctx.mailVars('ar', kita3.id);
     eq('差し込みの次回請求額は 取引先別 と同じ数字', v['次回請求額'], ctx.__x.moneyPlain(ctx.coNextBilling(kita3.id).total));

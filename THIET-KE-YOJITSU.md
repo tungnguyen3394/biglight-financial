@@ -250,6 +250,25 @@ docTaxCat = invoice.taxCat → 取引先.taxCat → 課税10%          (web docT
 - Tiêu đề số tiền ở 売掛金/買掛金/元帳 ghi `（税込）`; 入金額/支払額 ghi "số tiền thực nhận/thực trả".
 - `test/attachments.js` so từng con số giữa web và backend.
 
+### 4.3c Phí chuyển khoản bị trừ và tiền thiếu (差額) — 2026-09-16
+
+Vấn đề: khoảng 5–10/50 công ty trả thiếu hoặc tự trừ phí chuyển khoản (~440 yên). Trước đây nếu gõ ô 振込手数料 thì số dư về 0 và 440 yên biến mất; không gõ thì lẫn với nợ thật.
+
+- `companies.feeBurden`: `先方` (mặc định, trống = 先方) / `当社`.
+- `FEE_MAX = 1000`: chênh lệch 1〜1,000 yên = **手数料差引き**; > 1,000 = **不足** (trả một phần).
+- `入金を記録`: bỏ ô gõ phí. Ô so sánh `請求の残り − 入金 = 差額` hiện khi gõ số (`payShortPreview` = cùng phép tính với lúc lưu).
+  - 先方負担 → `payments.feeShort` = chênh lệch (chỉ để ghi nhận), phần thiếu **còn nằm trong 売掛金**.
+  - 当社負担 → `payments.fee` = chênh lệch, số dư về 0 (giống cách cũ).
+- **FIFO bỏ qua khoản lẻ** (`arFifoPlan`): hoá đơn đã trả một phần và còn ≤ FEE_MAX được xếp sau cùng. Nếu không, 440 của tháng trước ăn vào tháng sau và tiền thiếu trượt mãi.
+- Xử lý một khoản lẻ = thêm vào `payments.adjust[]` `{type, invoiceId, amount, at, by, done}`, cộng thêm vào allocations:
+  - `carry` (次回請求に加算): hiện ở "次回の請求に足す額" cho đến khi bấm `MFの請求書に入れた` (`done`).
+  - `absorb` (当社負担): chỉ Admin/Manager.
+  - `received(p) = amount + fee + Σadjust`. Backend tính số dư theo allocations nên không phải sửa.
+- Màn `arshort` "差額（手数料・不足）" (quyền = invoices): theo công ty — số lần bị trừ (năm), tổng bị trừ, chưa xử lý, cần cộng vào hoá đơn sau, 不足 quá hạn, các nút xử lý và mail `d-ar-fee`.
+- 入金チェック: thêm `feeShort` (đỏ), `carry`; `fee` = 当社負担. Chuông: `fee-short`, `fee-carry`.
+- 督促 **không** tính khoản lẻ (`isFeeResidual`) — xử lý ở màn 差額.
+- Dữ liệu cũ có `fee>0` được hiểu là 当社負担 (đã đóng).
+
 ### 4.4 OKR
 
 | Key | Trường chính |

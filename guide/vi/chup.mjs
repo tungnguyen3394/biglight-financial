@@ -105,13 +105,13 @@ export default {
       run: async p => {
         await p.evaluate(`openPayment()`); await p.waitForTimeout(300)
         const sel = p.locator('#modal select').first()
-        const v = await sel.evaluate(s => [...s.options].find(o => o.text.includes('北関東物流'))?.value)
-        if (v) { await sel.selectOption(v); await sel.dispatchEvent('change') }
-        await p.waitForTimeout(200)
-        await p.locator('#modal label:has-text("入金額") + input, #modal label:has-text("入金額") ~ input').first().fill('150000').catch(() => {})
+        const v = await p.evaluate(() => DB.companies.find(c => c.name.includes('東和フーズ')).id)
+        await sel.selectOption(v); await sel.dispatchEvent('change'); await p.waitForTimeout(300)
+        const t = await p.evaluate(id => payShortPreview(id, 1, null).target, v)
+        const amt = p.locator('#modal input.num').first(); await amt.fill(String(t - 440)); await amt.dispatchEvent('input')
       },
       clip: '#modal',
-      marks: { date: '#modal input[type="date"]', co: '#modal select >> nth=0', amt: '#modal label:has-text("入金額") + *', fee: '#modal label:has-text("振込手数料") + *',
+      marks: { date: '#modal input[type="date"]', co: '#modal select >> nth=0', amt: '#modal label:has-text("入金額") + *', diff: '#payDiff',
         files: '#modal .attpend', save: '#modal button:has-text("保存")' },
     },
     mf: {
@@ -167,6 +167,16 @@ export default {
     },
     cashflow: { page: 'cashflow', marks: { seg: '#main .seg', start: '#main button:has-text("開始残高を設定")' } },
 
+    arshort: {
+      page: 'arshort', height: 760,
+      marks: { kpi: '#main .kpi-grid', open: '#main tbody tr:has-text("あおば") td >> nth=3', btn: '#main tbody tr:has-text("あおば") button:has-text("次回請求に加算")',
+        abs: '#main tbody tr:has-text("あおば") button:has-text("当社負担")', mail: '#main tbody tr:has-text("あおば") button:has-text("✉")', burden: '#main tbody tr:has-text("みどり") td >> nth=0' },
+    },
+    fee_burden: {
+      page: 'companies',
+      run: ev(`openForm('companies', DB.companies.find(c=>c.name.includes('あおば')).id)`), clip: '#modal',
+      marks: { fee: '#modal select[name="feeBurden"]' },
+    },
     /* ── 証憑（ファイル）── */
     arbill_form: {
       page: 'arbook',

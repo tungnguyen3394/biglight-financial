@@ -614,6 +614,13 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .attprev iframe{width:100%; height:100%; min-height:62vh; border:0; background:#fff;}
   .attprev img{max-width:100%; max-height:66vh; object-fit:contain;}
   @media(max-width:900px){ .attwin{grid-template-columns:1fr;} .attprev,.attprev iframe{min-height:50vh;} }
+  /* 入金の差額（2026-09-16） */
+  .pdiff{margin-top:12px; border-radius:10px; padding:10px 14px; font-size:13px; line-height:1.6; border:1px solid var(--border);}
+  .pdiff.ok{background:var(--success-soft,#eaf7ee); border-color:#bfe3c9;}
+  .pdiff.info{background:var(--surface-2);}
+  .pdiff.bad{background:var(--danger-soft); border-color:#f5c2bd;}
+  .pdiff-row{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; margin-bottom:4px;}
+  .pdiff-row b{font-size:15px;}
   /* 入力フォームの中の「ファイルを付ける」 */
   .attpend{display:flex; gap:8px; align-items:stretch;}
   .attpend .attdrop{flex:1;}
@@ -771,7 +778,7 @@ const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
 /* 同じ台帳を別の入口から見る画面は、権限も同じにする（二重に設定させない） */
-const PAGE_PERM_ALIAS = { arbook:'invoices', archeck:'invoices', apbook:'bills', apsuii:'bills', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
+const PAGE_PERM_ALIAS = { arbook:'invoices', archeck:'invoices', arshort:'invoices', apbook:'bills', apsuii:'bills', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
 function permOf(page){
   page = PAGE_PERM_ALIAS[page] || page;
   const role = myRole();
@@ -996,6 +1003,8 @@ const ENTITIES = {
       {name:'owner',      label:'BIGLIGHT担当者', type:'text', ph:'名前 または メール',
         help:'CRM の「BIGLIGHT担当者」と同じ人。'},
       {name:'taxCat',     label:'既定の税区分', type:'select', options:TAX_CATS},
+      /* ★ 2026-09-16: 振込手数料の負担。空欄＝先方負担（差し引かれたら 売掛金に残す） */
+      {name:'feeBurden',  label:'振込手数料', type:'select', options:[{k:'先方',label:'先方負担（差し引かれたら不足）'},{k:'当社',label:'当社負担'}]},
       {name:'billTo',     label:'請求書送付先', type:'text'},
       {name:'billEmail',  label:'請求書メール', type:'text'},
       {name:'bankInfo',   label:'振込先・口座', type:'text', full:true},
@@ -1176,6 +1185,7 @@ const SECTIONS = [
     {id:'arbook',   label:'売掛金'},
     {id:'receipts', label:'入金'},
     {id:'archeck',  label:'入金チェック'},
+    {id:'arshort',  label:'差額（手数料・不足）'},
     {id:'dunning',  label:'督促（今日やること）'} ]},
   /* ★ 2026-09-15 利用者の指示: 買掛金は 売掛金と同じ「支払先×月の残高」、費用は 推移表（大・中・小 › 支払先）。
        未払（年齢表）・支払先別 はメニューから外しました（買掛金と買掛元帳が同じことを見せるため。コードは残してあります。
@@ -1647,6 +1657,7 @@ function renderPage(page){
       case 'invoices':  html=viewInvoices();  break;
       case 'receipts':  html=viewReceipts();  break;
       case 'archeck':   html=viewArCheck();   break;
+      case 'arshort':   html=viewArShort();   break;
       case 'apbook':    html=viewApBook();    break;
       case 'apsuii':    html=viewApSuii();    break;
       case 'aging':     html=viewAging();     break;
@@ -3351,19 +3362,114 @@ function ledRedraw(){
 /* ---------- 入金の充て先（古い請求から自動）----------
    新しい画面では請求書ごとの消込をしない。ただし 督促・資金繰り・API は
    請求書ごとの残高（allocations）で動いているので、裏で古い順に充てて食い違わないようにする。 */
-function arFifoAlloc(companyId, amount, paymentId){
+/* ★ 2026-09-16: 手数料の差引きで残った少額（FEE_MAX 以下）は 後回し。
+   先に次の請求に充てないと、毎月 440円 が次の請求へずれていき「不足」が止まらなくなる。
+   残ったお金があれば 最後に少額の残りへ充てる（先方が差額を払ってくれたとき）。 */
+function arFifoPlan(companyId, amount, paymentId){
   const old=paymentId? (findById('payments',paymentId)||{}).allocations||[] : [];
   const mine={}; old.forEach(a=>mine[a.invoiceId]=(mine[a.invoiceId]||0)+num(a.amount));
-  let rest=num(amount); const out=[];
-  (DB.invoices||[]).filter(i=>String(i.companyId)===String(companyId) && AR_LIVE(i))
+  const list=(DB.invoices||[]).filter(i=>String(i.companyId)===String(companyId) && AR_LIVE(i))
     .sort((a,b)=>String(a.dueDate||arYmOfInv(a)).localeCompare(String(b.dueDate||arYmOfInv(b))) || String(a.no||'').localeCompare(String(b.no||'')))
-    .forEach(i=>{
-      if(rest<=0) return;
-      const bal=balanceOfInvoice(i)+(mine[i.id]||0);
-      const use=Math.min(bal, rest);
-      if(use>0){ out.push({ invoiceId:i.id, amount:use }); rest-=use; }
-    });
+    .map(i=>{ const bal=balanceOfInvoice(i)+(mine[i.id]||0), paid=docTotal(i)-bal; return { i, bal, small: paid>0 && bal>0 && bal<=FEE_MAX }; });
+  let rest=num(amount); const out=[]; let stop=null;
+  const take=x=>{ if(rest<=0||x.bal<=0) return; const use=Math.min(x.bal, rest); out.push({ invoiceId:x.i.id, amount:use }); rest-=use; if(use<x.bal && !stop) stop={ inv:x.i, left:x.bal-use }; };
+  list.filter(x=>!x.small).forEach(take);
+  list.filter(x=>x.small).forEach(take);
+  return { allocations:out, stop, over:rest };
+}
+function arFifoAlloc(companyId, amount, paymentId){ return arFifoPlan(companyId, amount, paymentId).allocations; }
+
+/* ============================================================================
+   振込手数料の差引き・入金の不足 — 2026-09-16 利用者の指示
+   ----------------------------------------------------------------------------
+   ・取引先ごとに 振込手数料の負担（feeBurden: 先方＝既定／当社）。
+   ・入金を記録するとき、途中で止まった請求の残り（stop.left）を見る:
+       1〜FEE_MAX 円 → 手数料の差引き。先方負担なら 売掛金に残す（feeShort に記録）、
+                                       当社負担なら その場で fee にして 残高0。
+       FEE_MAX 円超 → 入金の不足（一部入金）。
+   ・残った差引き（請求の少額の残り）の片付け方は2つだけ（payments.adjust に残す）:
+       carry  … 次回の請求に加算する（Money Forward の請求書に足す。足したら done）
+       absorb … 当社負担にする（管理者・マネージャーのみ）
+   ・「差額」の画面で 会社ごとに 回数・金額・未処理 を見る。
+   ========================================================================== */
+const FEE_MAX = 1000;
+/** 手数料の差引きで残った少額の請求か（一部入金済み・残り FEE_MAX 以下） */
+const isFeeResidual = i => { const bal=balanceOfInvoice(i), paid=docTotal(i)-bal; return paid>0 && bal>0 && bal<=FEE_MAX; };
+const feeBurdenOf = cid => ((findById('companies',cid)||{}).feeBurden==='当社')? '当社' : '先方';
+/** 入金額を入れた時点での見立て（保存と同じ計算） */
+function payShortPreview(companyId, amount, paymentId){
+  if(!companyId || !(num(amount)>0)) return null;
+  const pl=arFifoPlan(companyId, num(amount), paymentId);
+  const left = pl.stop? pl.stop.left : 0;
+  const kind = !left? (pl.over>0? 'over' : 'ok') : (left<=FEE_MAX? 'fee' : 'short');
+  return { kind, left, over:pl.over, inv:pl.stop? pl.stop.inv : null, burden:feeBurdenOf(companyId),
+    target: pl.allocations.reduce((s,a)=>s+num(a.amount),0)+left };
+}
+/** 手数料の差引きで残っている請求（未処理）。{ inv, bal, pay } */
+function feeResiduals(companyId){
+  return (DB.invoices||[]).filter(i=>AR_LIVE(i) && (!companyId || String(i.companyId)===String(companyId))).map(i=>{
+    const bal=balanceOfInvoice(i), paid=docTotal(i)-bal;
+    if(!(paid>0 && bal>0 && bal<=FEE_MAX)) return null;
+    const pays=(DB.payments||[]).filter(p=>p.status!=='取消' && (p.allocations||[]).some(a=>String(a.invoiceId)===String(i.id)))
+      .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+    return { inv:i, bal, pay:pays[0]||null };
+  }).filter(x=>x && x.pay);
+}
+/** 片付ける。how: 'carry'（次回請求に加算）／'absorb'（当社負担） */
+function feeResolve(companyId, how, invoiceId){
+  if(how==='absorb' && !(myRole()==='Admin'||myRole()==='Manager')){ toast('当社負担にできるのは 管理者・マネージャーです。','err'); return; }
+  if(!canEdit('receipts')){ toast('入金を直す権限がありません。','err'); return; }
+  const list=feeResiduals(companyId).filter(x=>!invoiceId || String(x.inv.id)===String(invoiceId));
+  if(!list.length){ toast('片付ける差額はありません。','err'); return; }
+  const tot=list.reduce((s,x)=>s+x.bal,0), name=arCoName(companyId);
+  const msg = how==='carry'
+    ? `${name} の差額 ${list.length}件・${moneyPlain(tot)}円 を「次回の請求に加算」にします。\nMoney Forward で次の請求書に ${moneyPlain(tot)}円 を足してください（「差額」の画面に残ります）。`
+    : `${name} の差額 ${list.length}件・${moneyPlain(tot)}円 を「当社負担」にします（回収しません）。\nこの判断は記録に残ります。よろしいですか？`;
+  if(!confirm(msg)) return;
+  const me=(SESSION&&SESSION.email)||'', at=new Date().toISOString();
+  list.forEach(x=>{
+    const p=x.pay;
+    p.adjust=(p.adjust||[]).concat([{ type:how, invoiceId:x.inv.id, amount:x.bal, at, by:me, done: how==='absorb' }]);
+    p.allocations=(p.allocations||[]).concat([{ invoiceId:x.inv.id, amount:x.bal }]);
+    p.updatedAt=at; markDirty('payments', p);
+  });
+  renderPage(CURRENT_PAGE); renderNav();
+  toast(how==='carry'? `次回請求に加算：${moneyPlain(tot)}円` : `当社負担にしました：${moneyPlain(tot)}円`,'ok');
+}
+/** 次回請求に加算して、まだ MF の請求書に入れていない額 */
+function feeCarryPending(companyId){
+  const out=[];
+  (DB.payments||[]).filter(p=>p.status!=='取消' && (!companyId || String(p.companyId)===String(companyId)))
+    .forEach(p=>(p.adjust||[]).forEach((a,k)=>{ if(a.type==='carry' && !a.done) out.push({ p, a, k }); }));
   return out;
+}
+function feeCarryDone(companyId){
+  const list=feeCarryPending(companyId); if(!list.length) return;
+  const tot=list.reduce((s,x)=>s+num(x.a.amount),0);
+  if(!confirm(`${arCoName(companyId)} の次の請求書（Money Forward）に ${moneyPlain(tot)}円 を足しましたか？\n「入れた」にすると、この一覧から消えます。`)) return;
+  const at=new Date().toISOString(), me=(SESSION&&SESSION.email)||'';
+  list.forEach(x=>{ x.a.done=true; x.a.doneAt=at; x.a.doneBy=me; x.p.updatedAt=at; markDirty('payments', x.p); });
+  renderPage(CURRENT_PAGE); renderNav(); toast('入れた、にしました。','ok');
+}
+/** 会社ごとのまとめ（年度） */
+function feeSummary(fy){
+  const m=new Map();
+  const row=cid=>{ const k=String(cid); if(!m.has(k)) m.set(k,{ companyId:k, n:0, deducted:0, open:0, openN:0, carry:0, absorbed:0, short:0, shortN:0 }); return m.get(k); };
+  (DB.payments||[]).filter(p=>p.status!=='取消').forEach(p=>{
+    const ym=String(p.date||'').slice(0,7);
+    const d=num(p.feeShort)+num(p.fee);
+    if(d>0 && (fy==null || fyOf(ym)===Number(fy))){ const r=row(p.companyId); r.n++; r.deducted+=d; if(num(p.fee)) r.absorbed+=num(p.fee); }
+    (p.adjust||[]).forEach(a=>{ if(a.type==='absorb' && (fy==null || fyOf(String(a.at||'').slice(0,7))===Number(fy))) row(p.companyId).absorbed+=num(a.amount); });
+  });
+  feeResiduals().forEach(x=>{ const r=row(x.inv.companyId); r.open+=x.bal; r.openN++; });
+  feeCarryPending().forEach(x=>{ row(x.p.companyId).carry+=num(x.a.amount); });
+  /* 不足（FEE_MAX 超の一部入金で、期日を過ぎたもの） */
+  const t=today();
+  (DB.invoices||[]).filter(i=>AR_LIVE(i)).forEach(i=>{
+    const bal=balanceOfInvoice(i), paid=docTotal(i)-bal, due=effDue(i);
+    if(paid>0 && bal>FEE_MAX && due && due<t){ const r=row(i.companyId); r.short+=bal; r.shortN++; }
+  });
+  return [...m.values()];
 }
 /** 請求を取り込んだあと、充て先の決まっていない入金の残りを 古い請求から充てる（既存の充て先は変えない） */
 function arApplyUnallocated(companyId){
@@ -3843,7 +3949,10 @@ function viewReceipts(){
     {key:'date', label:'入金日', date:true, val:r=>esc(r.date||'')},
     {key:'companyId', label:'取引先', raw:r=>String(companyName(r.companyId)).replace(/<[^>]+>/g,''), val:r=>coLink(r.companyId,'ar')},
     {key:'amount', label:'入金額', cls:'r', noFilter:true, val:r=>`<b class="num plus">${moneyPlain(r.amount)}</b>`},
-    {key:'fee', label:'振込手数料', cls:'r', noFilter:true, val:r=>money(r.fee)},
+    {key:'fee', label:'差額', cls:'r', noFilter:true, val:r=>{
+      if(num(r.feeShort)) return `<span class="badge b-red" title="振込手数料の差引き（先方負担）">手数料差引き −${moneyPlain(r.feeShort)}</span>`;
+      if(num(r.fee)) return `<span class="badge b-gray" title="当社負担にした手数料">当社負担 ${moneyPlain(r.fee)}</span>`;
+      return '<span class="zero">—</span>'; }},
     {key:'source', label:'取込元', raw:r=>PAY_SOURCE_LABEL[r.source||'manual']||r.source, val:r=>esc(PAY_SOURCE_LABEL[r.source||'manual']||r.source)},
     {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payments', r.id, r)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
@@ -3880,7 +3989,9 @@ const ARCHK_KINDS = {
   ok:    { label:'全額・期日内',   cls:'b-green',  hint:'期日までに 請求額どおり' },
   late:  { label:'全額・遅れ',     cls:'b-amber',  hint:'全額 入ったが 期日より後' },
   split: { label:'分割で全額',     cls:'b-blue',   hint:'2回以上に分けて 全額' },
-  fee:   { label:'手数料を引いて', cls:'b-blue',   hint:'振込手数料を 先方が差し引き（残高は0）' },
+  feeShort:{ label:'手数料差引き', cls:'b-red',   hint:`振込手数料を差し引かれた（${FEE_MAX}円以下の不足・未処理）→ 差額 の画面で片付ける` },
+  carry: { label:'次回請求に加算', cls:'b-amber',  hint:'差し引かれた手数料を 次の請求書に足す（残高は0）' },
+  fee:   { label:'手数料 当社負担', cls:'b-gray',   hint:'差し引かれた手数料を 当社負担にした（残高は0）' },
   over:  { label:'過入金',         cls:'b-purple', hint:'多く払われた分は 次の請求に充当' },
   short: { label:'不足',           cls:'b-red',    hint:'期日を過ぎて 一部だけ入金' },
   none:  { label:'未入金',         cls:'b-red',    hint:'期日を過ぎて 1円も入っていない' },
@@ -3919,14 +4030,18 @@ function arCheckRows(fy){
     const paid=al.reduce((s,a)=>s+a.amount,0), bal=total-paid;
     const pids=[...new Set(al.map(a=>a.p.id))], payOf=id=>al.find(a=>a.p.id===id).p;
     const prepaid=al.filter(a=>a.p.date && iss && String(a.p.date).slice(0,10)<iss).reduce((s,a)=>s+a.amount,0);
-    const fee=pids.reduce((s,id)=>s+num(payOf(id).fee),0);
+    const adj=t2=>pids.reduce((s,id)=>s+(payOf(id).adjust||[]).filter(a=>a.type===t2 && String(a.invoiceId)===String(inv.id)).reduce((u,a)=>u+num(a.amount),0),0);
+    const carried=adj('carry'), absorbed=adj('absorb');
+    const fee=pids.reduce((s,id)=>s+num(payOf(id).fee),0)+absorbed;
     const nPay=pids.filter(id=>!(iss && String(payOf(id).date||'').slice(0,10)<iss)).length;
     let run=0, settle=null; for(const a of al){ run+=a.amount; if(run>=total){ settle=String(a.p.date||'').slice(0,10); break; } }
     const ov=overByInv.get(String(inv.id)), overAmt=ov? ov.amount : 0;
     const lateDays = settle && due ? daysBetween(due, settle) : (bal>0 && due && due<t ? daysBetween(due, t) : 0);
     let kind;
-    if(bal>0) kind = (due && due<t)? (paid>0? 'short' : 'none') : 'wait';
+    if(bal>0 && paid>0 && bal<=FEE_MAX) kind='feeShort';
+    else if(bal>0) kind = (due && due<t)? (paid>0? 'short' : 'none') : 'wait';
     else if(overAmt>0) kind='over';
+    else if(carried>0) kind='carry';
     else if(fee>0) kind='fee';
     else if(nPay>=2) kind='split';
     else if(lateDays>0) kind='late';
@@ -3934,13 +4049,15 @@ function arCheckRows(fy){
     const notes=[];
     if(prepaid>0) notes.push(`前に多く払われた ${moneyPlain(prepaid)}円 を充当`);
     if(overAmt>0) notes.push(`${moneyPlain(overAmt)}円 多く入金 → 次の請求に充当`);
-    if(fee>0) notes.push(`振込手数料 ${moneyPlain(fee)}円 を先方が差し引き`);
+    if(fee>0) notes.push(`振込手数料 ${moneyPlain(fee)}円 は当社負担`);
+    if(carried>0) notes.push(`差し引かれた ${moneyPlain(carried)}円 は次回請求に加算`);
+    if(kind==='feeShort') notes.push(`振込手数料 ${moneyPlain(bal)}円 を差し引かれた（未処理）`);
     if(nPay>=2) notes.push(`${nPay}回に分けて入金`);
-    if(bal>0 && paid>0) notes.push(`${moneyPlain(bal)}円 足りない`);
+    if(bal>0 && paid>0 && kind!=='feeShort') notes.push(`${moneyPlain(bal)}円 足りない`);
     if(lateDays>0) notes.push(bal>0? `期日から ${lateDays}日` : `${lateDays}日 遅れ`);
     else if(settle && lateDays<0) notes.push(`${-lateDays}日 前に入金`);
     rows.push({ inv, companyId:String(inv.companyId), ym, no:inv.no||'', total, due, paid, bal, fee, prepaid, overAmt,
-      cash: paid-fee-prepaid+overAmt, diff: paid+overAmt-total, dates: pids.map(id=>String(payOf(id).date||'').slice(0,10)),
+      cash: paid-fee-carried-prepaid+overAmt, carried, diff: paid+overAmt-total, dates: pids.map(id=>String(payOf(id).date||'').slice(0,10)),
       settle, lateDays, nPay, kind, notes, staff: staffOf(invStaffRaw(inv)).name });
   });
   return rows.sort((a,b)=>b.ym.localeCompare(a.ym) || arCoName(a.companyId).localeCompare(arCoName(b.companyId),'ja'));
@@ -3955,9 +4072,9 @@ function viewArCheck(){
   rows=rows.filter(r=>fcolPass(p,r));
 
   const sumOf=k=>{ const list=all.filter(r=>r.kind===k);
-    const amt = k==='short'||k==='none'||k==='wait'? list.reduce((s,r)=>s+r.bal,0) : (k==='over'? list.reduce((s,r)=>s+r.overAmt,0) : (k==='fee'? list.reduce((s,r)=>s+r.fee,0) : list.reduce((s,r)=>s+r.total,0)));
+    const amt = k==='short'||k==='none'||k==='wait'||k==='feeShort'? list.reduce((s,r)=>s+r.bal,0) : (k==='over'? list.reduce((s,r)=>s+r.overAmt,0) : (k==='fee'? list.reduce((s,r)=>s+r.fee,0) : (k==='carry'? list.reduce((s,r)=>s+r.carried,0) : list.reduce((s,r)=>s+r.total,0))));
     return { n:list.length, amt }; };
-  const amtLabel={ short:'足りない額', none:'未入金額', wait:'これから', over:'多く入った額', fee:'手数料', ok:'請求額', late:'請求額', split:'請求額' };
+  const amtLabel={ short:'足りない額', none:'未入金額', wait:'これから', over:'多く入った額', fee:'手数料', feeShort:'差し引かれた額', carry:'加算する額', ok:'請求額', late:'請求額', split:'請求額' };
   const chips=`<div class="archk-chips">${Object.entries(ARCHK_KINDS).map(([k,d])=>{ const x=sumOf(k);
     return `<button type="button" class="archk-chip ${ARCHK_FILTER===k?'on':''} ${x.n?'':'zero'}" onclick="setArchkFilter('${k}')" title="${attr(d.hint)}">
       <span class="badge ${d.cls}">${esc(d.label)}</span><b class="num">${x.n}<small>件</small></b>
@@ -3969,6 +4086,8 @@ function viewArCheck(){
     <div class="kpi"><div class="lbl">請求（${esc(fyLabel(fy))}）</div><div class="num">${moneyPlain(billed)}</div><div class="sub">${all.length}件</div></div>
     <div class="kpi"><div class="lbl">充当済みの入金</div><div class="num plus">${moneyPlain(paidAll)}</div><div class="sub">回収率 ${billed? (paidAll/billed*100).toFixed(1)+'%' : '—'}</div></div>
     <div class="kpi"><div class="lbl">期日までに全額 入った請求</div><div class="num">${due.length? Math.round(fine/due.length*100) : 0}%</div><div class="sub">${fine}件 ／ 期日が来た ${due.length}件（手数料差引・過入金・分割も 期日内なら含む）</div></div>
+    <div class="kpi clickable" onclick="goto('arshort')"><div class="lbl">手数料の差引き（未処理）</div>
+      <div class="num minus">${moneyPlain(sumOf('feeShort').amt)}</div><div class="sub">${sumOf('feeShort').n}件 ・ 差額の画面へ →</div></div>
     <div class="kpi clickable" onclick="setArchkFilter('short')"><div class="lbl">いま足りない（不足＋未入金）</div>
       <div class="num minus">${moneyPlain(sumOf('short').amt+sumOf('none').amt)}</div><div class="sub">${sumOf('short').n+sumOf('none').n}件</div></div>
   </div>`;
@@ -3981,7 +4100,7 @@ function viewArCheck(){
     {key:'total', label:'請求額', cls:'r', noFilter:true, val:r=>`<span class="num">${moneyPlain(r.total)}</span>`},
     {key:'due', label:'期日', noFilter:true, val:r=>esc(r.due||'—')},
     {key:'cash', label:'振込額', cls:'r', noFilter:true, val:r=>r.cash||r.prepaid? `<span class="num">${moneyPlain(r.cash)}</span>` : '<span class="zero">0</span>'},
-    {key:'fee', label:'手数料', cls:'r', noFilter:true, val:r=>r.fee? `<span class="num">${moneyPlain(r.fee)}</span>` : '<span class="zero">—</span>'},
+    {key:'fee', label:'手数料', cls:'r', noFilter:true, val:r=>r.kind==='feeShort'? `<b class="num minus">${moneyPlain(r.bal)}</b>` : ((r.fee||r.carried)? `<span class="num">${moneyPlain(r.fee+r.carried)}</span>` : '<span class="zero">—</span>')},
     {key:'diff', label:'差額', cls:'r', noFilter:true, val:r=>!r.diff? '<span class="zero">0</span>'
       : `<b class="num ${r.diff>0?'archk-plus':'minus'}">${r.diff>0?'+':'−'}${moneyPlain(Math.abs(r.diff))}</b>`},
     {key:'dates', label:'入金日', noFilter:true, val:r=>r.dates.length? r.dates.map(d=>`<div class="num" style="font-size:11.5px;">${esc(d)}</div>`).join('') : '<span class="zero">—</span>'},
@@ -3997,6 +4116,56 @@ function viewArCheck(){
           <a onclick="setArchkFilter('${ARCHK_FILTER}')" style="cursor:pointer;color:var(--primary);margin-left:8px;">すべて表示</a></div>` : '')
       +(unal>0? `<div class="warnbar" style="margin:0 0 8px;">どの請求にも充てていない入金が ${moneyPlain(unal)}円 あります（次の請求が来ると 古い順に充てます）。</div>` : '')
       +dataTable(p, rows, cols, { allRows:all, onRow:r=>`openArLedger('${attr(r.companyId)}')`, emptyText:'この年度の請求はありません。' }) });
+}
+
+/* ============================================================================
+   差額（手数料・不足）— 会社ごとに「いくら・何回 足りなかったか」と 片付け
+   ========================================================================== */
+function viewArShort(){
+  const p='arshort', fy=CUR_FY;
+  const all=feeSummary(fy).filter(r=>r.n||r.open||r.carry||r.short)
+    .sort((a,b)=>(b.open+b.short+b.carry)-(a.open+a.short+a.carry) || b.deducted-a.deducted);
+  const q=(SEARCH[p]||'').trim().toLowerCase();
+  const rows=all.filter(r=>!q || arCoName(r.companyId).toLowerCase().includes(q));
+  const S=k=>all.reduce((s,r)=>s+r[k],0);
+  const mgr=myRole()==='Admin'||myRole()==='Manager', canE=canEdit('receipts');
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">手数料の差引き（未処理）</div><div class="num minus">¥${moneyPlain(S('open'))}</div><div class="sub">${S('openN')}件 ・ 下の「対応」で片付ける</div></div>
+    <div class="kpi"><div class="lbl">次回の請求に足す額</div><div class="num">¥${moneyPlain(S('carry'))}</div><div class="sub">Money Forward の請求書に入れたら「入れた」</div></div>
+    <div class="kpi"><div class="lbl">入金の不足（期日超過）</div><div class="num minus">¥${moneyPlain(S('short'))}</div><div class="sub">${S('shortN')}件 ・ 督促へ</div></div>
+    <div class="kpi"><div class="lbl">差し引かれた手数料（${esc(fyLabel(fy))}）</div><div class="num">¥${moneyPlain(S('deducted'))}</div>
+      <div class="sub">${S('n')}回 ・ うち当社負担 ¥${moneyPlain(S('absorbed'))}</div></div>
+  </div>`;
+  const body=rows.map(r=>{
+    const c=findById('companies', r.companyId)||{};
+    const act=[];
+    if(r.open && canE) act.push(`<button class="btn sm" onclick="feeResolve('${attr(r.companyId)}','carry')">次回請求に加算</button>`);
+    if(r.open && mgr) act.push(`<button class="btn secondary sm" onclick="feeResolve('${attr(r.companyId)}','absorb')">当社負担にする</button>`);
+    if(r.carry && canE) act.push(`<button class="btn secondary sm" onclick="feeCarryDone('${attr(r.companyId)}')">MFの請求書に入れた</button>`);
+    if(r.short) act.push(`<button class="btn secondary sm" onclick="goto('dunning')">督促へ</button>`);
+    if(r.n) act.push(`<button class="btn secondary sm" title="振込手数料差引きのご連絡" onclick="mailCompose('ar','${attr(r.companyId)}','d-ar-fee')">✉</button>`);
+    return `<tr>
+      <td><a class="ar-name" onclick="openArLedger('${attr(r.companyId)}')">${esc(arCoName(r.companyId))}</a>
+        <div class="muted" style="font-size:10.5px;">手数料 ${feeBurdenOf(r.companyId)}負担${c.feeBurden?'':'（既定）'}</div></td>
+      <td class="r num">${r.n? r.n+'回' : '<span class="zero">—</span>'}</td>
+      <td class="r num">${r.deducted? moneyPlain(r.deducted) : '<span class="zero">—</span>'}</td>
+      <td class="r num">${r.open? `<b class="minus">${moneyPlain(r.open)}</b> <span class="muted">(${r.openN}件)</span>` : '<span class="zero">0</span>'}</td>
+      <td class="r num">${r.carry? `<b>${moneyPlain(r.carry)}</b>` : '<span class="zero">0</span>'}</td>
+      <td class="r num">${r.short? `<b class="minus">${moneyPlain(r.short)}</b> <span class="muted">(${r.shortN}件)</span>` : '<span class="zero">0</span>'}</td>
+      <td><div style="display:flex;gap:6px;flex-wrap:wrap;">${act.join('')}</div></td></tr>`;
+  }).join('');
+  const table=`<div class="table-wrap"><table>
+    <thead><tr><th>取引先</th><th class="r">差引き回数<br><span class="muted" style="font-weight:400;">年度</span></th><th class="r">差し引かれた額<br><span class="muted" style="font-weight:400;">年度</span></th>
+      <th class="r">未処理</th><th class="r">次回請求に足す</th><th class="r">不足<br><span class="muted" style="font-weight:400;">期日超過</span></th><th>対応</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="7" class="empty">差額はありません。</td></tr>'}</tbody>
+    ${rows.length? `<tfoot><tr class="totrow"><td>合計（${rows.length}社）</td><td class="r num">${S('n')}回</td><td class="r num">${moneyPlain(S('deducted'))}</td>
+      <td class="r num">${moneyPlain(S('open'))}</td><td class="r num">${moneyPlain(S('carry'))}</td><td class="r num">${moneyPlain(S('short'))}</td><td></td></tr></tfoot>` : ''}
+  </table></div>`;
+  const help=`<div class="infobar">入金が請求より <b>${FEE_MAX}円以下</b> 少ないときは <b>振込手数料の差引き</b>、それより多く足りないときは <b>不足</b> です。
+    手数料の負担は 取引先 › 請求・回収条件 の「振込手数料」で決めます（既定は 先方負担）。先方負担の会社の差引きは 売掛金に残り、ここで
+    <b>次回請求に加算</b>（MF の次の請求書に足す）か <b>当社負担</b>（管理者・マネージャー）で片付けます。</div>`;
+  const tools=`${searchBox(p,'取引先で検索')}`;
+  return pageShell({ title:'差額（手数料・不足）', count:all.length, shown:rows.length, tools, body: help+kpis+table });
 }
 
 let PAY_CTX=null;
@@ -4031,12 +4200,13 @@ function drawPaymentModal(){
       <div><label>入金日</label><input type="date" value="${attr(c.date)}" onchange="PAY_CTX.date=this.value"></div>
       <div><label>取引先</label><select onchange="PAY_CTX.companyId=this.value;drawPaymentModal()">
         <option value="">-</option>${cos.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      <div><label>入金額 <span class="muted" style="font-weight:400;">（通帳に入った金額）</span></label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PAY_CTX.amount=num(this.value)"></div>
-      <div><label>振込手数料（先方負担分）</label><input class="num" style="text-align:right;" value="${c.fee?moneyPlain(c.fee):''}" oninput="fmtMoneyInput(this);PAY_CTX.fee=num(this.value)">
-        <div class="fhelp">差し引かれて入金された手数料。売掛金はこの分も減ります。</div></div>
+      <div><label>入金額 <span class="muted" style="font-weight:400;">（通帳に入った金額）</span></label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PAY_CTX.amount=num(this.value);payDiffPaint()"></div>
+      ${c.fee? `<div><label>当社負担の手数料</label><input class="num" style="text-align:right;" value="${moneyPlain(c.fee)}" readonly>
+        <div class="fhelp">以前の記録（当社負担にした手数料）。</div></div>` : ''}
       <div><label>方法</label><select onchange="PAY_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div><label>備考</label><input value="${attr(c.note||'')}" oninput="PAY_CTX.note=this.value"></div>
     </div>
+    <div id="payDiff">${payDiffHtml()}</div>
     ${attPendHtml('pay','payments',c.id,{hint:'振込明細・入金の控えをドロップ'})}
     ${bal? `<div class="infobar" style="margin-top:12px;">この取引先の売掛金残高（税込・今月末時点）：<b class="num">¥${arAmt(bal.closing)}</b>
       ${bal.overdue>0?` ・ <span class="minus">うち期限超過 ¥${moneyPlain(bal.overdue)}</span>`:''}${c.id?' （この入金を含む）':''}</div>` : ''}
@@ -4045,6 +4215,25 @@ function drawPaymentModal(){
       <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
       <button class="btn" onclick="paySave()">保存</button></div></div>`,'lg');
 }
+/** 請求の残りと入金額のくらべ（入力しながら出る） */
+function payDiffHtml(){
+  const c=PAY_CTX; if(!c) return '';
+  const pv=payShortPreview(c.companyId, c.amount, c.id); if(!pv) return '';
+  const burden=pv.burden==='当社'? '当社負担' : '先方負担';
+  const head=`<div class="pdiff-row"><span>請求の残り</span><b class="num">¥${moneyPlain(pv.target)}</b>
+    <span>−</span><span>入金</span><b class="num">¥${moneyPlain(c.amount)}</b>
+    <span>＝</span><span>差額</span><b class="num ${pv.left?'minus':''}">${pv.left? '−¥'+moneyPlain(pv.left) : (pv.over? '+¥'+moneyPlain(pv.over) : '¥0')}</b></div>`;
+  const inv=pv.inv? `（${esc(pv.inv.no||pv.inv.bookMonth||'')}）` : '';
+  if(pv.kind==='ok') return `<div class="pdiff ok">${head}<div>✓ ぴったりです。</div></div>`;
+  if(pv.kind==='over') return `<div class="pdiff info">${head}<div>${pv.target? '多く入った分は' : '請求の残りがありません。入った分は'} 次の請求に充てます（差し引かれた手数料の残りがあれば そこへ）。</div></div>`;
+  if(pv.kind==='fee' && pv.burden==='当社') return `<div class="pdiff info">${head}
+    <div>振込手数料の差引きと思われます。この会社は <b>${burden}</b> なので、${moneyPlain(pv.left)}円 は <b>当社負担</b> として残高0にします。</div></div>`;
+  if(pv.kind==='fee') return `<div class="pdiff bad">${head}
+    <div>⚠ <b>振込手数料の差引き</b>と思われます${inv}。この会社は <b>${burden}</b> です。
+      <b>${moneyPlain(pv.left)}円 は 不足として残します</b>（回収 › 差額 で 次回請求に加算 または 当社負担）。</div></div>`;
+  return `<div class="pdiff bad">${head}<div>⚠ <b>入金が ${moneyPlain(pv.left)}円 足りません</b>${inv}。一部入金として記録し、残りは売掛金に残ります。</div></div>`;
+}
+function payDiffPaint(){ const el=document.getElementById('payDiff'); if(el) el.innerHTML=payDiffHtml(); }
 function payAlloc(invId,v){
   const amt=num(v);
   PAY_CTX.allocations=(PAY_CTX.allocations||[]).filter(a=>String(a.invoiceId)!==String(invId));
@@ -4075,11 +4264,25 @@ function paySave(){
   if(!c.companyId||!num(c.amount)){ toast('取引先と入金額を入力してください。','err'); return; }
   /* 充て先は 古い請求から自動。取引先・金額が変わっていなければ 今の充て先をそのまま使う */
   const old=c.id? findById('payments',c.id) : null;
-  const same = old && String(old.companyId)===String(c.companyId) && num(old.amount)===num(c.amount) && num(old.fee)===num(c.fee);
-  const allocations = same? (old.allocations||[]) : arFifoAlloc(c.companyId, num(c.amount)+num(c.fee), c.id);
-  const res=commitRecord('payments', { companyId:c.companyId, date:c.date, amount:num(c.amount), fee:num(c.fee),
-    method:c.method, note:c.note, allocations, status:'確定' }, { existingId:c.id });
-  closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast('入金を記録しました。','ok');
+  const same = old && String(old.companyId)===String(c.companyId) && num(old.amount)===num(c.amount);
+  let allocations, fee=num(c.fee), feeShort=old? num(old.feeShort) : 0, msg='入金を記録しました。';
+  if(same){ allocations=old.allocations||[]; }
+  else {
+    /* 金額・会社が変わったら 充て先と 差額の見立てを やり直す（前の片付け adjust は 充て先ごと外す） */
+    if(old && (old.adjust||[]).length && !confirm('この入金には 差額の処理（次回請求に加算／当社負担）があります。金額を変えると その処理は外れます。よろしいですか？')) return;
+    const pv=payShortPreview(c.companyId, num(c.amount), c.id);
+    fee=0; feeShort=0;
+    if(pv && pv.kind==='fee'){
+      if(pv.burden==='当社'){ fee=pv.left; msg=`入金を記録しました（手数料 ${moneyPlain(fee)}円 は当社負担）。`; }
+      else { feeShort=pv.left; msg=`入金を記録しました。⚠ 手数料の差引き ${moneyPlain(feeShort)}円 が残っています。`; }
+    } else if(pv && pv.kind==='short') msg=`入金を記録しました。⚠ ${moneyPlain(pv.left)}円 足りません。`;
+    allocations=arFifoAlloc(c.companyId, num(c.amount)+fee, c.id);
+  }
+  const rec={ companyId:c.companyId, date:c.date, amount:num(c.amount), fee, feeShort,
+    method:c.method, note:c.note, allocations, status:'確定' };
+  if(old && !same) rec.adjust=[];
+  const res=commitRecord('payments', rec, { existingId:c.id });
+  closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast(msg, msg.includes('⚠')?'err':'ok');
   if(attPendCount('pay')) attPendFlush('pay', res.record.id);
 }
 function payDelete(){
@@ -5909,7 +6112,10 @@ async function attPendFlush(key, id){
 const invDocDate = inv => inv.issueDate || (inv.bookMonth? monthEnd(inv.bookMonth) : '');
 /** 並び順（日付 → 番号）。同じ日に2枚出したときも前後が決まるように。 */
 const invOrderKey = inv => invDocDate(inv)+'|'+String(inv.no||'')+'|'+String(inv.id||'');
-const received = p => num(p.amount)+num(p.fee);           // 先方負担の振込手数料も「受け取った」うちに入れる
+/* 受け取ったとみなす額 ＝ 振込額 ＋ 当社負担にした手数料（fee）＋ 差額の処理（adjust: 次回請求に加算／当社負担）
+   ★ 2026-09-16: 先方負担の会社が手数料を差し引いた分（feeShort）は 受け取っていない＝売掛金に残る */
+const adjSum = p => (p.adjust||[]).reduce((s,a)=>s+num(a.amount),0);
+const received = p => num(p.amount)+num(p.fee)+adjSum(p);
 
 function invoiceCarry(inv){
   const cid=inv.companyId, key=invOrderKey(inv), asOf=invDocDate(inv);
@@ -6089,7 +6295,8 @@ function dunLogs(companyId){
 /** 1社の督促の状態。「今日やること（todo）」まで決める。 */
 function dunStatus(companyId){
   const t=today(), D=dunDays();
-  const overdue=openInvoices().filter(i=>String(i.companyId)===String(companyId) && isOverdue(i));
+  /* ★ 2026-09-16: 手数料の差引きで残った少額は 督促に入れない（差額の画面で 加算・当社負担 を決める） */
+  const overdue=openInvoices().filter(i=>String(i.companyId)===String(companyId) && isOverdue(i) && !isFeeResidual(i));
   const amount=overdue.reduce((s,i)=>s+balanceOfInvoice(i),0);
   const maxDays=overdue.reduce((m,i)=>Math.max(m, daysOverdue(i)),0);
   const oldestDue=overdue.map(effDue).sort()[0]||'';
@@ -6304,6 +6511,9 @@ const MAIL_TPL_DEFAULT = [
   { id:'d-ar-remind3', side:'ar', name:'督促3　最終のお願い',
     subject:'【{{自社名}}】【重要】お支払いについてのお願い',
     body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\nこれまで複数回ご連絡いたしましたが、下記のご請求についてご入金の確認ができておりません。\n\n{{未回収明細}}\n　合計：{{未回収額}}円\n\n大変恐れ入りますが、至急お手続きをお願いいたします。\nご事情がおありの場合は、お支払いの方法や時期についてご相談させていただきたく、ご連絡をお待ちしております。\n\nお振込先：{{振込先}}\n\n{{自社名}}\n{{差出人}}' },
+  { id:'d-ar-fee', side:'ar', name:'振込手数料差引きのご連絡',
+    subject:'【{{自社名}}】お振込手数料についてのお願い',
+    body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\nご入金いただきありがとうございます。\n大変恐縮ですが、ご入金額がご請求額より振込手数料分少なくなっておりました。\n\n　今年度の差引き：{{手数料差引回数}}回　合計 {{手数料差引額}}円\n　現在の差額：{{手数料未処理額}}円\n\n弊社のご請求条件では、お振込手数料は貴社ご負担とさせていただいております。\n差額につきましては、次回のご請求に合わせてご請求させていただきます。\n今後のお振込の際は、手数料を差し引かずにお振込みいただけますと幸いです。\n\nご不明な点がございましたら、お気軽にお問い合わせください。\n\n{{自社名}}\n{{差出人}}' },
   { id:'d-ar-thanks', side:'ar', name:'ご入金確認のお礼',
     subject:'【{{自社名}}】ご入金確認のご連絡',
     body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n{{最終入金日}}に {{最終入金額}}円 のご入金を確認いたしました。\n誠にありがとうございます。\n\n引き続きよろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
@@ -6317,7 +6527,7 @@ const MAIL_TPL_DEFAULT = [
     subject:'【{{自社名}}】ご請求書のご送付のお願い',
     body:'{{会社名}}\n{{宛名}}\n\nいつも大変お世話になっております。{{自社名}}の{{差出人}}です。\n\n恐れ入りますが、ご請求書をお送りいただけますでしょうか。\n（弊社にて受領が確認できておりません）\n\nよろしくお願いいたします。\n\n{{自社名}}\n{{差出人}}' },
 ];
-const MAIL_VAR_LIST = ['会社名','宛名','未回収額','過入金額','繰越額','次回請求額','次回請求月','未回収明細',
+const MAIL_VAR_LIST = ['会社名','宛名','未回収額','過入金額','繰越額','次回請求額','次回請求月','未回収明細','手数料差引回数','手数料差引額','手数料未処理額',
   '最終入金日','最終入金額','自社名','振込先','差出人','本日'];
 
 /** 差し込みの値。数字はどこで見ても同じ関数から取る（取引先別の画面と一致させる）。 */
@@ -6343,6 +6553,8 @@ function mailVars(side, companyId){
     '振込先': s.bank||'（設定 › 基本設定 › 自社情報 で登録してください）',
     '差出人': (SESSION&&SESSION.name)||(SESSION&&SESSION.email)||'',
     '本日': today(),
+    ...(side==='ar'? (()=>{ const f=feeSummary(CUR_FY).find(x=>x.companyId===String(companyId))||{};
+      return { '手数料差引回数': String(f.n||0), '手数料差引額': moneyPlain(f.deducted||0), '手数料未処理額': moneyPlain((f.open||0)+(f.carry||0)) }; })() : {}),
   };
 }
 const mailFill = (text, vars) => String(text||'').replace(/\{\{([^}]+)\}\}/g, (m,k)=> k in vars ? vars[k] : m);
@@ -7582,6 +7794,7 @@ const CO_LAYOUT = [
     {n:'paySite', label:coLb('入金サイト（か月後）','支払サイト（か月後）','サイト（か月後）'), ph:'1＝翌月'},
     {n:'payDay', label:coLb('入金日','支払日','入金日・支払日'), ph:'31＝末日'},
     {n:'dueAdjust', label:'土日祝の場合'},
+    {n:'feeBurden', label:'振込手数料', only:'ar'},
     {n:'creditLimit', only:'ar'} ]},
   { icon:'pen', head:()=>coLb('管理情報','管理・口座情報','管理・口座情報'), fields:[
     {n:'owner', label:'BIGLIGHT担当者', ph:'メール'}, {n:'taxCat', label:'税区分'},
@@ -8399,6 +8612,15 @@ function notifItems(){
   if(apOver.length) out.push({ sev:'danger', key:'ap-over', label:'支払期日を過ぎた支払',
     n:apOver.length, amount:apOver.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('apbook')" });
 
+  /* ── 振込手数料の差引き（未処理）・次回請求に足す額 ── ★ 2026-09-16 */
+  if(canSee('arshort')){
+    const fr=feeResiduals(), cp=feeCarryPending();
+    if(fr.length) out.push({ sev:'danger', key:'fee-short', label:'振込手数料を差し引かれた入金（未処理）', n:fr.length,
+      amount:fr.reduce((s,x)=>s+x.bal,0), go:"goto('arshort')",
+      sub:[...new Set(fr.map(x=>arCoName(x.inv.companyId)))].slice(0,3).join('、') });
+    if(cp.length) out.push({ sev:'warn', key:'fee-carry', label:'次の請求書に足す差額', n:new Set(cp.map(x=>String(x.p.companyId))).size,
+      amount:cp.reduce((s,x)=>s+num(x.a.amount),0), go:"goto('arshort')", sub:'Money Forward の請求書に入れたら「入れた」' });
+  }
   /* ── 証憑（ファイル）が無い伝票（直近3か月・デモは数えない）── ★ 2026-09-16 */
   {
     const from=addMonths(thisMonth(),-2), PAGE_OF={ bills:'bills', payouts:'payouts', payments:'receipts' };
@@ -8539,6 +8761,8 @@ const PAGE_GUIDE = {
                 effect:'前月残高＋請求−入金＝月末残高。期日超過は赤' },
   invoices:   { step:'③', what:'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>。単発は「＋ 個別に請求を作成」',
                 effect:'確定して初めて<b>売上</b>と<b>売掛金</b>になります' },
+  arshort:    { step:'⑤', what:'振込手数料の差引き・入金の不足を 会社ごとに。<b>次回請求に加算</b> か <b>当社負担</b> で片付ける',
+                effect:'差し引かれた手数料が 知らないうちに消えない（先方負担の会社は 売掛金に残る）' },
   archeck:    { step:'⑤', what:'（入力なし）請求1枚ごとの 全額・遅れ・分割・手数料・過不足の判定',
                 effect:'足りない会社・多く払った会社が分かります' },
   receipts:   { step:'④', what:'入金を記録する（取引先・入金日・金額）',
@@ -8800,7 +9024,7 @@ async function demoSeed(){
     {k:'sakura', name:'株式会社さくら製作所', kana:'サクラセイサクショ', cl:31, site:1, day:31, addr:'栃木県小山市…', staff:'佐藤', owner:ST.yamada, base:420000, pay:'ontime', note:'いつも期日どおり。在籍人数×30,000円'},
     {k:'towa',   name:'東和フーズ株式会社', kana:'トウワフーズ', cl:20, site:2, day:25, addr:'群馬県太田市…', staff:'鈴木', owner:ST.me, base:550000, pay:'slow', note:'20日締・翌々月25日払い（期日は長いが少し遅れる）'},
     {k:'kita',   name:'北関東物流サービス', kana:'キタカントウブツリュウ', cl:15, site:1, day:20, addr:'茨城県古河市…', staff:'高橋', owner:ST.me, base:70000, pay:'late', note:'入金が遅れがち'},
-    {k:'midori', name:'みどり農園株式会社', kana:'ミドリノウエン', cl:31, site:1, day:31, addr:'栃木県真岡市…', staff:'加藤', owner:ST.yamada, base:360000, pay:'ontime', ev:{fee:660}, note:'振込手数料（660円）を差し引いて振り込んでくる'},
+    {k:'midori', name:'みどり農園株式会社', kana:'ミドリノウエン', cl:31, site:1, day:31, addr:'栃木県真岡市…', staff:'加藤', owner:ST.yamada, base:360000, pay:'ontime', ev:{fee:660}, feeBurden:'当社', note:'振込手数料（660円）を差し引いて振り込んでくる（当社負担の約束）'},
     {k:'daiwa',  name:'大和建設工業株式会社', kana:'ダイワケンセツコウギョウ', cl:31, site:1, day:31, addr:'埼玉県熊谷市…', staff:'伊藤', owner:ST.me, base:600000, pay:'ontime', limit:1500000, ev:{split:5}, note:'1月分は2回に分けて入金'},
     {k:'hikari', name:'社会福祉法人ひかり介護会', kana:'ヒカリカイゴカイ', cl:31, site:1, day:25, addr:'栃木県宇都宮市…', staff:'渡辺', owner:ST.yamada, base:480000, pay:'ontime', ev:{over:4, overAmt:100000}, note:'12月分で10万円多く入金 → 1月分に充当'},
     {k:'marufuku', name:'丸福水産加工株式会社', kana:'マルフクスイサンカコウ', cl:25, site:1, day:31, addr:'茨城県ひたちなか市…', staff:'山本', owner:ST.sasaki, base:390000, pay:'slow'},
@@ -8818,7 +9042,7 @@ async function demoSeed(){
   CUST.forEach(x=>{
     /* 担当が途中で替わる会社は、最初は元の担当で作る（請求を作りながら 替わった月に切り替える） */
     custBy[x.k]=put('companies',{name:DEMO_TAG+x.name, kana:x.kana, kind:'得意先', closingDay:x.cl, paySite:x.site, payDay:x.day,
-      taxCat:'課税10%', address:x.addr, staffName:x.staff, owner:x.owner, creditLimit:x.limit||'', note:x.note||''});
+      taxCat:'課税10%', address:x.addr, staffName:x.staff, owner:x.owner, creditLimit:x.limit||'', feeBurden:x.feeBurden||'', note:x.note||''});
   });
   /* 督促の見本: 北関東は与信限度額を超え、約束を過ぎた。東和は 約束待ち */
   custBy.kita.creditLimit=250000; markDirty('companies',custBy.kita);
@@ -8981,8 +9205,10 @@ async function demoSeed(){
   });
   plans.sort((a,b)=>a.date.localeCompare(b.date)).forEach(pl=>{
     if(pl.date>t) return;                                   // まだ来ていない日の入金は作らない
-    put('payments',{ companyId:pl.c.id, date:pl.date, amount:pl.amount, fee:pl.fee, method:'銀行振込', status:'確定',
-      allocations: arFifoAlloc(pl.c.id, pl.amount+pl.fee, null), note:DEMO_TAG+(pl.fee?'振込手数料 先方差引':'') });
+    /* ★ 2026-09-16: 当社負担の会社は 手数料を fee に（残高0）。先方負担の会社は 差引きを feeShort に残す（差額の画面に出る） */
+    const ours = pl.fee && feeBurdenOf(pl.c.id)==='当社';
+    put('payments',{ companyId:pl.c.id, date:pl.date, amount:pl.amount, fee: ours? pl.fee : 0, feeShort: ours? 0 : (pl.fee||0), method:'銀行振込', status:'確定',
+      allocations: arFifoAlloc(pl.c.id, pl.amount+(ours? pl.fee : 0), null), note:DEMO_TAG+(pl.fee? (ours?'振込手数料 当社負担':'振込手数料 差引き') : '') });
   });
 
   /* ── 支払請求（買掛）と支払 ── */

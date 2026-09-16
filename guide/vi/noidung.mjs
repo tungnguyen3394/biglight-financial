@@ -78,6 +78,8 @@ export default {
               ['`累計`', 'Luỹ kế', 'Cộng dồn từ đầu năm tài chính'],
               ['`督促`', 'Nhắc nợ', ''],
               ['`証憑` · `証憑なし`', 'File chứng từ gốc · chưa có file', 'Hoá đơn PDF, sao kê chuyển khoản, biên lai, hợp đồng'],
+              ['`差額` · `手数料差引き` · `不足`', 'Chênh lệch · bị trừ phí chuyển khoản · trả thiếu', 'Ngưỡng 1,000 yên'],
+              ['`先方負担` · `当社負担`', 'Khách chịu · BIGLIGHT chịu', 'Ai chịu phí chuyển khoản'],
               ['`税区分`', 'Loại thuế', '`課税10%` · `軽減8%` · `非課税` (miễn thuế) · `対象外` (không thuộc diện thuế)'],
             ] },
           ],
@@ -437,31 +439,70 @@ export default {
         {
           title: 'Ghi tiền vào (入金を記録)',
           screens: [{
-            shot: 'payment', modal: true, maxH: 82,
+            shot: 'payment', modal: true, maxH: 96,
             steps: [
               { mark: 'date', text: '`入金日`: ngày tiền vào tài khoản (theo sao kê).' },
               { mark: 'co', text: '`取引先`: công ty đã chuyển tiền. Bên dưới hiện **số dư hiện tại** của công ty đó để đối chiếu.' },
               { mark: 'amt', text: '`入金額`: số tiền **thực nhận** trên sao kê.' },
-              { mark: 'fee', text: '`振込手数料`: nếu khách **trừ phí chuyển khoản** trước khi chuyển, ghi phí đó ở đây. Số dư sẽ giảm cả phần phí.' },
+              { mark: 'diff', text: '**Ô so sánh tự hiện**: `請求の残り − 入金 = 差額`. Thiếu ≤ 1,000 yên → **trừ phí chuyển khoản**; thiếu nhiều hơn → **trả thiếu**. Không cần gõ phí.' },
               { mark: 'files', text: '**File chứng từ**: kéo thả sao kê / giấy báo có, chọn loại (`振込明細`…). File được gửi sau khi lưu.' },
               { mark: 'save', text: 'Bấm `保存`.' },
             ],
           }],
           blocks: [
             { h: 'Không cần chọn hoá đơn' },
-            { p: 'Tiền vào được **trừ vào số dư của công ty**, tự động gán cho hoá đơn **cũ nhất** trước. Khách trả nhiều hơn → phần dư được giữ lại và trừ vào lần sau. Khách trả thiếu → phần thiếu vẫn nằm trong số dư.' },
+            { p: 'Tiền vào được **trừ vào số dư của công ty**, tự động gán cho hoá đơn **cũ nhất** trước (các khoản lẻ do trừ phí được để sau cùng). Khách trả nhiều hơn → phần dư được giữ lại và trừ vào lần sau. Khách trả thiếu → phần thiếu vẫn nằm trong số dư.' },
           ],
-          tip: 'Màn `入金` (tab thứ hai) là danh sách mọi khoản tiền vào. Bấm `修正` ở cuối dòng để sửa khi ghi nhầm.',
+          tip: 'Màn `入金` (tab thứ hai) là danh sách mọi khoản tiền vào; cột `差額` hiện nhãn đỏ `手数料差引き` khi khách trừ phí. Bấm `修正` để sửa khi ghi nhầm.',
         },
         {
           title: 'Kiểm tra tiền vào (入金チェック)',
           screens: [{
             shot: 'archeck', maxH: 125,
             steps: [
-              { mark: 'cards', text: 'Mỗi hoá đơn được xếp vào một nhóm: `全額・期日内` (đủ, đúng hạn) · `全額・遅れ` (đủ nhưng trễ) · `分割で全額` (trả nhiều lần) · `手数料を引いて` (trừ phí) · `過入金` (trả thừa) · `不足` (trả thiếu) · `未入金` (chưa trả) · `期日前` (chưa tới hạn). **Bấm một ô để lọc.**' },
+              { mark: 'cards', text: 'Mỗi hoá đơn được xếp vào một nhóm: `全額・期日内` (đủ, đúng hạn) · `全額・遅れ` (đủ nhưng trễ) · `分割で全額` (trả nhiều lần) · `手数料差引き` (bị trừ phí, **chưa xử lý**) · `次回請求に加算` · `手数料 当社負担` · `過入金` (trả thừa) · `不足` (trả thiếu) · `未入金` (chưa trả) · `期日前` (chưa tới hạn). **Bấm một ô để lọc.**' },
             ],
           }],
           tip: 'Cuối tháng hãy xem `不足` và `過入金`: đó là những khách cần liên hệ để xác nhận.',
+        },
+        {
+          title: 'Tiền thiếu và phí chuyển khoản bị trừ (差額)',
+          lead: 'Nhiều công ty **tự trừ phí chuyển khoản** (~440 yên) hoặc **trả thiếu**. Màn này gom lại để không khoản nào bị mất mà không ai biết.',
+          screens: [{
+            shot: 'arshort', maxH: 72,
+            steps: [
+              { mark: 'kpi', text: 'Tổng: phí bị trừ **chưa xử lý** · số cần **cộng vào hoá đơn tháng sau** · **trả thiếu** đã quá hạn · tổng phí bị trừ trong năm.' },
+              { mark: 'open', text: 'Mỗi công ty: số lần bị trừ, tổng tiền, phần **chưa xử lý** (đỏ).', badge: 'right' },
+              { mark: 'btn', text: '`次回請求に加算`: đòi lại ở hoá đơn tháng sau. Nhớ **thêm số tiền đó vào hoá đơn Money Forward**, rồi bấm `MFの請求書に入れた`.' },
+              { mark: 'abs', text: '`当社負担にする`: BIGLIGHT chấp nhận chịu (chỉ Admin / Manager, có ghi lại người quyết định).' },
+              { mark: 'mail', text: '✉: gửi mail mẫu **振込手数料差引きのご連絡** (tự điền số lần và tổng tiền).' },
+              { mark: 'burden', text: 'Dòng dưới tên: công ty này **ai chịu phí**.' },
+            ],
+          }],
+          blocks: [
+            { flow: { title: 'Cách hệ thống phân loại khi ghi tiền vào', rows: [
+              [{ t: 'Thiếu 1〜1,000 yên', s: 'coi là phí chuyển khoản', c: 'src' },
+               { t: 'Công ty `先方負担` (mặc định)', s: 'khách phải chịu phí', c: 'in' },
+               { t: '`手数料差引き` — còn nợ', s: 'hiện ở màn này, chờ xử lý', c: 'no' }],
+              [{ t: 'Thiếu 1〜1,000 yên', s: '', c: 'src' },
+               { t: 'Công ty `当社負担`', s: 'BIGLIGHT đã đồng ý chịu phí', c: 'in' },
+               { t: 'Tự coi là phí, số dư về 0', s: '', c: 'out' }],
+              [{ t: 'Thiếu hơn 1,000 yên', s: '', c: 'src' },
+               { t: 'Trả một phần', s: '', c: 'in' },
+               { t: '`不足` — nhắc nợ như bình thường', s: 'nút `督促へ`', c: 'warn' }],
+            ] } },
+          ],
+          note: 'Khoản trừ phí **không** được đưa vào danh sách 督促 (nhắc nợ theo cấp) — xử lý ở màn này.',
+        },
+        {
+          title: 'Đặt ai chịu phí chuyển khoản cho từng công ty',
+          screens: [{
+            shot: 'fee_burden', modal: true, maxH: 100,
+            steps: [
+              { mark: 'fee', text: '`取引先` › mở công ty › mục ② › `振込手数料`: `先方負担` (mặc định — trừ phí là **thiếu**) hoặc `当社負担` (BIGLIGHT chịu).' },
+            ],
+          }],
+          tip: 'Chỉ đổi sang `当社負担` với những công ty đã **thoả thuận** BIGLIGHT chịu phí. Để trống = `先方負担`.',
         },
         {
           title: 'Nhắc nợ (督促 — 今日やること)',
@@ -804,6 +845,7 @@ export default {
               'Hoá đơn phải trả khác nhận được → `＋ 支払請求を登録`.',
               '`回収` › `入金チェック` → xem `不足` / `過入金` / `未入金`.',
               'Tích `証憑なしのみ` ở `入金` / `支払請求` / `支払実行` → đính file còn thiếu.',
+              '`回収` › `差額` → với từng công ty bị trừ phí: `次回請求に加算` (rồi thêm vào hoá đơn MF → `MFの請求書に入れた`) hoặc `当社負担にする`.',
             ] },
             { check: 'Khi nhận được 試算表 của văn phòng kế toán', items: [
               '`予実管理` › `入力` › `実績` → gõ chi phí tháng đó (chưa thuế).',
@@ -834,6 +876,8 @@ export default {
                 'Khi xem năm cũ, các ô và cột bên phải lấy **cuối năm đó** (VD `7月末残高`) để cả màn hình cùng một mốc thời gian. Xem năm hiện tại thì là **hôm nay** (`現在残高`).'],
               ['Bấm `確定` 支払請求 thì bị báo lỗi?',
                 'Khoản đó **chưa có file hoá đơn**. Hệ thống mở sẵn hộp đính file — thả file vào rồi bấm `この支払請求を確定する`.'],
+              ['Khách trừ 440 yên phí chuyển khoản thì làm gì?',
+                'Chỉ cần ghi đúng số tiền thực nhận. Hệ thống tự nhận ra, giữ 440 yên là **còn nợ** và đưa vào `回収` › `差額`. Cuối tháng quyết định: cộng vào hoá đơn sau, hoặc BIGLIGHT chịu.'],
               ['Hoá đơn không chịu thuế thì nhập thế nào?',
                 'Ở `請求額を手入力` chọn `税区分` = `非課税` hoặc `対象外` → 税抜 = 税込. Nên đặt luôn `税区分` của 取引先 để lần sau tự chọn.'],
               ['Không thấy một màn hình hoặc một nút?',
