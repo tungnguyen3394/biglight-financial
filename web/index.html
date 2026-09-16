@@ -486,6 +486,10 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .ar-tbl .ar-now{position:sticky; right:0; z-index:1; background:var(--card); border-left:1px solid var(--border); min-width:96px; font-weight:700; cursor:pointer;}
   .ar-tbl th.ar-now{z-index:4; background:var(--thead);}
   .ar-tbl .totrow td.ar-now{background:var(--surface-2);}
+  /* 合計の下の「動き」の2行（請求・入金）。残高より一段 控えめに */
+  .ar-tbl tr.ar-flow td{background:var(--surface-2); color:var(--text-secondary); font-size:12px; font-weight:500;}
+  .ar-tbl tr.ar-flow td.ar-co{padding-left:20px;}
+  .ar-tbl tr.ar-flow td.ar-now .ar-y{display:inline; margin-right:6px;}
   .ar-name{cursor:pointer; color:var(--text); font-weight:600; margin-right:6px;}
   .ar-name:hover{color:var(--primary); text-decoration:underline;}
   .ar-fut{color:var(--border-strong);}
@@ -2961,9 +2965,31 @@ function arCompanyIds(){
   (DB.payments||[]).forEach(p=>{ if(p.status!=='取消' && p.companyId) ids.add(String(p.companyId)); });
   return [...ids];
 }
-/** 今月の全社合計（KPI） */
-function arTotals(){
-  const tm=thisMonth(); const o={ billed:0, payment:0, balance:0, overdue:0, openN:0, overN:0 };
+/** 表の年度に合わせた「基準の月」（KPI・右端の残高の列が どの時点か）。
+    ★ 2026-09-16 利用者の指示: 過去の年度を見ているのに KPI と 現在残高 が「今日」のままだと、
+      1つの画面に2つの時点が混ざる。今の年度 → 今月／過去の年度 → その年度の最後の月／未来の年度 → 最初の月。 */
+function bookAnchor(fy){
+  const months=fyMonths(fy), tm=thisMonth();
+  if(tm>=months[0] && tm<=months[11]) return { ym:tm, now:true, m:Number(tm.slice(5)) };
+  const ym = tm>months[11]? months[11] : months[0];
+  return { ym, now:false, m:Number(ym.slice(5)) };
+}
+/** 合計の下の2行 — その月の「増えた分（請求）」と「減った分（入金）」。
+    ★ 2026-09-16 利用者の指示: 残高（結果）だけでなく、残高を作る動きを月ごとに見せる。
+      月末残高 ＝ 前月残高（左のマス）＋ 請求 − 入金。数字は arMonthly がもともと出している billed・payment。
+      売上（予実）とは別もの（こちらは 全明細・税込）なので「売上」とは書かない。 */
+function bookFlowRows(rows, months, labels){
+  const tm=thisMonth();
+  const line=(key,label)=>`<tr class="ar-flow"><td class="ar-co">${label}</td>${months.map((ym,i)=>{
+      if(ym>tm) return '<td class="r ar-fut">—</td>';
+      const v=rows.reduce((t,r)=>t+r.m[i][key],0);
+      return `<td class="r num">${v? moneyPlain(v) : '<span class="zero">0</span>'}</td>`; }).join('')}
+    <td class="r num ar-now"><span class="ar-y">年度計</span>${moneyPlain(rows.reduce((t,r)=>t+r.m.reduce((u,x)=>u+(x.future?0:x[key]),0),0))}</td></tr>`;
+  return line('billed',labels[0]) + line('payment',labels[1]);
+}
+/** 全社合計（KPI）。ym を省くと今月。 */
+function arTotals(ym){
+  const tm=ym||thisMonth(); const o={ billed:0, payment:0, balance:0, overdue:0, openN:0, overN:0 };
   arCompanyIds().forEach(id=>{
     const r=arMonthly(id,[tm])[0];
     o.billed+=r.billed; o.payment+=r.payment; o.balance+=r.closing; o.overdue+=r.overdue;
@@ -2975,9 +3001,9 @@ const arYmLabel = ym => `${Number(ym.slice(0,4))}年${Number(ym.slice(5))}月`;
 const arAmt = v => v<0? '−'+moneyPlain(-v) : moneyPlain(v);
 
 function viewArBook(){
-  const p='arbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth();
+  const p='arbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth(), A=bookAnchor(fy);
   const all=arCompanyIds().map(id=>{
-    const f=arFacts(id), m=arMonthly(id, months, f), now=arMonthly(id,[tm],f)[0];
+    const f=arFacts(id), m=arMonthly(id, months, f), now=arMonthly(id,[A.ym],f)[0];
     return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:arStatus(now.closing, now.overdue) };
   });
   const q=(SEARCH[p]||'').trim().toLowerCase();
@@ -2988,12 +3014,15 @@ function viewArBook(){
     return true;
   }).sort((a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja'));
 
-  const T=arTotals();
+  const T=arTotals(A.ym);
+  const L = A.now
+    ? { billed:`今月請求額（${A.m}月）`, paid:'今月入金額', bal:'売掛金残高', over:'期限超過額', col:'現在残高' }
+    : { billed:`${arYmLabel(A.ym)}の請求額`, paid:`${arYmLabel(A.ym)}の入金額`, bal:`売掛金残高（${A.m}月末）`, over:`期限超過額（${A.m}月末）`, col:`${A.m}月末残高` };
   const kpis=`<div class="kpi-grid ar-kpis">
-    <div class="kpi"><div class="lbl">今月請求額（${Number(tm.slice(5))}月）</div><div class="num">¥${moneyPlain(T.billed)}</div></div>
-    <div class="kpi"><div class="lbl">今月入金額</div><div class="num">¥${moneyPlain(T.payment)}</div></div>
-    <div class="kpi"><div class="lbl">売掛金残高</div><div class="num">¥${arAmt(T.balance)}</div><div class="sub">${T.openN}社が未回収</div></div>
-    <div class="kpi ${T.overdue>0?'clickable':''}" ${T.overdue>0?`onclick="arFilt('over',true)"`:''}><div class="lbl">期限超過額</div>
+    <div class="kpi"><div class="lbl">${L.billed}</div><div class="num">¥${moneyPlain(T.billed)}</div></div>
+    <div class="kpi"><div class="lbl">${L.paid}</div><div class="num">¥${moneyPlain(T.payment)}</div></div>
+    <div class="kpi"><div class="lbl">${L.bal}</div><div class="num">¥${arAmt(T.balance)}</div><div class="sub">${T.openN}社が未回収</div></div>
+    <div class="kpi ${T.overdue>0?'clickable':''}" ${T.overdue>0?`onclick="arFilt('over',true)"`:''}><div class="lbl">${L.over}</div>
       <div class="num ${T.overdue>0?'minus':''}">¥${moneyPlain(T.overdue)}</div><div class="sub">${T.overN? `${T.overN}社`:'なし'}</div></div>
   </div>`;
 
@@ -3001,11 +3030,11 @@ function viewArBook(){
     ${searchBox(p,'取引先で検索')}
     <label class="ar-chk"><input type="checkbox" ${AR_FILT.open?'checked':''} onchange="arFilt('open',this.checked)"> 未回収のみ</label>
     <label class="ar-chk"><input type="checkbox" ${AR_FILT.over?'checked':''} onchange="arFilt('over',this.checked)"> 期限超過のみ</label>
-    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の売掛金残高 ・ マスを押すと内訳</span>
+    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の売掛金残高 ・ 合計の下＝その月の請求と入金 ・ マスを押すと内訳</span>
   </div>`;
 
   const head=`<tr><th class="ar-co">取引先</th>${months.map((ym,i)=>`<th class="r ${ym===tm?'ar-cur':''}" title="${ym}">${
-      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">現在残高</th></tr>`;
+      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">${L.col}</th></tr>`;
   const cell=(r,x)=>{
     if(x.future) return `<td class="r ar-c ar-fut">—</td>`;
     const cls = x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
@@ -3018,7 +3047,8 @@ function viewArBook(){
   const foot = rows.length? `<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${months.map((ym,i)=>{
       if(ym>tm) return '<td class="r ar-fut">—</td>';
       const s=rows.reduce((t,r)=>t+r.m[i].closing,0); return `<td class="r num">${arAmt(s)}</td>`; }).join('')}
-      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>` : '';
+      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`
+      + bookFlowRows(rows, months, ['＋ 請求額','− 入金額']) : '';
   const table = all.length
     ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${head}</thead><tbody>${body||`<tr><td colspan="${months.length+2}" class="empty">条件に合う取引先はありません。</td></tr>`}${foot}</tbody></table></div>`
     : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「Money Forward から取り込む」で請求を取り込むか、入金を記録してください。</div></div>`;
@@ -3034,12 +3064,16 @@ function viewArBook(){
     tools, body: kpis+filters+table });
 }
 function arFilt(k, v){ AR_FILT[k]=!!v; renderPage('arbook'); }
+/* ★ 2026-09-16: 右に 月ごとの 請求額・入金額 を足した（今までの列の名前と並びは そのまま）。 */
 function exportArBookCsv(){
-  const months=fyMonths(CUR_FY), tm=thisMonth();
-  const out=[['取引先','状態',...months.map(m=>m),'現在残高','期限超過額']];
+  const months=fyMonths(CUR_FY), A=bookAnchor(CUR_FY);
+  const v=(x,k)=>x.future?'':x[k];
+  const out=[['取引先','状態',...months.map(m=>m), A.now?'現在残高':`${A.m}月末残高`,'期限超過額',
+    ...months.map(m=>m+' 請求額'), ...months.map(m=>m+' 入金額')]];
   arCompanyIds().forEach(id=>{
-    const f=arFacts(id), m=arMonthly(id,months,f), now=arMonthly(id,[tm],f)[0];
-    out.push([arCoName(id), arStatus(now.closing,now.overdue), ...m.map(x=>x.future?'':x.closing), now.closing, now.overdue]);
+    const f=arFacts(id), m=arMonthly(id,months,f), now=arMonthly(id,[A.ym],f)[0];
+    out.push([arCoName(id), arStatus(now.closing,now.overdue), ...m.map(x=>v(x,'closing')), now.closing, now.overdue,
+      ...m.map(x=>v(x,'billed')), ...m.map(x=>v(x,'payment'))]);
   });
   downloadCsv(`売掛金_${CUR_FY}年度`, out);
 }
@@ -4004,8 +4038,8 @@ function apCompanyIds(){
   (DB.payouts||[]).forEach(p=>{ if(p.status!=='取消' && p.companyId) ids.add(String(p.companyId)); });
   return [...ids];
 }
-function apTotals(){
-  const tm=thisMonth(); const o={ billed:0, payment:0, balance:0, overdue:0, openN:0, overN:0 };
+function apTotals(ym){
+  const tm=ym||thisMonth(); const o={ billed:0, payment:0, balance:0, overdue:0, openN:0, overN:0 };
   apCompanyIds().forEach(id=>{
     const r=apMonthly(id,[tm])[0];
     o.billed+=r.billed; o.payment+=r.payment; o.balance+=r.closing; o.overdue+=r.overdue;
@@ -4017,9 +4051,9 @@ function apStatus(bal, over){ return over>0? '期日超過' : (bal>0? '未払あ
 const apStatusBadge = s => `<span class="ar-st ${s==='期日超過'?'s-over':(s==='未払あり'?'s-open':'s-ok')}">${s}</span>`;
 
 function viewApBook(){
-  const p='apbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth();
+  const p='apbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth(), A=bookAnchor(fy);
   const all=apCompanyIds().map(id=>{
-    const f=apFacts(id), m=apMonthly(id, months, f), now=apMonthly(id,[tm],f)[0];
+    const f=apFacts(id), m=apMonthly(id, months, f), now=apMonthly(id,[A.ym],f)[0];
     return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:apStatus(now.closing, now.overdue) };
   });
   const q=(SEARCH[p]||'').trim().toLowerCase();
@@ -4030,14 +4064,18 @@ function viewApBook(){
     return true;
   }).sort((a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja'));
 
-  const T=apTotals();
+  const T=apTotals(A.ym);
+  const L = A.now
+    ? { billed:'今月の支払請求', paid:'今月の支払', paidSub:'支払日が今月', bal:'買掛金残高', over:'期日超過額', col:'現在残高' }
+    : { billed:`${arYmLabel(A.ym)}の支払請求`, paid:`${arYmLabel(A.ym)}の支払`, paidSub:'支払日がその月',
+        bal:`買掛金残高（${A.m}月末）`, over:`期日超過額（${A.m}月末）`, col:`${A.m}月末残高` };
   const drafts=(DB.bills||[]).filter(b=>b.status==='作成中');
   const kpis=`<div class="kpi-grid ar-kpis">
-    <div class="kpi"><div class="lbl">今月の支払請求</div><div class="num">¥${moneyPlain(T.billed)}</div><div class="sub">${arYmLabel(tm)}（計上月・税込）</div></div>
-    <div class="kpi"><div class="lbl">今月の支払</div><div class="num plus">¥${moneyPlain(T.payment)}</div><div class="sub">支払日が今月</div></div>
-    <div class="kpi ${T.openN?'clickable':''}" ${T.openN?`onclick="apFilt('open',true)"`:''}><div class="lbl">買掛金残高</div>
+    <div class="kpi"><div class="lbl">${L.billed}</div><div class="num">¥${moneyPlain(T.billed)}</div><div class="sub">${arYmLabel(A.ym)}（計上月・税込）</div></div>
+    <div class="kpi"><div class="lbl">${L.paid}</div><div class="num plus">¥${moneyPlain(T.payment)}</div><div class="sub">${L.paidSub}</div></div>
+    <div class="kpi ${T.openN?'clickable':''}" ${T.openN?`onclick="apFilt('open',true)"`:''}><div class="lbl">${L.bal}</div>
       <div class="num">¥${arAmt(T.balance)}</div><div class="sub">${T.openN? `${T.openN}社`:'なし'}</div></div>
-    <div class="kpi ${T.overdue>0?'clickable':''}" ${T.overdue>0?`onclick="apFilt('over',true)"`:''}><div class="lbl">期日超過額</div>
+    <div class="kpi ${T.overdue>0?'clickable':''}" ${T.overdue>0?`onclick="apFilt('over',true)"`:''}><div class="lbl">${L.over}</div>
       <div class="num ${T.overdue>0?'minus':''}">¥${moneyPlain(T.overdue)}</div><div class="sub">${T.overN? `${T.overN}社`:'なし'}</div></div>
   </div>`;
   const draftBar = drafts.length? `<div class="warnbar" style="margin:0 0 10px;">「作成中」の支払請求が ${drafts.length}件（${moneyPlain(drafts.reduce((s,b)=>s+docTotal(b),0))}円）あります。
@@ -4047,11 +4085,11 @@ function viewApBook(){
     ${searchBox(p,'支払先で検索')}
     <label class="ar-chk"><input type="checkbox" ${AP_FILT.open?'checked':''} onchange="apFilt('open',this.checked)"> 未払のみ</label>
     <label class="ar-chk"><input type="checkbox" ${AP_FILT.over?'checked':''} onchange="apFilt('over',this.checked)"> 期日超過のみ</label>
-    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の買掛金残高 ・ マスを押すと内訳</span>
+    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の買掛金残高 ・ 合計の下＝その月の支払請求と支払 ・ マスを押すと内訳</span>
   </div>`;
 
   const head=`<tr><th class="ar-co">支払先</th>${months.map((ym,i)=>`<th class="r ${ym===tm?'ar-cur':''}" title="${ym}">${
-      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">現在残高</th></tr>`;
+      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">${L.col}</th></tr>`;
   const cell=(r,x)=>{
     if(x.future) return `<td class="r ar-c ar-fut">—</td>`;
     const cls = x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
@@ -4064,7 +4102,8 @@ function viewApBook(){
   const foot = rows.length? `<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${months.map((ym,i)=>{
       if(ym>tm) return '<td class="r ar-fut">—</td>';
       const s=rows.reduce((t,r)=>t+r.m[i].closing,0); return `<td class="r num">${arAmt(s)}</td>`; }).join('')}
-      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>` : '';
+      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`
+      + bookFlowRows(rows, months, ['＋ 支払請求','− 支払']) : '';
   const table = all.length
     ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${head}</thead><tbody>${body||`<tr><td colspan="${months.length+2}" class="empty">条件に合う支払先はありません。</td></tr>`}${foot}</tbody></table></div>`
     : `<div class="table-wrap"><div class="empty">まだ支払請求も支払もありません。<br>「定期の支払を作成」または「＋ 支払請求を登録」から始めてください。</div></div>`;
@@ -4079,12 +4118,16 @@ function viewApBook(){
     
     tools, body: kpis+draftBar+filters+table });
 }
+/* ★ 2026-09-16: 右に 月ごとの 支払請求額・支払額 を足した（今までの列の名前と並びは そのまま）。 */
 function exportApBookCsv(){
-  const months=fyMonths(CUR_FY), tm=thisMonth();
-  const out=[['支払先','状態',...months,'現在残高','期日超過額']];
+  const months=fyMonths(CUR_FY), A=bookAnchor(CUR_FY);
+  const v=(x,k)=>x.future?'':x[k];
+  const out=[['支払先','状態',...months, A.now?'現在残高':`${A.m}月末残高`,'期日超過額',
+    ...months.map(m=>m+' 支払請求額'), ...months.map(m=>m+' 支払額')]];
   apCompanyIds().forEach(id=>{
-    const f=apFacts(id), m=apMonthly(id,months,f), now=apMonthly(id,[tm],f)[0];
-    out.push([arCoName(id), apStatus(now.closing,now.overdue), ...m.map(x=>x.future?'':x.closing), now.closing, now.overdue]);
+    const f=apFacts(id), m=apMonthly(id,months,f), now=apMonthly(id,[A.ym],f)[0];
+    out.push([arCoName(id), apStatus(now.closing,now.overdue), ...m.map(x=>v(x,'closing')), now.closing, now.overdue,
+      ...m.map(x=>v(x,'billed')), ...m.map(x=>v(x,'payment'))]);
   });
   downloadCsv(`買掛金_${CUR_FY}年度`, out);
 }

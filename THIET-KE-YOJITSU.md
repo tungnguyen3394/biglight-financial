@@ -183,6 +183,11 @@ Hoá đơn (tạo · 明細 · thuế · PDF · gửi · trạng thái) do **Mon
 - **Đường lấy MF**: ① API (backend `mfinvoice.ts`, chỉ đọc, OAuth scope `mfc/invoice/data.read`, token ở `server_config`;
   tắt khi không có `MF_CLIENT_ID/SECRET`) ② CSV xuất từ MF. Cả hai chỉ **đọc** — ghi vào DB qua `/state-delta` như mọi thao tác (có audit, có phân quyền).
 - **入金**: `payments.source` = `manual` hiện tại; sau này ngân hàng/MF → `source:'bank'|'mf'` + `extId`. Công thức không nhìn `source`.
+- **売掛金・買掛金 (2026-09-16)**: dưới dòng 合計 có 2 dòng chuyển động `＋ 請求額 / − 入金額` (買掛: `＋ 支払請求 / − 支払`),
+  lấy từ `arMonthly().billed/payment`, cột phải là **年度計**. **Không** thêm 月次売上 vào đây: 請求額 = toàn bộ dòng・税込,
+  còn 売上 = chỉ 収益科目・税抜 — hai số lệch nhau hợp lệ, đặt cạnh nhau sẽ bị hiểu là sai. 売上 theo tháng xem ở 予実管理/ダッシュボード.
+  KPI và cột bên phải theo `bookAnchor(fy)`: năm hiện tại → hôm nay (現在残高); năm cũ → tháng cuối năm (`7月末残高`); năm sau → tháng đầu.
+  CSV thêm cột `YYYY-MM 請求額 / 入金額` ở cuối (cột cũ giữ nguyên tên và thứ tự).
 - Menu: 回収 = 売掛金 · 入金 · 督促. 請求管理 / 年齢表 / 取引先別 **gỡ khỏi menu** (code còn, `PAGE_REDIRECT` dẫn về 売掛金).
 
 ### 4.3 予実

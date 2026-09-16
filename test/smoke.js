@@ -548,8 +548,22 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   /* 画面 */
   ctx.__x.setFY(2024);
   const h=ctx.viewArBook();
-  eq('売掛金の表: 現在残高の列と 8社×12か月のマス', [h.includes('現在残高'), (h.match(/ar-c[ "]/g)||[]).length], [true, 8*12]);
-  eq('売掛金の表: KPI 4つ', ['今月請求額','今月入金額','売掛金残高','期限超過額'].every(x=>h.includes(x)), true);
+  eq('売掛金の表: 8社×12か月のマス', (h.match(/ar-c[ "]/g)||[]).length, 8*12);
+  /* ★ 2026-09-16: 過去の年度は KPI と右端の列が「その年度の最後の月（7月末）」になる */
+  eq('売掛金の表（過去の年度）: KPI 4つは 年度末の7月で', ['2025年7月の請求額','2025年7月の入金額','売掛金残高（7月末）','期限超過額（7月末）','7月末残高'].every(x=>h.includes(x)), true);
+  eq('売掛金の表（過去の年度）: 「今月」「現在残高」は出さない', ['今月請求額','現在残高'].some(x=>h.includes(x)), false);
+  eq('基準の月: 過去の年度→最後の月／今の年度→今月／未来の年度→最初の月',
+    [ctx.bookAnchor(2024).ym, ctx.bookAnchor(ctx.fyOf(ctx.thisMonth())).ym, ctx.bookAnchor(ctx.fyOf(ctx.thisMonth())+1).ym],
+    ['2025-07', ctx.thisMonth(), (ctx.fyOf(ctx.thisMonth())+1)+'-08']);
+  eq('売掛金の表: 合計の下に 請求額・入金額 の2行（年度計つき）', ['＋ 請求額','− 入金額','年度計'].every(x=>h.includes(x)), true);
+  /* 動きの2行の年度計は、その年度の 請求・入金 の合計と一致する（K1〜K8 の 2024年度） */
+  { const ms=ctx.fyMonths(2024); let b=0,pm=0;
+    ctx.arCompanyIds().forEach(id=>ctx.arMonthly(id,ms).forEach(x=>{ if(!x.future){ b+=x.billed; pm+=x.payment; } }));
+    const nums=[...h.matchAll(/年度計<\/span>([\d,]+)/g)].map(x=>Number(x[1].replace(/,/g,'')));
+    eq('年度計 ＝ その年度の請求・入金の合計', nums, [b,pm]); }
+  { const cur=ctx.fyOf(ctx.thisMonth()); ctx.__x.setFY(cur); const hc=ctx.viewArBook();
+    eq('売掛金の表（今の年度）: 今までどおり 今月・現在残高', ['今月請求額','今月入金額','現在残高'].every(x=>hc.includes(x)), true);
+    ctx.__x.setFY(2024); }
   eq('売掛金の表: 請求番号・数量・単価・PDF は出さない', ['請求番号','数量','単価','PDF'].some(x=>h.includes(x)), false);
   el.innerHTML=''; ctx.openArLedger('K3'); const lh=String(el.innerHTML);
   eq('売掛元帳: 年月・前月残高・請求額・入金額・月末残高', ['年月','前月残高','請求額','入金額','月末残高','2025/04'].every(x=>lh.includes(x)), true);
