@@ -57,11 +57,16 @@ export const COLLECTIONS: CollectionDef[] = [
   { id: 'payouts', crmKey: 'payouts', label: '支払実行', page: 'payouts', readScope: 'payouts.read', basic: true,
     note: '支払の記録と、どの支払請求に充てたか（allocations）' },
 
-  { id: 'expenses', crmKey: 'expenses', label: '費用（月次費用表のマス）', page: 'expenses', readScope: 'expenses.read', basic: true,
-    note: '買掛を通さない費用。金額は税込。costItemId があれば月次費用表の1マス' },
+  /* ★ 2026-09-16: 費用表は「予定（見込み）の表」になった。マスの金額は cost_plans。
+     expenses（旧・経費）は もう入力にも予実にも使わない。過去のデータを読むためだけに残す。 */
+  { id: 'cost_plans', crmKey: 'costPlans', label: '費用表のマス（予定・税込）', page: 'expenses', readScope: 'cost_plans.read', basic: true,
+    note: '費用表の1マス。対象（cost_items）× 月。金額は税込の予定額で、実績ではない' },
 
-  { id: 'cost_items', crmKey: 'costItems', label: '費目マスタ', page: 'expenses', readScope: 'cost_items.read', basic: true,
-    note: '月次費用表の行（家賃・通信など）。金額そのものは expenses に入る' },
+  { id: 'expenses', crmKey: 'expenses', label: '費用（旧・経費）', page: 'expenses', readScope: 'expenses.read', basic: true,
+    note: '★ 2026-09-16 以降は使わない（予実にも入らない）。それ以前に入力された経費が残っている' },
+
+  { id: 'cost_items', crmKey: 'costItems', label: '対象（費目マスタ）', page: 'expenses', readScope: 'cost_items.read', basic: true,
+    note: '費用表の行（家賃・通信など）。マスの金額は cost_plans に入る' },
 
   { id: 'properties', crmKey: 'properties', label: '物件（建物）', page: 'properties', readScope: 'properties.read', basic: true,
     note: '借りている建物の契約（貸主・期間・家賃・共益費）。毎月の金額は費目から集まる' },
@@ -72,8 +77,11 @@ export const COLLECTIONS: CollectionDef[] = [
   { id: 'forecasts', crmKey: 'forecasts', label: '見込', page: 'yojitsu', readScope: 'forecasts.read',
     note: '年度×月×勘定科目の見込額（税抜）' },
 
-  { id: 'actual_adjust', crmKey: 'actualAdjust', label: '実績調整', page: 'yojitsu', readScope: 'actual_adjust.read',
-    note: '会計事務所の数字・期首の持ち込みなど、伝票に無い実績の手入力' },
+  { id: 'actuals', crmKey: 'actuals', label: '実績（費用）', page: 'yojitsu', readScope: 'actuals.read', basic: true,
+    note: '年度×月×勘定科目の費用の実績額（税抜）。会計事務所の試算表から手入力。売上の実績は請求書から計算する' },
+
+  { id: 'actual_adjust', crmKey: 'actualAdjust', label: '実績調整（旧）', page: 'yojitsu', readScope: 'actual_adjust.read',
+    note: '★ 2026-09-16 以降は入力に使わない。古いデータは実績に足したまま（消すと過去の数字が変わるため）' },
 
   { id: 'accounts', crmKey: 'accounts', label: '勘定科目', page: 'settings', readScope: 'accounts.read', basic: true,
     note: 'コード・名称・区分（収益／売上原価／販管費／営業外）' },

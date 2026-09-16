@@ -10,7 +10,7 @@
    会計の約束（THIET-KE-YOJITSU.md §4.2 と同じ）:
      ・bookMonth（計上月）が予実を決める。入金日・支払日ではない（発生主義）。
      ・入金／支払は P/L に影響しない。債権・債務の残高を減らすだけ。
-     ・実績は保存しない。毎回、伝票から計算する。
+     ・売上の実績は保存しない（請求書から毎回計算する）。費用の実績は 試算表から手で入れた actuals。
      ・予実の金額は税抜。消費税は預り金であって儲けではない。
    ============================================================================ */
 
@@ -201,25 +201,15 @@ export function actualSeries(st: any, fy: number, kind: string): number[] {
       if (!(inv.items || []).length) addTo(ym, docNet(inv))
     })
   } else {
-    arr(st, 'bills').forEach((b: any) => {
-      if (b.status === '取消') return
-      const ym = ymOfDoc(b); if (idx[ym] == null) return
-      ;(b.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === kind) addTo(ym, itemAmount(it)) })
+    /* ★ 2026-09-16: 費用の実績は actuals（会計事務所の試算表からの手入力・税抜）だけ。
+       支払請求（bills）・費用表（costPlans）は予定であって実績ではない。web/index.html の actualSeries と同じ。 */
+    arr(st, 'actuals').forEach((a: any) => {
+      if (Number(a.fy) !== Number(fy)) return
+      if (accountKind(st, a.accountCode) !== kind) return
+      const i = Number(a.mIndex); if (i >= 0 && i < 12) out[i] += num(a.amount)
     })
-    arr(st, 'expenses').forEach((e: any) => {
-      const ym = String(e.bookMonth || e.date || '').slice(0, 7); if (idx[ym] == null) return
-      if (accountKind(st, e.accountCode) !== kind) return
-      const rate = TAX_RATE[e.taxCat || '課税10%'] || 0
-      addTo(ym, Math.round(num(e.amount) / (1 + rate)))
-    })
-    if (kind === 'nonop') {
-      arr(st, 'invoices').forEach((inv: any) => {
-        if (inv.status === '取消') return
-        const ym = ymOfDoc(inv); if (idx[ym] == null) return
-        ;(inv.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === 'nonop') addTo(ym, itemAmount(it)) })
-      })
-    }
   }
+  /* di sản: 2026-09-16 より前の「実績の調整」。入力はもうできないが、過去の数字を変えないため足し続ける */
   arr(st, 'actualAdjust').forEach((a: any) => {
     if (Number(a.fy) !== Number(fy)) return
     if (accountKind(st, a.accountCode) !== kind) return
@@ -251,9 +241,10 @@ export const sum12 = (a: number[]) => sumRange(a, 0, 11)
 
 /** 直近で実績のある月（無ければ今月） */
 export function lastActualIdx(st: any, fy: number): number {
-  const rev = actualSeries(st, fy, 'revenue'), cost = actualSeries(st, fy, 'sga')
+  const rev = actualSeries(st, fy, 'revenue')
+  const cost = ['cogs', 'sga', 'nonop'].map(k => actualSeries(st, fy, k))
   let last = -1
-  for (let i = 0; i < 12; i++) if ((rev[i] || 0) !== 0 || (cost[i] || 0) !== 0) last = i
+  for (let i = 0; i < 12; i++) if ((rev[i] || 0) !== 0 || cost.some(a => (a[i] || 0) !== 0)) last = i
   if (last >= 0) return last
   const t = thisMonth()
   return fyOf(t) === fy ? fyIndexOf(t) : 0

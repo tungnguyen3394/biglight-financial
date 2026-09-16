@@ -968,30 +968,22 @@ const ENTITIES = {
     ],
     columns:['name','kind','companyId','contractEnd','rent'],
   },
-  /* 費目マスタ — 月次費用表の「行」。金額そのものは expenses に入る（1マス=1行）。 */
+  /* 対象（費目マスタ）— 費用表の「行」。マスの金額（予定・税込）は costPlans に入る（1マス=1行）。
+     ★ 2026-09-16: 説明文はフォームから外し 入力ガイドへ。vendor（自由記入の支払先）と method（支払方法）は
+        フォームから外した（データは残る。支払先は companyId で選ぶ）。 */
   costItems: {
-    label:'費目', key:'costItems', page:'expenses', idPrefix:'CI',
+    label:'対象', key:'costItems', page:'expenses', idPrefix:'CI',
     fields:[
-      {name:'name',        label:'費目名',   type:'text', req:true, section:'基本', secIcon:'file', ph:'例: 事務所家賃'},
-      {name:'accountCode', label:'勘定科目', type:'account', req:true, help:'予実のどの費用に入るかを決めます。'},
-      {name:'kind',        label:'区分',     type:'select', options:COST_KINDS, req:true,
-        help:'定期＝毎月ほぼ同じ額（家賃・通信・リース）。変動＝月によって変わる（旅費・交際費）。'},
-      /* ★ 2026-09-13 利用者の指示: 費用は「ある会社に定期的に払うお金」。
-         だから支払先の会社を選べるようにし、無ければその場で作れるようにする。 */
-      {name:'companyId',   label:'支払先', type:'ref', ref:'companies', refFilter:'payee', quickAdd:'仕入先',
-        help:'BIGLIGHT がサービスを受けている会社（大家・電力・通信・清掃など）。支払期日は この会社の 締日・支払サイト・支払日 から決まります。一覧に無ければ「＋ 新しい支払先を作る」で その場で作れます。'},
-      {name:'payMode',     label:'払い方',   type:'select', options:PAY_MODES,
-        help:'即払い＝月次費用表に金額を打つ（経費）。買掛＝毎月の支払請求を作り、期日と残高で管理する。'},
-      {name:'propertyId',  label:'物件（建物）', type:'ref', ref:'properties',
-        help:'家賃・電気・水道・ガスなど、建物にかかるものはここで物件を選びます。物件ごとの表に集まります。'},
-      {name:'monthly',     label:'月額予定（税込）', type:'money',
-        help:'定期費用の目安。実績がここから10%以上ズレると表のマスに色が付きます。'},
-      {name:'taxCat',      label:'税区分',   type:'select', options:TAX_CATS,
-        help:'予実は税抜で見ます。この区分で税込→税抜に直します。'},
-      {name:'vendor',      label:'支払先',   type:'text'},
-      {name:'method',      label:'支払方法', type:'select', options:PAY_METHODS},
-      {name:'startYm',     label:'開始月',   type:'month', section:'期間・メモ', secIcon:'pen', help:'空欄なら制限なし。'},
-      {name:'endYm',       label:'終了月',   type:'month', help:'解約した月を入れると、その後の月は表で入力できなくなります。'},
+      {name:'name',        label:'対象名',   type:'text', req:true, section:'基本', secIcon:'file', ph:'例: 事務所家賃'},
+      {name:'accountCode', label:'勘定科目', type:'account', req:true},
+      {name:'kind',        label:'区分',     type:'select', options:COST_KINDS, req:true},
+      {name:'companyId',   label:'支払先', type:'ref', ref:'companies', refFilter:'payee', quickAdd:'仕入先'},
+      {name:'payMode',     label:'払い方',   type:'select', options:PAY_MODES},
+      {name:'propertyId',  label:'物件（建物）', type:'ref', ref:'properties'},
+      {name:'monthly',     label:'月額（税込）', type:'money'},
+      {name:'taxCat',      label:'税区分',   type:'select', options:TAX_CATS},
+      {name:'startYm',     label:'開始月',   type:'month', section:'期間・メモ', secIcon:'pen'},
+      {name:'endYm',       label:'終了月',   type:'month'},
       {name:'note',        label:'メモ',     type:'textarea', full:true, ph:'契約番号・値上げの経緯など'},
     ],
   },
@@ -1272,7 +1264,10 @@ function showPending(msg){
 function ensureShape(){
   ['companies','workers','assignments','billingRules','invoices','payments','bills','payouts',
    'expenses','costItems','budgets','forecasts','actualAdjust','objectives','keyResults','checkins',
-   'accounts','departments','mailLog','mailTemplates','collectionLogs'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
+   'accounts','departments','mailLog','mailTemplates','collectionLogs',
+   /* ★ 2026-09-16: costPlans＝費用表のマス（予定・税込）、actuals＝費用の実績（試算表から手入力・税抜）。
+      expenses（旧・経費）と actualAdjust（旧・実績調整）は入力に使わない（データは残す）。 */
+   'costPlans','actuals'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
   if(!DB.userPerms) DB.userPerms={};
   if(!DB.settings)  DB.settings={};
   if(!DB.accounts.length) DB.accounts = DEFAULT_ACCOUNTS.map(a=>({id:uid('AC'),...a}));
@@ -1775,27 +1770,16 @@ function actualSeries(fy, kind, opt){
       addTo(ym, invRevenue(inv));
     });
   } else {
-    // 費用側: bills（買掛あり）＋ expenses（即払い）
-    (DB.bills||[]).forEach(b=>{
-      if(b.status==='取消') return;
-      const ym=ymOfDoc(b); if(idx[ym]==null) return;
-      (b.items||[]).forEach(it=>{ if(accountKind(it.accountCode)===kind) addTo(ym, itemAmount(it)); });
+    /* ★ 2026-09-16 利用者の指示: 費用の実績は「会計事務所の試算表」から手で入れた数字（actuals・税抜）だけ。
+       支払請求（bills）も 費用表（costPlans）も 予定・約束であって実績ではないので、ここでは拾わない。
+       これで「予実の費用＝試算表」が1対1になり、伝票の作り漏れで実績が減ることが無くなる。 */
+    (DB.actuals||[]).forEach(a=>{
+      if(Number(a.fy)!==Number(fy)) return;
+      if(accountKind(a.accountCode)!==kind) return;
+      const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount);
     });
-    (DB.expenses||[]).forEach(e=>{
-      const ym=(e.bookMonth||e.date||'').slice(0,7); if(idx[ym]==null) return;
-      if(accountKind(e.accountCode)!==kind) return;
-      const rate = TAX_RATE[e.taxCat||'課税10%']||0;
-      addTo(ym, Math.round(num(e.amount)/(1+rate)));    // 経費は税込入力 → 税抜へ
-    });
-    if(kind==='nonop'){
-      (DB.invoices||[]).forEach(inv=>{     // 営業外収益が請求書に混ざる場合
-        if(inv.status==='取消') return;
-        const ym=ymOfDoc(inv); if(idx[ym]==null) return;
-        (inv.items||[]).forEach(it=>{ if(accountKind(it.accountCode)==='nonop') addTo(ym, itemAmount(it)); });
-      });
-    }
   }
-  // 手入力の調整（会計事務所の数字・期首の持ち込みなど）
+  // 手入力の調整（di sản: 2026-09-16 より前に入れた「実績の調整」。入力はもうできないが、過去の数字を変えないため足し続ける）
   (DB.actualAdjust||[]).forEach(a=>{
     if(Number(a.fy)!==Number(fy)) return;
     if(accountKind(a.accountCode)!==kind) return;
@@ -1825,16 +1809,15 @@ function seriesByAccount(fy, accountCode, source){
     });
     return out;
   }
+  /* 実績: 売上は請求書から、費用は actuals（試算表からの手入力）から。actualSeries と同じ拾い方でなければならない。 */
   const kind = accountKind(accountCode);
-  if(kind==='revenue'||kind==='nonop'){
+  if(kind==='revenue'){
     (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const i=idx[ymOfDoc(inv)]; if(i==null) return;
       (inv.items||[]).forEach(it=>{ if(it.accountCode===accountCode) out[i]+=itemAmount(it); }); });
+  }else{
+    (DB.actuals||[]).forEach(a=>{ if(Number(a.fy)!==Number(fy)||a.accountCode!==accountCode) return;
+      const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount); });
   }
-  (DB.bills||[]).forEach(b=>{ if(b.status==='取消') return; const i=idx[ymOfDoc(b)]; if(i==null) return;
-    (b.items||[]).forEach(it=>{ if(it.accountCode===accountCode) out[i]+=itemAmount(it); }); });
-  (DB.expenses||[]).forEach(e=>{ const i=idx[(e.bookMonth||e.date||'').slice(0,7)]; if(i==null) return;
-    if(e.accountCode!==accountCode) return;
-    const rate=TAX_RATE[e.taxCat||'課税10%']||0; out[i]+=Math.round(num(e.amount)/(1+rate)); });
   (DB.actualAdjust||[]).forEach(a=>{ if(Number(a.fy)!==Number(fy)||a.accountCode!==accountCode) return;
     const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount); });
   return out;
@@ -1878,12 +1861,11 @@ function actualSeriesGross(fy, kind){
   if(kind==='revenue'){
     (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const ym=ymOfDoc(inv); if(idx[ym]==null) return; addTo(ym, invRevenueGross(inv)); });
   }else{
-    (DB.bills||[]).forEach(b=>{ if(b.status==='取消') return; const ym=ymOfDoc(b); if(idx[ym]==null) return;
-      (b.items||[]).forEach(it=>{ if(accountKind(it.accountCode)===kind) addTo(ym, grossOfItemV(it)); }); });
-    (DB.expenses||[]).forEach(e=>{ const ym=(e.bookMonth||e.date||'').slice(0,7); if(idx[ym]==null) return;
-      if(accountKind(e.accountCode)===kind) addTo(ym, num(e.amount)); });
-    if(kind==='nonop') (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const ym=ymOfDoc(inv); if(idx[ym]==null) return;
-      (inv.items||[]).forEach(it=>{ if(accountKind(it.accountCode)==='nonop') addTo(ym, grossOfItemV(it)); }); });
+    /* 費用の実績は税抜で入れる。税込で見たいときは 予算と同じように 科目の税率で戻す。 */
+    (DB.actuals||[]).forEach(a=>{
+      if(Number(a.fy)!==Number(fy) || accountKind(a.accountCode)!==kind) return;
+      const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=Math.round(num(a.amount)*grossRateOf(fy, a.accountCode));
+    });
   }
   (DB.actualAdjust||[]).forEach(a=>{           // 調整は税の情報を持たないので そのまま
     if(Number(a.fy)!==Number(fy) || accountKind(a.accountCode)!==kind) return;
@@ -1892,20 +1874,20 @@ function actualSeriesGross(fy, kind){
   return out;
 }
 let _grossRateCache=null;
+/** 科目ごとの税率（税込÷税抜）。
+    ★ 2026-09-16: 実績も予算も 税抜で持つようになったので、伝票から税率を測る必要がなくなった。
+      対象（費目マスタ）の税区分だけを見る。無ければ 10%（営業外は 0%）。 */
 function grossRates(fy){
-  const sig=[fy,(DB.invoices||[]).length,(DB.bills||[]).length,(DB.expenses||[]).length,(DB.costItems||[]).length,(DB.accounts||[]).length].join('|');
+  const sig=[(DB.costItems||[]).length,(DB.accounts||[]).length].join('|');
   if(_grossRateCache && _grossRateCache.sig===sig) return _grossRateCache.map;
-  const g={}, n={}, ci={};
-  [fy, fy-1].forEach(y=>moneyLines(y).forEach(l=>{ g[l.code]=(g[l.code]||0)+l.gross; n[l.code]=(n[l.code]||0)+l.amount; }));
+  const ci={};
   (DB.costItems||[]).forEach(it=>{ if(it && it.accountCode && !(it.accountCode in ci)) ci[it.accountCode]=1+(TAX_RATE[it.taxCat||'課税10%']||0); });
-  _grossRateCache={ sig, map:{ g, n, ci } };
+  _grossRateCache={ sig, map:{ ci } };
   return _grossRateCache.map;
 }
-/** 科目の「税込÷税抜」。親の科目なら 下の科目をまとめて */
+/** 科目の「税込÷税抜」。親の科目なら 下の科目から探す */
 function grossRateOf(fy, code){
   const M=grossRates(fy), codes=accountCodesUnder(code);
-  let g=0, n=0; codes.forEach(c=>{ g+=M.g[c]||0; n+=M.n[c]||0; });
-  if(n>0) return g/n;
   const c=codes.find(x=>M.ci[x]); if(c) return M.ci[c];
   return accountKind(code)==='nonop'? 1 : 1.1;
 }
@@ -1938,9 +1920,15 @@ function landingV(fy, key, uptoIdx){
 function seriesByAccountV(fy, code, source){
   if(taxView()==='net') return seriesByAccount(fy, code, source);
   if(source==='budget' || source==='forecast') return seriesByAccount(fy, code, source).map(v=>Math.round(v*grossRateOf(fy, code)));
-  const out=Array(12).fill(0);
-  moneyLines(fy).forEach(l=>{ if(String(l.code)===String(code)) out[l.i]+=l.gross; });
-  return out;
+  /* 実績: 売上は請求書の税込、費用は 税抜の実績を科目の税率で戻す */
+  if(accountKind(code)==='revenue'){
+    const months=fyMonths(fy), idx={}; months.forEach((m,i)=>{ idx[m]=i; });
+    const out=Array(12).fill(0);
+    (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const i=idx[ymOfDoc(inv)]; if(i==null) return;
+      (inv.items||[]).forEach(it=>{ if(it.accountCode===code) out[i]+=grossOfItemV(it); }); });
+    return out;
+  }
+  return seriesByAccount(fy, code, 'actual').map(v=>Math.round(v*grossRateOf(fy, code)));
 }
 const taxGrossNote = () => taxView()==='gross'
   ? `<div class="infobar" style="margin:0 0 10px;">税込で表示中。利益（粗利・営業・経常）は 預かった消費税 − 払った消費税 を含みます（納税前の手元のお金に近い数字）。
@@ -1972,10 +1960,11 @@ function landing(fy, key, uptoIdx){
   for(let i=uptoIdx+1;i<12;i++) t += (fc[i]||bud[i]||0);
   return t;
 }
-/** 直近で実績のある月（無ければ今月） */
+/** 直近で実績のある月（無ければ今月）。請求書 または 手入力の実績（actuals）がある最後の月。 */
 function lastActualIdx(fy){
-  const rev=actualSeries(fy,'revenue'), cost=actualSeries(fy,'sga');
-  let last=-1; for(let i=0;i<12;i++) if((rev[i]||0)!==0||(cost[i]||0)!==0) last=i;
+  const rev=actualSeries(fy,'revenue');
+  const cost=['cogs','sga','nonop'].map(k=>actualSeries(fy,k));
+  let last=-1; for(let i=0;i<12;i++) if((rev[i]||0)!==0 || cost.some(a=>(a[i]||0)!==0)) last=i;
   if(last>=0) return last;
   const t=thisMonth(); return fyOf(t)===fy ? fyIndexOf(t) : 0;
 }
@@ -2461,17 +2450,19 @@ function setYjTab(t){ YJ_TAB=t; renderPage('yojitsu'); }
 function setYjView(v){ YJ_VIEW=v; renderPage('yojitsu'); }
 
 function planCell(which, fy, mIndex, accountCode){
-  const src = which==='forecast'? (DB.forecasts||[]) : (DB.budgets||[]);
+  const src = which==='forecast'? (DB.forecasts||[]) : (which==='actual'? (DB.actuals||[]) : (DB.budgets||[]));
   const r = src.find(x=>Number(x.fy)===Number(fy)&&Number(x.mIndex)===Number(mIndex)&&x.accountCode===accountCode);
   return r? num(r.amount) : 0;
 }
 function setPlanCell(which, fy, mIndex, accountCode, amount){
-  const key = which==='forecast'?'forecasts':(which==='adjust'?'actualAdjust':'budgets');
+  /* ★ 2026-09-16: which='actual' ＝ 会計事務所の試算表から手で入れる費用の実績（税抜）。
+     予算・見込と同じ形（fy・mIndex・勘定科目・金額）なので、同じ関数で読み書きする。 */
+  const key = which==='forecast'?'forecasts':(which==='actual'?'actuals':(which==='adjust'?'actualAdjust':'budgets'));
   const list = coll(key);
   let r = list.find(x=>Number(x.fy)===Number(fy)&&Number(x.mIndex)===Number(mIndex)&&x.accountCode===accountCode);
   if(!r){
     if(!num(amount)) return;
-    r = { id:uid(which==='forecast'?'FC':(which==='adjust'?'AJ':'BG')), fy:Number(fy), mIndex:Number(mIndex),
+    r = { id:uid(which==='forecast'?'FC':(which==='actual'?'AT':(which==='adjust'?'AJ':'BG'))), fy:Number(fy), mIndex:Number(mIndex),
           accountCode, amount:num(amount) };
     commitRecord(key, r, {});
   }else{
@@ -4532,7 +4523,7 @@ function accountUsage(code){
   let n=0;
   const cnt = arr => (arr||[]).forEach(x=>{ if(String(x.accountCode)===String(code)) n++; });
   (DB.invoices||[]).forEach(i=>cnt(i.items)); (DB.bills||[]).forEach(b=>cnt(b.items));
-  cnt(DB.expenses); cnt(DB.costItems); cnt(DB.budgets); cnt(DB.forecasts); cnt(DB.actualAdjust); cnt(DB.billingRules);
+  cnt(DB.expenses); cnt(DB.costItems); cnt(DB.budgets); cnt(DB.forecasts); cnt(DB.actualAdjust); cnt(DB.actuals); cnt(DB.billingRules);
   return n;
 }
 /** 選べるのは末端だけ。親は見出しとして出す（選べない）。 */
@@ -6683,38 +6674,33 @@ function costItemActive(it, ym){
   if(it.endYm   && ym > String(it.endYm).slice(0,7))   return false;
   return true;
 }
-/** 表の1マスに対応する expenses の行 */
+/** 表の1マス（費用表の予定額・税込）＝ costPlans の1行。
+    ★ 2026-09-16: 以前は expenses（実際に出たお金）を書いていた。費用表は「予定」の表になったので
+      costPlans に移した。expenses は残すが、もう入力にも計算にも使わない。 */
 function costCell(costItemId, ym){
-  return (DB.expenses||[]).find(e=>e && String(e.costItemId)===String(costItemId)
-    && (e.bookMonth||'').slice(0,7)===ym) || null;
+  return (DB.costPlans||[]).find(p=>p && String(p.costItemId)===String(costItemId)
+    && String(p.ym||'').slice(0,7)===ym) || null;
 }
 function costCellAmount(costItemId, ym){ const r=costCell(costItemId,ym); return r? num(r.amount) : 0; }
 /** 税込 → 税抜（actualSeries と同じ式でなければ予実とズレる） */
 function netOfGross(gross, taxCat){
   return Math.round(num(gross)/(1+(TAX_RATE[taxCat||'課税10%']||0)));
 }
-/** マスに書き込む。空欄・0 にすると行ごと消す（残すと「0円の費用」が残ってしまう）。 */
+/** マスに書き込む（予定・税込）。空欄・0 にすると行ごと消す（0円の予定を残さない）。
+    ★ 買掛の対象も同じように打てる。ここは「予定」なので、支払請求（実際の請求）とは別もの。 */
 function setCostCell(costItemId, ym, amount){
   const it = findById('costItems', costItemId); if(!it) return;
-  /* 買掛の費目は支払請求が唯一の入口。ここで経費も作ると、予実に二重に乗る。 */
-  if(isApCost(it)){ toast('この費目は「買掛」です。金額は支払請求（支払管理）で直します。','err'); return; }
   const v = num(amount);
   const r = costCell(costItemId, ym);
   if(!r){
     if(!v) return;
-    commitRecord('expenses', { costItemId:String(costItemId), bookMonth:ym, date:'',
-      accountCode:it.accountCode||'', vendor:it.vendor||'', amount:v,
-      taxCat:it.taxCat||'課税10%', method:it.method||'', note:it.name||'' }, {});
+    commitRecord('costPlans', { costItemId:String(costItemId), ym, amount:v }, {});
     return;
   }
-  if(!v){ DB.expenses=(DB.expenses||[]).filter(x=>String(x.id)!==String(r.id)); markDeleted('expenses', r.id); return; }
+  if(!v){ DB.costPlans=(DB.costPlans||[]).filter(x=>String(x.id)!==String(r.id)); markDeleted('costPlans', r.id); return; }
   r.amount=v;
-  r.accountCode=it.accountCode||r.accountCode;
-  r.taxCat=it.taxCat||r.taxCat||'課税10%';
-  r.vendor=it.vendor||r.vendor||'';
-  r.note=it.name||r.note||'';
   r.updatedAt=new Date().toISOString(); r.updatedBy=(SESSION&&SESSION.email)||'';
-  markDirty('expenses', r);
+  markDirty('costPlans', r);
 }
 function onCostInput(el, costItemId, mi){
   fmtMoneyInput(el); el.classList.add('dirty');
@@ -9040,8 +9026,9 @@ function viewAudit(){
       <button class="${AUDIT_TAB==='restore'?'on':''}" onclick="setAuditTab('restore')">データ復元</button>
     </div><div id="auditBox"><div class="empty">読み込み中…</div></div>` });
 }
-const AUDIT_ENT={ invoices:'請求書', payments:'入金', bills:'支払請求', payouts:'支払実行', expenses:'費用', costItems:'費目',
-  companies:'取引先', budgets:'予算', forecasts:'見込', actualAdjust:'実績調整', billingRules:'請求ルール',
+const AUDIT_ENT={ invoices:'請求書', payments:'入金', bills:'支払請求', payouts:'支払実行', expenses:'費用（旧）', costItems:'対象',
+  costPlans:'費用表のマス（予定）', actuals:'費用の実績',
+  companies:'取引先', budgets:'予算', forecasts:'見込', actualAdjust:'実績調整（旧）', billingRules:'請求ルール',
   objectives:'目標', keyResults:'Key Result', workers:'特定技能者', assignments:'雇用', profiles:'アカウント', app_state:'データ全体' };
 function auditFieldLabel(entity, f){
   const ek=Object.keys(ENTITIES).find(k=>ENTITIES[k].key===entity);
