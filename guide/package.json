@@ -1,0 +1,13 @@
+{
+  "name": "biglight-finance-guide",
+  "private": true,
+  "type": "module",
+  "description": "Hướng dẫn sử dụng finance.biglight.jp (予実管理システム) bằng hình ảnh → PDF / HTML (tiếng Việt)",
+  "scripts": {
+    "capture": "node tools/capture.mjs vi",
+    "build": "node tools/build.mjs vi"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
