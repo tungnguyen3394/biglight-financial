@@ -550,7 +550,7 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   const h=ctx.viewArBook();
   eq('売掛金の表: 8社×12か月のマス', (h.match(/ar-c[ "]/g)||[]).length, 8*12);
   /* ★ 2026-09-16: 過去の年度は KPI と右端の列が「その年度の最後の月（7月末）」になる */
-  eq('売掛金の表（過去の年度）: KPI 4つは 年度末の7月で', ['2025年7月の請求額','2025年7月の入金額','売掛金残高（7月末）','期限超過額（7月末）','7月末残高'].every(x=>h.includes(x)), true);
+  eq('売掛金の表（過去の年度）: KPI 4つは 年度末の7月で', ['2025年7月の請求額（税込）','2025年7月の入金額','売掛金残高（7月末・税込）','期限超過額（7月末）','7月末残高'].every(x=>h.includes(x)), true);
   eq('売掛金の表（過去の年度）: 「今月」「現在残高」は出さない', ['今月請求額','現在残高'].some(x=>h.includes(x)), false);
   eq('基準の月: 過去の年度→最後の月／今の年度→今月／未来の年度→最初の月',
     [ctx.bookAnchor(2024).ym, ctx.bookAnchor(ctx.fyOf(ctx.thisMonth())).ym, ctx.bookAnchor(ctx.fyOf(ctx.thisMonth())+1).ym],

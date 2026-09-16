@@ -24,6 +24,8 @@ import { SCOPES, SCOPE_LEVELS, resolveApiKey, touchLastUsed, rateHit, hasScope,
 import { buildOpenApi } from './openapi'
 import * as R from './reports'
 import * as F from './finance'
+import * as A from './attachments'
+import { safeName } from '../files'
 
 export const API_V1_ENABLED = String(process.env.API_V1_ENABLED || 'false').toLowerCase() === 'true'
 export const API_PUBLIC_BASE = String(process.env.API_V1_PUBLIC_BASE || 'https://finance.biglight.jp').replace(/\/+$/, '')
@@ -202,6 +204,40 @@ export function apiV1Router(d: Deps): Router {
     const st = await loadStateCached(pool)
     const mode = String(req.query.mode || 'week') === 'month' ? 'month' : 'week'
     res.json(R.cashflowReport(st, mode as any, Number(req.query.periods) || 12))
+  })
+
+  /* ── 添付ファイル（証憑）— 読むだけ。スコープは その伝票の表と同じ ── */
+  const monthQ = (v: any) => { const s = String(v || ''); return /^\d{4}-\d{2}$/.test(s) ? s : '' }
+  r.get('/v1/attachments/missing', async (req: any, res: any) => {
+    const want = req.query.screen ? [String(req.query.screen)] : A.MISSING_SCREENS
+    const bad = want.find(x => !A.MISSING_SCREENS.includes(x))
+    if (bad) return fail(res, 400, 'bad-screen', 'screen は ' + A.MISSING_SCREENS.join(' / ') + ' のどれかです')
+    const screens = want.filter(x => hasScope(scopesOf(res), A.attScreen(x)!.readScope))
+    if (!screens.length) return fail(res, 403, 'scope-required', 'この表を読むスコープがありません', { required_scope: A.attScreen(want[0])!.readScope })
+    const st = await loadStateCached(pool)
+    res.json(await A.missingAttachments(pool, st, screens, { monthFrom: monthQ(req.query.month_from), monthTo: monthQ(req.query.month_to),
+      companyId: safeId(req.query.company_id) || undefined, limit: Number(req.query.limit) || 100 }))
+  })
+  r.get('/v1/attachments/file/:fileId', async (req: any, res: any) => {
+    const st = await loadStateCached(pool)
+    const got = await A.attachmentFile(pool, st, safeId(req.params.fileId))
+    if (!got) return fail(res, 404, 'not-found', '見つかりません')
+    if (!hasScope(scopesOf(res), got.def.readScope)) return fail(res, 403, 'scope-required', 'このファイルを読むには ' + got.def.readScope + ' が必要です', { required_scope: got.def.readScope })
+    const integ: Integration = res.locals.integration
+    d.audit('api:' + integ.name, 'api-file-read', got.file.id, { screen: got.def.id, record_id: got.record.id, file_name: got.file.fileName, request_id: res.locals.requestId, result: 'ok' })
+    res.setHeader('Content-Type', got.file.mime)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(safeName(got.file.fileName)))
+    res.send(got.file.data)
+  })
+  r.get('/v1/attachments/:screen/:id', async (req: any, res: any) => {
+    const def = A.attScreen(req.params.screen)
+    if (!def) return fail(res, 404, 'unknown-screen', '添付が付く表は ' + A.ATT_SCREEN_IDS.join(' / ') + ' です')
+    if (!hasScope(scopesOf(res), def.readScope)) return fail(res, 403, 'scope-required', 'この表を読むには ' + def.readScope + ' が必要です', { required_scope: def.readScope })
+    const st = await loadStateCached(pool)
+    const out = await A.attachmentsOf(pool, st, def, safeId(req.params.id))
+    if (!out) return fail(res, 404, 'not-found', 'その伝票はありません')
+    res.json(out)
   })
 
   r.use('/v1', (_req: any, res: any) => fail(res, 404, 'not-found', 'このエンドポイントはありません（/api/v1/openapi.json を見てください）'))

@@ -222,6 +222,34 @@ Hoá đơn (tạo · 明細 · thuế · PDF · gửi · trạng thái) do **Mon
 - `lastActualIdx` = tháng cuối có hoá đơn **hoặc** có `actuals`.
 - `backend/src/apiv1/finance.ts` là bản sao của đúng các công thức này (`test/apiv1.js` so từng con số).
 
+### 4.3b Chứng từ đính kèm (証憑) và thuế của doanh thu — 2026-09-16
+
+**File** nằm ở bảng `attachments` (BYTEA, không vào `app_state`), gắn vào 請求 / 入金 / 支払請求 / 支払 / 取引先 / 費目 / 物件.
+- Mỗi file có `doc_type`: `請求書 · 領収書 · 振込明細 · 契約書 · その他` (lạ → その他). Đổi bằng `PATCH /files/:id`.
+- Hộp 📎: danh sách bên trái, **xem trước PDF/ảnh ngay bên phải** (blob → iframe). Không mở tab mới.
+- Form `入金を記録` · `支払を記録` · `請求額を手入力` · `支払請求` có ô kéo thả; file giữ trong `ATT_PEND`, gửi **sau khi** bản ghi đã lên server (`attPushNow` → `attPendFlush`) vì server chỉ nhận file cho bản ghi đã tồn tại.
+- `売掛元帳 / 買掛元帳`: bấm dòng tháng → danh sách chứng từ của tháng, mỗi dòng có 📎; cột `証憑` = tổng file / số chứng từ thiếu.
+- **証憑なし** (thiếu file): 支払請求・請求 đã xác nhận (không phải 作成中/取消), 入金・支払 không 取消. Dữ liệu `demo` không tính.
+  Hiện: nhãn đỏ ở cột 📎, ô lọc `証憑なしのみ` (入金 / 支払請求 / 支払実行), chuông (3 tháng gần nhất).
+  Web `ATT_NEEDS` và backend `apiv1/attachments.ts NEEDS_FILE` phải giống nhau.
+- **支払請求 không có file thì không 確定 được** — kiểm ở 2 nơi: màn hình (`confirmBill`, `saveBillForm`) và
+  server (`authz.ts billsNeedingFile` + đếm `attachments` trong `/state-delta` → 403 `bill-needs-file`).
+  Chỉ áp cho bản ghi đang 作成中/取消/mới chuyển sang trạng thái xác nhận; bản đã 確定 từ trước không bị khoá lại; `demo` bỏ qua.
+  Form chọn 確定 + có file: lưu 作成中 → gửi file → đổi sang 確定.
+- **AI/API chỉ đọc**: `list_attachments · get_attachment · list_missing_attachments`, REST `/api/v1/attachments/…`.
+  Quyền = scope đọc của bảng chứng từ. Không có đường ghi.
+
+**Thuế của hoá đơn doanh thu không có dòng chi tiết** (MF / 請求額を手入力): `invoices.taxCat` = `課税10% · 軽減8% · 非課税 · 対象外` (MF có thể ra `混在`).
+```
+税抜 = subtotal (nếu có)  ·  không có → 税込 ÷ (1 + thuế suất của docTaxCat)
+docTaxCat = invoice.taxCat → 取引先.taxCat → 課税10%          (web docTaxCat = backend finance.ts docTaxCat)
+```
+- Trước đây luôn ÷1.1 → hoá đơn không chịu thuế bị trừ thuế oan.
+- MF: 税抜=税込 → `対象外` (công ty là 非課税/対象外 thì theo công ty); tỉ lệ 1.10/1.08 → 課税10%/軽減8%; khác → `混在`.
+  CSV thiếu 小計 → theo 取引先 và tính luôn `subtotal`.
+- Tiêu đề số tiền ở 売掛金/買掛金/元帳 ghi `（税込）`; 入金額/支払額 ghi "số tiền thực nhận/thực trả".
+- `test/attachments.js` so từng con số giữa web và backend.
+
 ### 4.4 OKR
 
 | Key | Trường chính |

@@ -216,8 +216,14 @@ export function mcpRouter(d: Deps): Router {
   return r
 }
 
-function toolResult(data: any, isError: boolean) {
-  return { content: [{ type: 'text', text: JSON.stringify(data, null, 1) }], structuredContent: data, isError }
+export function toolResult(data: any, isError: boolean) {
+  const content: any[] = [{ type: 'text', text: JSON.stringify(data, null, 1) }]
+  /* get_attachment: ファイルの中身は JSON に入れず、MCP の画像／リソースとして添える（2026-09-16） */
+  const em = data && data.__embed
+  if (em) content.push(/^image\//.test(em.mime)
+    ? { type: 'image', data: em.base64, mimeType: em.mime }
+    : { type: 'resource', resource: { uri: em.uri, mimeType: em.mime, blob: em.base64 } })
+  return { content, structuredContent: data, isError }
 }
 /** 監査に残す引数は「鍵っぽいもの」を伏せ、長さも切る（検索語は残す＝誰が何を見たかは追える） */
 function summarizeArgs(a: any) {

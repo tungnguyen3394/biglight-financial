@@ -18,6 +18,7 @@ import { hasScope } from '../apiv1/keys'
 import { COLLECTIONS, collectionById, publicRow, rowStamp, CollectionDef } from '../apiv1/collections'
 import * as R from '../apiv1/reports'
 import * as F from '../apiv1/finance'
+import * as A from '../apiv1/attachments'
 
 export interface ToolDef {
   name: string
@@ -212,6 +213,82 @@ export const TOOLS: ToolDef[] = [
       const b = id ? list.find(x => String(x.id) === id) : list.find(x => String(x.no || '').toUpperCase() === no)
       if (!b) throw new ToolError('not-found', 'その支払請求はありません')
       return R.billDetail(st, b)
+    },
+  },
+
+  /* ══════ 証憑（添付ファイル）— 読むだけ（2026-09-16）══════ */
+  {
+    name: 'list_attachments', title: '伝票に付いた書類（証憑）の一覧', scope: '',
+    description: '請求・入金・支払請求・支払・取引先・費目・物件の1件に付いているファイル（請求書PDF・振込明細・領収書・契約書など）を一覧する。' +
+      '各ファイルの file_id・ファイル名・書類の種類（doc_type）・大きさと、その伝票の会社・月・金額（税込）を返す。中身は get_attachment で読む。',
+    inputSchema: { type: 'object', properties: {
+      screen: { type: 'string', enum: A.ATT_SCREEN_IDS, description: '伝票の表（invoices / payments / bills / payouts / companies / cost_items / properties など）' },
+      id: { type: 'string', description: '伝票の id（search_records・list_unpaid_bills などが返す id）' },
+    }, required: ['screen', 'id'], additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    visible: (sc) => A.ATT_SCREENS.some(c => hasScope(sc, c.readScope)),
+    scopeFor: (a) => { const d = A.attScreen(S(a && a.screen, 40)); return d ? d.readScope : 'invoices.read' },
+    async run(ctx, a) {
+      const def = A.attScreen(S(a && a.screen, 40))
+      if (!def) throw new ToolError('bad-input', 'screen が不正です')
+      const id = safeId(a && a.id)
+      if (!id) throw new ToolError('bad-input', 'id が不正です')
+      const st = await loadStateCached(ctx.pool)
+      const out = await A.attachmentsOf(ctx.pool, st, def, id)
+      if (!out) throw new ToolError('not-found', 'その伝票はありません')
+      return out
+    },
+  },
+  {
+    name: 'get_attachment', title: '書類（証憑）ファイルを読む', scope: '',
+    description: 'list_attachments が返した file_id のファイルを読む。PDF はファイルそのもの（resource）、画像は image として返す（5MB まで）。' +
+      'Excel・Word は中身を返さず、書類の情報だけ返す。どの伝票（会社・月・金額）のファイルかも一緒に返す。',
+    inputSchema: { type: 'object', properties: { file_id: { type: 'string' } }, required: ['file_id'], additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    visible: (sc) => A.ATT_SCREENS.some(c => hasScope(sc, c.readScope)),
+    scopeFor: () => null,                // どの表のファイルかは 読んでみるまで分からない → run の中で確かめる
+    async run(ctx, a) {
+      const id = safeId(a && a.file_id)
+      if (!id) throw new ToolError('bad-input', 'file_id が不正です')
+      const st = await loadStateCached(ctx.pool)
+      const got = await A.attachmentFile(ctx.pool, st, id)
+      /* スコープが無い表のファイルは「無い」と同じ答えにする（あるかどうかも教えない） */
+      if (!got || !hasScope(ctx.scopes, got.def.readScope)) throw new ToolError('not-found', 'そのファイルはありません（または読む範囲の外です）')
+      const f = got.file
+      const out: any = { record: got.record, file: A.fileView(f) }
+      const small = f.data.length <= 5 * 1024 * 1024
+      if (small && (f.mime === 'application/pdf' || /^image\/(png|jpeg|gif|webp)$/.test(f.mime))) {
+        out.content_included = true
+        Object.defineProperty(out, '__embed', { value: { uri: 'attachment://' + f.id + '/' + encodeURIComponent(f.fileName), mime: f.mime, base64: f.data.toString('base64') }, enumerable: false })
+      } else {
+        out.content_included = false
+        out.note = small ? 'この種類（' + f.kind + '）は中身を返しません。' : '5MB を超えるため中身は返しません。'
+      }
+      return out
+    },
+  },
+  {
+    name: 'list_missing_attachments', title: '証憑（ファイル）が付いていない伝票', scope: '',
+    description: 'ファイルが要るのに1つも付いていない伝票を新しい順に返す。対象: 確定した支払請求・請求、取消していない入金・支払。' +
+      '月（YYYY-MM）・取引先で絞れる。書類集めや月次の点検に使う。',
+    inputSchema: { type: 'object', properties: {
+      screen: { type: 'string', enum: A.MISSING_SCREENS, description: '省略すると 読める表すべて' },
+      month_from: { type: 'string', description: 'YYYY-MM（計上月。入金・支払は日付の月）' },
+      month_to: { type: 'string', description: 'YYYY-MM' },
+      company_id: { type: 'string' },
+      limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+    }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    visible: (sc) => A.ATT_SCREENS.some(c => A.MISSING_SCREENS.includes(c.id) && hasScope(sc, c.readScope)),
+    scopeFor: (a) => { const d = a && a.screen ? A.attScreen(S(a.screen, 40)) : null; return d ? d.readScope : null },
+    async run(ctx, a) {
+      const mo = (v: any, k: string) => { const s = S(v, 10); if (s && !/^\d{4}-\d{2}$/.test(s)) throw new ToolError('bad-input', k + ' は YYYY-MM で'); return s }
+      const want = a && a.screen ? [S(a.screen, 40)] : A.MISSING_SCREENS
+      const screens = want.filter(x => { const d = A.attScreen(x); return d && hasScope(ctx.scopes, d.readScope) })
+      if (!screens.length) throw new ToolError('insufficient-scope', '読める表がありません')
+      const st = await loadStateCached(ctx.pool)
+      return A.missingAttachments(ctx.pool, st, screens, { monthFrom: mo(a && a.month_from, 'month_from'), monthTo: mo(a && a.month_to, 'month_to'),
+        companyId: safeId(a && a.company_id) || undefined, limit: intIn(a && a.limit, 1, 200, 50) })
     },
   },
 

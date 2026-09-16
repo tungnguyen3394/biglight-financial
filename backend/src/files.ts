@@ -15,7 +15,10 @@
    ・見る・付ける・消す は、その伝票の画面の 表示・編集・削除 の権限に従う
      （画面を見せていない人には、添付も見せない）。
    ・消すのは「消した印」を付けるだけ。誰が何を消したかは操作履歴に残す。
-   ・外部API・MCP からは一切見えません（ここにしか口が無い）。
+   ・★ 2026-09-16 利用者の指示: 外部API・MCP から「読むだけ」見えるようにした
+     （鍵のスコープ＝その伝票の表の read。付ける・消すの口は外には無い）。
+     下の listAttachments / attachmentCounts / readAttachment を apiv1・mcp が使う。
+   ・★ 2026-09-16: 書類の種類（doc_type）を持つ。AI や人が「どれが請求書か」を迷わないように。
    ========================================================================== */
 import crypto from 'crypto'
 import { Router } from 'express'
@@ -28,6 +31,10 @@ export const ATTACH_ENTITIES: Record<string, string> = {
   invoices: 'invoices', payments: 'receipts', bills: 'bills', payouts: 'payouts',
   expenses: 'expenses', costItems: 'expenses', properties: 'properties', companies: 'companies',
 }
+
+/** 書類の種類（画面の選択肢と同じ並び）。知らない値は「その他」にする。 */
+export const DOC_TYPES = ['請求書', '領収書', '振込明細', '契約書', 'その他']
+export const docTypeOf = (v: any) => DOC_TYPES.includes(String(v || '')) ? String(v) : 'その他'
 
 export async function initFiles(pool: Pool) {
   await pool.query(`
@@ -47,6 +54,7 @@ export async function initFiles(pool: Pool) {
       deleted_by  TEXT
     )`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_att_entity ON attachments(entity, entity_id) WHERE deleted_at IS NULL`)
+  await pool.query(`ALTER TABLE attachments ADD COLUMN IF NOT EXISTS doc_type TEXT`)
 }
 
 const has = (b: Buffer, needle: string, enc: BufferEncoding = 'latin1') => b.indexOf(Buffer.from(needle, enc)) >= 0
@@ -109,9 +117,32 @@ export type FilesDeps = {
   loadState: () => Promise<any>
   audit: (email: string, action: string, id: string, detail: any) => Promise<void> | void
 }
-const fileRow = (r: any) => ({ id: r.id, entity: r.entity, entityId: r.entity_id, fileName: r.file_name, mime: r.mime,
-  kind: r.kind, size: Number(r.size_bytes || 0), uploadedBy: r.uploaded_by || '', createdAt: r.created_at })
-const COLS = 'id,entity,entity_id,file_name,mime,kind,size_bytes,uploaded_by,created_at'
+export const fileRow = (r: any) => ({ id: r.id, entity: r.entity, entityId: r.entity_id, fileName: r.file_name, mime: r.mime,
+  kind: r.kind, docType: docTypeOf(r.doc_type), size: Number(r.size_bytes || 0), uploadedBy: r.uploaded_by || '', createdAt: r.created_at })
+const COLS = 'id,entity,entity_id,file_name,mime,kind,doc_type,size_bytes,uploaded_by,created_at'
+
+/* ───────── 読むだけの道具（API・MCP・確定の関所が使う。中身の BYTEA は読まない） ───────── */
+type Q = { query: (sql: string, p?: any[]) => Promise<any> }
+/** その台帳の伝票ごとの添付の数。ids を渡すとその伝票だけ。 */
+export async function attachmentCounts(q: Q, entity: string, ids?: string[]): Promise<Record<string, number>> {
+  const r = ids
+    ? await q.query(`SELECT entity_id, COUNT(*)::int AS n FROM attachments WHERE entity=$1 AND entity_id = ANY($2) AND deleted_at IS NULL GROUP BY entity_id`, [entity, ids])
+    : await q.query(`SELECT entity_id, COUNT(*)::int AS n FROM attachments WHERE entity=$1 AND deleted_at IS NULL GROUP BY entity_id`, [entity])
+  const out: Record<string, number> = {}
+  for (const x of r.rows) if (!ids || ids.includes(String(x.entity_id))) out[String(x.entity_id)] = Number(x.n)
+  return out
+}
+/** 伝票1枚の添付の一覧（中身なし） */
+export async function listAttachments(q: Q, entity: string, entityId: string) {
+  const r = await q.query(`SELECT ${COLS} FROM attachments WHERE entity=$1 AND entity_id=$2 AND deleted_at IS NULL ORDER BY created_at`, [entity, entityId])
+  return r.rows.map(fileRow)
+}
+/** 1ファイル（中身つき）。消したもの・無いものは null */
+export async function readAttachment(q: Q, id: string): Promise<(ReturnType<typeof fileRow> & { data: Buffer }) | null> {
+  const r = await q.query(`SELECT ${COLS}, data FROM attachments WHERE id=$1 AND deleted_at IS NULL`, [id])
+  const x = r.rows[0]
+  return x ? Object.assign(fileRow(x), { data: x.data as Buffer }) : null
+}
 
 export function filesRouter(d: FilesDeps): Router {
   const r = Router()
@@ -161,10 +192,10 @@ export function filesRouter(d: FilesDeps): Router {
     const name = safeName(b.fileName)
     const t = sniff(buf, name)
     if (!t.ok) return res.status(415).json({ error: 'bad-type', message: t.reason })
-    const id = newFileId(), hash = sha256(buf)
-    await d.pool.query(`INSERT INTO attachments(id,entity,entity_id,file_name,mime,kind,size_bytes,sha256,data,uploaded_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [id, entity, entityId, name, t.mime, t.kind, buf.length, hash, buf, me.email])
-    await d.audit(me.email, 'upload', id, { entity, entityId, fileName: name, kind: t.kind, size: buf.length, sha256: hash })
+    const id = newFileId(), hash = sha256(buf), docType = docTypeOf(b.docType)
+    await d.pool.query(`INSERT INTO attachments(id,entity,entity_id,file_name,mime,kind,size_bytes,sha256,data,uploaded_by,doc_type)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [id, entity, entityId, name, t.mime, t.kind, buf.length, hash, buf, me.email, docType])
+    await d.audit(me.email, 'upload', id, { entity, entityId, fileName: name, kind: t.kind, docType, size: buf.length, sha256: hash })
     const q = await d.pool.query(`SELECT ${COLS} FROM attachments WHERE id=$1`, [id])
     res.status(201).json({ item: fileRow(q.rows[0]) })
   }))
@@ -181,6 +212,17 @@ export function filesRouter(d: FilesDeps): Router {
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Content-Disposition', (inline ? 'inline' : 'attachment') + "; filename*=UTF-8''" + encodeURIComponent(f.file_name))
     res.send(f.data)
+  }))
+  /** 書類の種類だけ直す（中身は変えない） */
+  r.patch('/files/:id', wrap(async (req: any, res: any) => {
+    const q0 = await d.pool.query('SELECT entity, entity_id, doc_type FROM attachments WHERE id=$1 AND deleted_at IS NULL', [String(req.params.id)])
+    if (!q0.rows[0]) { if (await d.requireActive(req, res)) res.status(404).json({ error: 'not-found' }); return }
+    const me = await perm(req, res, q0.rows[0].entity, 'e'); if (!me) return
+    const docType = docTypeOf((req.body || {}).docType)
+    const before = { entity: q0.rows[0].entity, entityId: q0.rows[0].entity_id, docType: String(q0.rows[0].doc_type || '') }
+    await d.pool.query('UPDATE attachments SET doc_type=$2 WHERE id=$1', [String(req.params.id), docType])
+    await d.audit(me.email, 'update', String(req.params.id), { entity: before.entity, entityId: before.entityId, docType: { from: before.docType, to: docType } })
+    res.json({ ok: true, docType })
   }))
   r.delete('/files/:id', wrap(async (req: any, res: any) => {
     const q0 = await d.pool.query('SELECT entity, entity_id, file_name, size_bytes, sha256 FROM attachments WHERE id=$1 AND deleted_at IS NULL', [String(req.params.id)])

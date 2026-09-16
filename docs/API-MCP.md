@@ -117,6 +117,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://finance.biglight.jp/mcp
 | `get_invoice` / `get_bill` | 伝票1枚（明細・入金／支払の充当まで） | `invoices.read` / `bills.read` |
 | `search_companies` / `get_company_account` | 取引先と、その会社の売掛・買掛の状況 | `companies.read` |
 | `list_screens` → `search_records` → `get_record` | どの画面でも同じ形で読む（許可した画面だけ） | 画面ごと |
+| `list_attachments` | 伝票1件に付いたファイル（請求書PDF・振込明細・領収書・契約書）の一覧。会社・月・金額（税込）つき | その伝票の表 |
+| `get_attachment` | ファイル1つ。PDF は resource、画像は image として返す（5MBまで。Excel・Word は情報だけ） | そのファイルが付いた表 |
+| `list_missing_attachments` | 証憑（ファイル）が付いていない伝票（確定した支払請求・請求、取消でない入金・支払） | 読める表だけ |
+
+★ 2026-09-16: 証憑は **読むだけ**。付ける・消す・書類の種類を変える口は AI にも API にもありません。
+範囲外の表のファイルを `get_attachment` で指定しても「ありません」と同じ答えになります（あるかどうかも教えない）。
 
 ---
 
@@ -142,6 +148,9 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://finance.biglight.jp/mcp
 | `/api/v1/reports/payables` | 未払（`due_within_days` 既定30） |
 | `/api/v1/reports/pl` | 予実（`fy=2025` で年度指定） |
 | `/api/v1/reports/cashflow` | 資金繰り（`mode=week|month`） |
+| `/api/v1/attachments/{表}/{id}` | 伝票1件のファイル一覧（`doc_type`・会社・月・税込金額つき） |
+| `/api/v1/attachments/file/{fileId}` | ファイル本体（読んだことは監査に `api-file-read` で残る） |
+| `/api/v1/attachments/missing` | 証憑なしの伝票（`screen` `month_from` `month_to` `company_id`） |
 
 制限: IPごと 600回/分、鍵ごと 300回/分（MCP は 120回/分）。
 

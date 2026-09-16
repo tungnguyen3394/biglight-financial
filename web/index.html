@@ -527,6 +527,12 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .ar-led-grade .why{font-size:12.5px;}
   .ar-led{max-height:58vh; overflow:auto;}
   .ar-led td,.ar-led th{padding:6px 12px;}
+  /* 元帳の月の中身（2026-09-16） */
+  .ar-led tr.ledrow{cursor:pointer;}
+  .ar-led tr.leddet>td{background:var(--surface-2); padding:6px 12px 10px 34px;}
+  .ledlist{display:flex; flex-direction:column; gap:4px;}
+  .ledi{display:flex; align-items:center; gap:8px; font-size:12px; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:4px 8px;}
+  .ledi .ledamt{margin-left:auto; font-weight:600;}
   .ar-mf-src{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
   .ar-mf-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px;}
   .ar-mf-row input{padding:5px 8px; border:1px solid var(--border-strong); border-radius:7px;}
@@ -588,6 +594,34 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .cost-table .attbtn{opacity:.3;}
   .cost-table .attbtn.has,.cost-table .attbtn:hover,.cost-table tr:hover .attbtn{opacity:1;}
   .attbtn span{font-size:11px; font-weight:700; font-variant-numeric:tabular-nums;}
+  /* ★ 2026-09-16: 証憑なし（要るのに0件）は赤で。押すとその場で付けられる */
+  .attbtn.miss{color:var(--danger); background:var(--danger-soft);}
+  .attbtn.miss span{font-size:10.5px;}
+  /* 添付の窓: 左に一覧、右にプレビュー */
+  .attwin{display:grid; grid-template-columns:minmax(300px,380px) 1fr; gap:14px; min-height:62vh;}
+  .attside{min-width:0; display:flex; flex-direction:column;}
+  .attkind{display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px;}
+  .attkind select{flex:1;}
+  .attlist{display:flex; flex-direction:column; gap:6px; overflow:auto; max-height:52vh;}
+  .attrow{border:1px solid var(--border); border-radius:10px; padding:8px 10px; cursor:pointer; background:var(--card);}
+  .attrow:hover{border-color:var(--border-strong);}
+  .attrow.on{border-color:var(--primary); box-shadow:0 0 0 2px var(--primary-soft);}
+  .attname{font-weight:600; font-size:12.5px; word-break:break-all;}
+  .attmeta{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; font-size:11px;}
+  .attmeta select{font-size:11px; padding:2px 4px; border:1px solid var(--border); border-radius:6px;}
+  .attact{display:flex; gap:6px; margin-top:6px;}
+  .attprev{border:1px solid var(--border); border-radius:12px; background:var(--surface-2); overflow:hidden; display:flex; align-items:center; justify-content:center; min-height:62vh;}
+  .attprev iframe{width:100%; height:100%; min-height:62vh; border:0; background:#fff;}
+  .attprev img{max-width:100%; max-height:66vh; object-fit:contain;}
+  @media(max-width:900px){ .attwin{grid-template-columns:1fr;} .attprev,.attprev iframe{min-height:50vh;} }
+  /* 入力フォームの中の「ファイルを付ける」 */
+  .attpend{display:flex; gap:8px; align-items:stretch;}
+  .attpend .attdrop{flex:1;}
+  .attpend select{width:120px;}
+  .attdrop.sm{padding:10px 12px; font-size:12.5px;}
+  .attplist{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+  .attchip{display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); background:var(--surface-2); border-radius:999px; padding:3px 10px; font-size:11.5px;}
+  .attchip a{cursor:pointer; color:var(--danger); font-weight:700;}
   .attdrop{display:block; border:2px dashed var(--border-strong); border-radius:12px; padding:18px; text-align:center;
     cursor:pointer; background:var(--bg-subtle); font-size:13px; line-height:1.8;}
   .attdrop:hover,.attdrop.over{border-color:var(--primary); background:var(--primary-soft);}
@@ -1675,13 +1709,28 @@ function docTotal(doc){
   if(Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items)+itemsTax(doc.items);
   return num(doc.total);
 }
+/** 明細の無い伝票の税区分: 伝票の税区分 → 取引先の税区分 → 課税10%（backend finance.ts docTaxCat と同じ） */
+function docTaxCat(doc){
+  if(doc && TAX_RATE[doc.taxCat]!=null) return doc.taxCat;
+  const c=doc && doc.companyId? findById('companies', doc.companyId) : null;
+  if(c && TAX_RATE[c.taxCat]!=null) return c.taxCat;
+  return '課税10%';
+}
 /** 伝票の税抜合計（予実は税抜で見る — 消費税は預り金であって儲けではない） */
 function docNet(doc){
   if(!doc) return 0;
   if(Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items);
   /* Money Forward から取り込んだ請求・手入力の請求額は 税抜（subtotal）を持っている → それを使う（backend finance.ts と同じ式） */
   if(doc.subtotal!=null && doc.subtotal!=='') return num(doc.subtotal);
-  return Math.round(num(doc.total)/1.1);
+  /* ★ 2026-09-16: 以前は いつも ÷1.1（非課税・対象外まで税を抜いていた）→ 税区分で割る */
+  return Math.round(num(doc.total)/(1+(TAX_RATE[docTaxCat(doc)]||0)));
+}
+/** 請求の税区分の印（明細のある旧請求は出さない）。税込と税抜が同じなら 非課税・対象外 */
+function invTaxBadge(inv){
+  if(!inv || (inv.items||[]).length) return '';
+  const t=inv.taxCat || docTaxCat(inv);
+  const zero=!(TAX_RATE[t]>0);
+  return `<span class="badge ${zero?'b-amber':'b-gray'}" title="税込 ${moneyPlain(docTotal(inv))} ／ 税抜 ${moneyPlain(docNet(inv))}">${esc(t)}</span>`;
 }
 
 /* ---------- 債権（売掛金） ---------- */
@@ -2208,6 +2257,7 @@ function openForm(entKey, id, preset){
     <h3>${isEdit?'編集':'新規作成'} — ${esc(E.label)}</h3>
     ${row.source==='crm'?`<div class="mdsub">CRM連携の項目は編集できません。会計情報だけこの画面で入力します。</div>`:''}
     <form id="entForm" class="form-grid" onsubmit="return saveForm(event)">${fields}</form>
+    ${entKey==='bills'? (attPendReset('bill','bills'), attPendHtml('bill','bills',isEdit?id:null,{required:true, hint:'請求書（PDF）をドロップ'})) : ''}
     <div class="modal-actions ${isEdit&&canDelete(page)?'split':''}">
       ${isEdit&&canDelete(page)?`<button class="btn danger" onclick="deleteFromForm('${entKey}','${id}')">削除</button>`:''}
       <div style="display:flex;gap:8px;">
@@ -2343,11 +2393,38 @@ function saveForm(ev){
   }
   // 伝票は保存前に自動計算（番号・期日・合計）
   if(entKey==='invoices'||entKey==='bills') prepareDoc(entKey, rec, FORM_CTX.id);
+  if(entKey==='bills'){ saveBillForm(rec); return false; }
   const old = FORM_CTX.id ? findById(E.key, FORM_CTX.id) : null;
   if(old) rec.source = old.source;
   commitRecord(E.key, rec, { existingId: FORM_CTX.id });
   closeModal(); renderPage(CURRENT_PAGE); toast('保存しました。','ok');
   return false;
+}
+/** 支払請求の保存。確定にするときは「作成中で保存 → ファイルを送る → 確定」の順（サーバーの関所を通るため）。 */
+async function saveBillForm(rec){
+  const id=FORM_CTX.id, old=id? findById('bills',id) : null;
+  const OPEN=['','作成中','取消'];
+  const wantConfirm = !OPEN.includes(String(rec.status||''));
+  const wasConfirmed = old && !OPEN.includes(String(old.status||''));
+  const pend=attPendCount('bill');
+  if(wantConfirm && !wasConfirmed){
+    let have=0;
+    if(id){ try{ have=await attCountFresh('bills', id); }catch(e){ toast('ファイルの有無を確かめられませんでした（通信）。','err'); return; } }
+    if(!have && !pend){ toast('請求書のファイルを付けてから「確定」にしてください（作成中なら そのまま保存できます）。','err'); return; }
+    const target=rec.status;
+    rec.status='作成中'; rec.locked=false;
+    const res=commitRecord('bills', rec, { existingId:id });
+    closeModal(); renderPage(CURRENT_PAGE);
+    if(pend){ const f=await attPendFlush('bill', res.record.id); if(!f.ok && !have){ toast('ファイルを送れなかったため、作成中のまま保存しました。','err'); return; } }
+    else if(!(await attPushNow())){ toast('保存できませんでした。','err'); return; }
+    const b=findById('bills', res.record.id); if(!b) return;
+    b.status=target; b.locked=true; b.updatedAt=new Date().toISOString(); markDirty('bills', b);
+    renderPage(CURRENT_PAGE); toast('保存して確定しました。','ok');
+    return;
+  }
+  const res=commitRecord('bills', rec, { existingId:id });
+  closeModal(); renderPage(CURRENT_PAGE); toast('保存しました。','ok');
+  if(pend) attPendFlush('bill', res.record.id);
 }
 function deleteFromForm(entKey,id){
   const E=ENTITIES[entKey];
@@ -3014,7 +3091,7 @@ function bookViewBar(){
 /** 表の説明（1行） */
 function bookNote(fy, what, flow){
   const month=BOOK_VIEW.per==='month'||!BOOK_PERS.some(x=>x[0]===BOOK_VIEW.per), unit=month?'月':'期間';
-  return `${esc(fyLabel(fy))} ・ 各マス＝${unit}末の${what} ・ 合計の下＝${BOOK_VIEW.cum?'年度のはじめからの':'その'+unit+'の'}${flow} ・ マスを押すと${month?'内訳':'元帳'}`;
+  return `${esc(fyLabel(fy))} ・ 金額はすべて<b>税込</b> ・ 各マス＝${unit}末の${what} ・ 合計の下＝${BOOK_VIEW.cum?'年度のはじめからの':'その'+unit+'の'}${flow} ・ マスを押すと${month?'内訳':'元帳'}`;
 }
 /** o: { rows, months, first, col, pop, ledger, ledgerTitle, badge, flow:[増,減] } → { head, body, foot, ncol } */
 function bookGrid(o){
@@ -3081,8 +3158,8 @@ function viewArBook(){
 
   const T=arTotals(A.ym);
   const L = A.now
-    ? { billed:`今月請求額（${A.m}月）`, paid:'今月入金額', bal:'売掛金残高', over:'期限超過額', col:'現在残高' }
-    : { billed:`${arYmLabel(A.ym)}の請求額`, paid:`${arYmLabel(A.ym)}の入金額`, bal:`売掛金残高（${A.m}月末）`, over:`期限超過額（${A.m}月末）`, col:`${A.m}月末残高` };
+    ? { billed:`今月請求額（${A.m}月・税込）`, paid:'今月入金額', bal:'売掛金残高（税込）', over:'期限超過額', col:'現在残高' }
+    : { billed:`${arYmLabel(A.ym)}の請求額（税込）`, paid:`${arYmLabel(A.ym)}の入金額`, bal:`売掛金残高（${A.m}月末・税込）`, over:`期限超過額（${A.m}月末）`, col:`${A.m}月末残高` };
   const kpis=`<div class="kpi-grid ar-kpis">
     <div class="kpi"><div class="lbl">${L.billed}</div><div class="num">¥${moneyPlain(T.billed)}</div></div>
     <div class="kpi"><div class="lbl">${L.paid}</div><div class="num">¥${moneyPlain(T.payment)}</div></div>
@@ -3146,15 +3223,15 @@ function arCellPop(ev, companyId, ym){
       <a class="ar-x" onclick="arPopClose()" aria-label="閉じる">${IC.close}</a></div>
     <table class="ar-pop-t">
       <tr><td>前月残高</td><td class="r num">¥${arAmt(r.opening)}</td></tr>
-      <tr><td>請求額</td><td class="r num">＋ ¥${moneyPlain(r.billed)}</td></tr>
+      <tr><td>請求額（税込）</td><td class="r num">＋ ¥${moneyPlain(r.billed)}</td></tr>
       <tr><td>入金額</td><td class="r num">− ¥${moneyPlain(r.payment)}</td></tr>
       <tr class="sum"><td>月末残高</td><td class="r num ${r.overdue>0?'minus':''}">¥${arAmt(r.closing)}</td></tr>
       ${r.overdue>0?`<tr><td class="minus">うち期限超過</td><td class="r num minus">¥${moneyPlain(r.overdue)}</td></tr>`:''}
     </table>
-    ${list(bills,'請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.issueDate||b.doc.bookMonth||'')} ${srcTag(b.doc)}${b.doc.no?` <span class="muted">${esc(b.doc.no)}</span>`:''}</span>
-      <span class="num">${moneyPlain(b.amount)}${(b.doc.source!=='mf'&&!(b.doc.items||[]).length&&canEdit('invoices'))?` <a onclick="arPopClose();openArBillForm('${attr(b.doc.id)}')">修正</a>`:''}</span></div>`)}
+    ${list(bills,'請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.issueDate||b.doc.bookMonth||'')} ${srcTag(b.doc)} ${invTaxBadge(b.doc)}${b.doc.no?` <span class="muted">${esc(b.doc.no)}</span>`:''}</span>
+      <span class="num">${attBtn('invoices', b.doc.id, b.doc)} ${moneyPlain(b.amount)}${(b.doc.source!=='mf'&&!(b.doc.items||[]).length&&canEdit('invoices'))?` <a onclick="arPopClose();openArBillForm('${attr(b.doc.id)}')">修正</a>`:''}</span></div>`)}
     ${list(pays,'入金', x=>`<div class="ar-pop-i"><span>${esc(x.date)}${x.doc.method?` <span class="muted">${esc(x.doc.method)}</span>`:''}</span>
-      <span class="num">${moneyPlain(x.amount)}${canEdit('receipts')?` <a onclick="arPopClose();openPayment('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
+      <span class="num">${attBtn('payments', x.doc.id, x.doc)} ${moneyPlain(x.amount)}${canEdit('receipts')?` <a onclick="arPopClose();openPayment('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
     <div class="ar-pop-f"><a onclick="arPopClose();openArLedger('${attr(companyId)}')">売掛元帳を見る ›</a></div>`;
   document.body.appendChild(pop);
   const rc=ev&&ev.currentTarget&&ev.currentTarget.getBoundingClientRect? ev.currentTarget.getBoundingClientRect() : {left:40,bottom:120,top:100};
@@ -3190,17 +3267,85 @@ function openArLedger(companyId){
           ${p.n?`<span class="muted">期日内 ${p.onTime}/${p.n}件${p.avgLate?` ・ 遅れた分は平均 ${p.avgLate}日（最大 ${p.worst}日）`:''}</span>`:''}</div>`; })()}
     </div>
     ${months.length>MAX?`<div class="infobar" style="margin:0 0 8px;">直近 ${MAX}か月を表示しています（それより前の分は 前月残高 に含まれます）。</div>`:''}
-    <div class="table-wrap ar-led"><table>
-      <thead><tr><th>年月</th><th class="r">前月残高</th><th class="r">請求額</th><th class="r">入金額</th><th class="r">月末残高</th></tr></thead>
-      <tbody>${rows.map(r=>`<tr class="${r.ym===tm?'ar-cur':''}">
-        <td>${r.ym.replace('-','/')}</td><td class="r num ${r.opening?'':'zero'}">${arAmt(r.opening)}</td>
-        <td class="r num ${r.billed?'':'zero'}">${moneyPlain(r.billed)}</td><td class="r num ${r.payment?'':'zero'}">${moneyPlain(r.payment)}</td>
-        <td class="r num ${r.overdue>0?'ar-over':(r.closing>0?'ar-pos':'zero')}" ${r.overdue>0?`title="うち期限超過 ${moneyPlain(r.overdue)}"`:''}>${arAmt(r.closing)}</td></tr>`).join('')}
-      </tbody></table></div>
+    ${ledOpenInit('ar', companyId, shown, f)}
+    <div class="table-wrap ar-led"><table id="ledTbl">
+      <thead><tr><th>年月</th><th class="r">前月残高</th><th class="r">請求額（税込）</th><th class="r">入金額</th><th class="r">月末残高</th><th class="r">証憑</th></tr></thead>
+      <tbody>${ledRowsHtml('ar', rows, f)}</tbody></table></div>
+    <div class="fhelp" style="margin-top:6px;">行を押すと、その月の請求・入金が1件ずつ出ます。📎 で請求書 PDF・振込明細を見る／付ける。</div>
     <div class="modal-actions split">
       <div style="display:flex;gap:8px;">${c?`<button class="btn secondary" onclick="closeModal();openDetail('companies','${attr(companyId)}')">取引先の情報</button>`:''}</div>
       <div style="display:flex;gap:8px;">${canCreate('receipts')?`<button class="btn secondary" onclick="closeModal();openPayment(null,{companyId:'${attr(companyId)}'})">＋ 入金を記録</button>`:''}
         <button class="btn" onclick="closeModal()">閉じる</button></div></div>`,'lg');
+  ledScrollEnd();
+}
+
+/* ============================================================================
+   元帳の「月の中身」— 行を押すと、その月の伝票が1件ずつ出る（📎 で証憑を見る・付ける）
+   ----------------------------------------------------------------------------
+   ★ 2026-09-16 利用者の指示: 売掛元帳・買掛元帳に 請求書 PDF などのファイルを。
+     ファイルは伝票（請求・入金・支払請求・支払）に付く。元帳の月の行は その合計を出すだけ。
+   ========================================================================== */
+let LED_OPEN=null;    // { side, companyId, months, open:{ym:true} }
+const LED_ENT = { ar:{ bill:'invoices', pay:'payments', bl:'請求', pl:'入金', over:'期限超過' },
+                  ap:{ bill:'bills', pay:'payouts', bl:'支払請求', pl:'支払', over:'期日超過' } };
+/** 元帳を開くときに1回。前に開いていた同じ会社なら 開いていた月を覚えておく。空文字を返す（テンプレートに埋め込むため）。 */
+function ledOpenInit(side, companyId, months, f){
+  const keep = LED_OPEN && LED_OPEN.side===side && LED_OPEN.companyId===String(companyId);
+  const open = keep? LED_OPEN.open : {};
+  if(!keep){ /* はじめは 伝票のある いちばん新しい月だけ開く */
+    const ym=[...f.bills.map(b=>b.ym), ...f.pays.map(x=>x.ym)].filter(y=>months.includes(y)).sort().pop();
+    if(ym) open[ym]=true;
+  }
+  LED_OPEN={ side, companyId:String(companyId), months, open };
+  const E=LED_ENT[side];
+  [E.bill, E.pay].forEach(e=>{ if(!ATT_COUNTS[e] && GTOKEN) attLoadCounts(e); });
+  return '';
+}
+function ledDocsOf(side, f, ym){
+  const E=LED_ENT[side], out=[];
+  f.bills.filter(b=>b.ym===ym).forEach(b=>out.push({ entity:E.bill, kind:E.bl, doc:b.doc, amount:b.amount,
+    date:b.doc.issueDate||b.doc.recvDate||b.doc.bookMonth||'' }));
+  f.pays.filter(x=>x.ym===ym).forEach(x=>out.push({ entity:E.pay, kind:E.pl, doc:x.doc, amount:x.amount, date:x.date }));
+  return out;
+}
+function ledAttCell(docs){
+  const known=docs.every(d=>ATT_COUNTS[d.entity]);
+  if(!known) return '<span class="zero">…</span>';
+  const n=docs.reduce((t,d)=>t+((ATT_COUNTS[d.entity]||{})[d.doc.id]||0),0);
+  const miss=docs.filter(d=>attMissing(d.entity,d.doc)).length;
+  return (n?`<span class="attbtn has">${IC.clip}<span>${n}</span></span>`:'')
+    + (miss?`<span class="attbtn miss" title="ファイルが付いていない伝票">${IC.clip}<span>証憑なし ${miss}</span></span>`:'')
+    || '<span class="zero">—</span>';
+}
+function ledRowsHtml(side, rows, f){
+  const tm=thisMonth(), E=LED_ENT[side];
+  return rows.map(r=>{
+    const docs=ledDocsOf(side, f, r.ym), open=!!(LED_OPEN && LED_OPEN.open[r.ym]);
+    const main=`<tr class="${r.ym===tm?'ar-cur':''}${docs.length?' ledrow':''}" ${docs.length?`onclick="ledToggle('${r.ym}')"`:''}>
+      <td><span class="ctw">${docs.length?(open?'▼':'▶'):''}</span>${r.ym.replace('-','/')}</td>
+      <td class="r num ${r.opening?'':'zero'}">${arAmt(r.opening)}</td>
+      <td class="r num ${r.billed?'':'zero'}">${moneyPlain(r.billed)}</td><td class="r num ${r.payment?'':'zero'}">${moneyPlain(r.payment)}</td>
+      <td class="r num ${r.overdue>0?'ar-over':(r.closing>0?'ar-pos':'zero')}" ${r.overdue>0?`title="うち${E.over} ${moneyPlain(r.overdue)}"`:''}>${arAmt(r.closing)}</td>
+      <td class="r">${docs.length? ledAttCell(docs) : ''}</td></tr>`;
+    if(!open || !docs.length) return main;
+    return main + `<tr class="leddet"><td colspan="6"><div class="ledlist">${docs.map(d=>`<div class="ledi">
+        <span class="badge ${d.entity===E.bill?'b-blue':'b-green'}">${esc(d.kind)}</span>
+        <span class="num">${esc(d.date)}</span>
+        <span class="muted">${esc(d.doc.no||d.doc.method||'')}</span>
+        ${d.entity==='invoices'? invTaxBadge(d.doc) : ''}${d.entity==='bills'? statusBadge(billStatus(d.doc)) : ''}
+        <span class="num ledamt">${d.entity===E.bill?'＋':'−'} ${moneyPlain(d.amount)}</span>
+        ${attBtn(d.entity, d.doc.id, d.doc)}
+      </div>`).join('')}</div></td></tr>`;
+  }).join('');
+}
+/** 新しい月（表の下）から見えるように */
+function ledScrollEnd(){ setTimeout(()=>{ const w=document.querySelector('#modal .ar-led'); if(w) w.scrollTop=w.scrollHeight; },0); }
+function ledToggle(ym){ if(!LED_OPEN) return; LED_OPEN.open[ym]=!LED_OPEN.open[ym]; ledRedraw(); }
+function ledRedraw(){
+  const el=document.getElementById('ledTbl'); if(!el || !LED_OPEN) return;
+  const L=LED_OPEN, f=L.side==='ar'? arFacts(L.companyId) : apFacts(L.companyId);
+  const rows=(L.side==='ar'? arMonthly : apMonthly)(L.companyId, L.months, f);
+  el.querySelector('tbody').innerHTML=ledRowsHtml(L.side, rows, f);
 }
 
 /* ---------- 入金の充て先（古い請求から自動）----------
@@ -3252,26 +3397,37 @@ function openArBillForm(id, preset){
         ${cos.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(r.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div><label>計上月 <span style="color:var(--danger)">*</span></label><input id="abYm" type="month" value="${attr(String(r.bookMonth||'').slice(0,7))}" onchange="arBillDue()"></div>
       <div><label>請求日</label><input id="abDate" type="date" value="${attr(r.issueDate||'')}"></div>
+      <div><label>税区分 <span style="color:var(--danger)">*</span></label><select id="abTax" onchange="this.dataset.touched=1;arBillNet(true)">
+        ${TAX_CATS.map(t=>`<option ${t===(r.taxCat||(r.companyId?docTaxCat(r):'課税10%'))?'selected':''}>${esc(t)}</option>`).join('')}</select>
+        <div class="fhelp">非課税・対象外（不課税）なら 税抜＝税込 になります</div></div>
       <div><label>請求額（税込）<span style="color:var(--danger)">*</span></label><input id="abTotal" class="num" style="text-align:right;" value="${r.total?moneyPlain(r.total):''}" oninput="fmtMoneyInput(this);arBillNet()"></div>
       <div><label>うち税抜（予実の売上）</label><input id="abNet" class="num" style="text-align:right;" value="${r.subtotal!=null&&r.subtotal!==''?moneyPlain(r.subtotal):''}" oninput="fmtMoneyInput(this);this.dataset.touched=1" ${r.subtotal!=null&&r.subtotal!==''?'data-touched="1"':''}></div>
       <div><label>入金期日</label><input id="abDue" type="date" value="${attr(r.dueDate||'')}" oninput="this.dataset.touched=1" ${r.dueDate?'data-touched="1"':''}></div>
       <div><label>請求番号</label><input id="abNo" value="${attr(r.no||'')}" placeholder="空欄なら自動"></div>
       <div class="full"><label>備考</label><input id="abNote" value="${attr(r.note||'')}"></div>
     </div>
+    ${(attPendReset('arb','invoices'), attPendHtml('arb','invoices',inv?inv.id:null,{hint:'請求書（PDF）をドロップ'}))}
     <div class="modal-actions ${inv?'split':''}">
       ${inv?`<button class="btn danger" onclick="arBillCancel('${attr(inv.id)}')">取消にする</button>`:''}
       <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
         <button class="btn" onclick="arBillSave('${inv?attr(inv.id):''}')">保存</button></div></div>`);
   if(!inv) arBillDue();
 }
-function arBillNet(){
-  const n=document.getElementById('abNet'); if(!n || n.dataset.touched) return;
-  const t=num(document.getElementById('abTotal').value); n.value=t? moneyPlain(Math.round(t/1.1)) : '';
+/** 税抜を 税区分から自動で入れる（手で直した後は触らない。税区分を変えたときは入れ直す） */
+function arBillNet(force){
+  const n=document.getElementById('abNet'); if(!n) return;
+  if(force) delete n.dataset.touched;
+  if(n.dataset.touched) return;
+  const rate=TAX_RATE[(document.getElementById('abTax')||{}).value]||0;
+  const t=num(document.getElementById('abTotal').value); n.value=t? moneyPlain(Math.round(t/(1+rate))) : '';
 }
 function arBillDue(){
   const d=document.getElementById('abDue'); if(!d || d.dataset.touched) return;
   const c=findById('companies', document.getElementById('abCo').value), ym=document.getElementById('abYm').value;
   if(c && ym) d.value=dueDateOf(ym, c.closingDay, c.paySite, c.payDay);
+  /* 取引先を選んだら その会社の税区分を初期値に（自分で選び直していなければ） */
+  const tx=document.getElementById('abTax');
+  if(c && tx && !tx.dataset.touched && TAX_RATE[c.taxCat]!=null){ tx.value=c.taxCat; arBillNet(true); }
 }
 function arBillSave(id){
   const g=k=>document.getElementById(k).value;
@@ -3281,13 +3437,16 @@ function arBillSave(id){
   if(dup.length && !confirm(`この取引先には ${bookMonth} の請求がすでに ${dup.length}件 あります（${dup.map(i=>moneyPlain(docTotal(i))+'円').join('、')}）。\n二重にならないか確認しましたか？ 保存しますか？`)) return;
   let no=g('abNo').trim();
   if(!no){ const ym=bookMonth.replace('-',''); const n=(DB.invoices||[]).filter(x=>String(x.no||'').startsWith('INV-'+ym)).length+1; no=`INV-${ym}-${String(n).padStart(3,'0')}`; }
-  const netRaw=g('abNet');
-  const rec={ companyId, bookMonth, issueDate:g('abDate'), dueDate:g('abDue'), total, subtotal: netRaw===''? Math.round(total/1.1) : num(netRaw),
+  const netRaw=g('abNet'), taxCat=g('abTax')||'課税10%', rate=TAX_RATE[taxCat]||0;
+  const subtotal = netRaw===''? Math.round(total/(1+rate)) : num(netRaw);
+  if(!rate && subtotal!==total && !confirm(`税区分が「${taxCat}」ですが、税抜（${moneyPlain(subtotal)}）と税込（${moneyPlain(total)}）が違います。\nこのまま保存しますか？`)) return;
+  const rec={ companyId, bookMonth, issueDate:g('abDate'), dueDate:g('abDue'), total, subtotal, taxCat,
     no, note:g('abNote'), items:[], status:'確定', locked:true };
   if(!id) stampStaff(rec);
-  commitRecord('invoices', rec, { existingId:id||null });
+  const res=commitRecord('invoices', rec, { existingId:id||null });
   arApplyUnallocated(companyId);
   closeModal(); renderPage(CURRENT_PAGE); toast('保存しました。','ok');
+  if(attPendCount('arb')) attPendFlush('arb', res.record.id);
 }
 function arBillCancel(id){
   const inv=findById('invoices',id); if(!inv) return;
@@ -3427,7 +3586,20 @@ function mfToInvoice(x, companyId){
   const bm=(x.salesDate||x.billingDate).slice(0,7);
   const rec={ companyId, bookMonth:bm, issueDate:x.billingDate||x.salesDate, dueDate:x.dueDate||'', total:num(x.total),
     no:x.number||'', note:x.title||'', items:[], status:'確定', locked:true, source:'mf', mfId:String(x.mfId), mfPartnerId:x.partnerId||'' };
-  if(x.subtotal!=null && x.subtotal!=='') rec.subtotal=num(x.subtotal);
+  /* ★ 2026-09-16: 税区分を付ける。MF の税抜があれば 税込との比で決める（同じなら 非課税・対象外）。
+     税抜が無い CSV は 取引先の税区分で税抜を出す（以前は いつも ÷1.1）。 */
+  const c=findById('companies', companyId);
+  if(x.subtotal!=null && x.subtotal!==''){
+    rec.subtotal=num(x.subtotal);
+    const t=rec.total, n=rec.subtotal;
+    if(t===n) rec.taxCat = (c && TAX_RATE[c.taxCat]===0)? c.taxCat : '対象外';
+    else if(n && Math.abs(t-Math.floor(n*1.10))<=1) rec.taxCat='課税10%';
+    else if(n && Math.abs(t-Math.floor(n*1.08))<=1) rec.taxCat='軽減8%';
+    else rec.taxCat='混在';
+  } else {
+    rec.taxCat = (c && TAX_RATE[c.taxCat]!=null)? c.taxCat : '課税10%';
+    rec.subtotal = Math.round(rec.total/(1+(TAX_RATE[rec.taxCat]||0)));
+  }
   return rec;
 }
 /** 取り込み先の既存請求（mfId → 無ければ 同じ取引先の同じ請求書番号の MF 請求） */
@@ -3445,7 +3617,7 @@ function mfPlan(){
     const rec=mfToInvoice(x, cid==='__new'? '__new' : cid), ex=cid==='__new'? null : mfExisting(x, cid);
     if(ex){
       if(ex.status==='取消') rec.status='取消';          // こちらで取消にした請求は、取り込み直しても生き返らせない
-      const keys=['companyId','bookMonth','issueDate','dueDate','total','subtotal','no'];
+      const keys=['companyId','bookMonth','issueDate','dueDate','total','subtotal','taxCat','no'];
       (keys.some(k=>String(ex[k]??'')!==String(rec[k]??'')) || String(ex.mfId)!==String(rec.mfId))? plan.upd.push({x,rec,ex}) : plan.same.push({x,rec,ex});
     }else{
       plan.add.push({x,rec});
@@ -3659,6 +3831,7 @@ function viewReceipts(){
   const q=(SEARCH[p]||'').toLowerCase();
   let rows=q? list.filter(r=>(companyName(r.companyId)+(r.note||'')).toLowerCase().includes(q)) : list;
   rows=rows.filter(r=>fcolPass(p,r));
+  if(ATT_MISS_ONLY[p]) rows=rows.filter(r=>attMissing('payments', r));
   const thisM=(DB.payments||[]).filter(x=>(x.date||'').slice(0,7)===thisMonth()&&x.status!=='取消');
 
   const kpis=`<div class="kpi-grid">
@@ -3672,13 +3845,13 @@ function viewReceipts(){
     {key:'amount', label:'入金額', cls:'r', noFilter:true, val:r=>`<b class="num plus">${moneyPlain(r.amount)}</b>`},
     {key:'fee', label:'振込手数料', cls:'r', noFilter:true, val:r=>money(r.fee)},
     {key:'source', label:'取込元', raw:r=>PAY_SOURCE_LABEL[r.source||'manual']||r.source, val:r=>esc(PAY_SOURCE_LABEL[r.source||'manual']||r.source)},
-    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payments', r.id)},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payments', r.id, r)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
     {key:'note', label:'備考', noFilter:true, val:r=>esc(r.note||'')},
     {key:'act', label:'', noFilter:true, val:r=>canEdit('receipts')?
       `<a onclick="event.stopPropagation();openPayment('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">修正</a>`:''},
   ];
-  const tools=`${searchBox(p,'取引先で検索')}${filterClearBtn(p)}
+  const tools=`${searchBox(p,'取引先で検索')}${filterClearBtn(p)}${attMissToggle(p,'payments')}
     ${canCreate('receipts')?`<button class="btn" onclick="openPayment()">＋ 入金を記録</button>`:''}
     ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payments')">${IC.doc} CSV出力</button>
       <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
@@ -3842,6 +4015,7 @@ function openPayment(id, preset){
     method: p? p.method : '銀行振込',
     note: p? p.note : '',
     allocations: p? (p.allocations||[]).map(a=>Object.assign({},a)) : [] };
+  attPendReset('pay','payments');
   drawPaymentModal();
 }
 function drawPaymentModal(){
@@ -3857,13 +4031,14 @@ function drawPaymentModal(){
       <div><label>入金日</label><input type="date" value="${attr(c.date)}" onchange="PAY_CTX.date=this.value"></div>
       <div><label>取引先</label><select onchange="PAY_CTX.companyId=this.value;drawPaymentModal()">
         <option value="">-</option>${cos.map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      <div><label>入金額</label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PAY_CTX.amount=num(this.value)"></div>
+      <div><label>入金額 <span class="muted" style="font-weight:400;">（通帳に入った金額）</span></label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PAY_CTX.amount=num(this.value)"></div>
       <div><label>振込手数料（先方負担分）</label><input class="num" style="text-align:right;" value="${c.fee?moneyPlain(c.fee):''}" oninput="fmtMoneyInput(this);PAY_CTX.fee=num(this.value)">
         <div class="fhelp">差し引かれて入金された手数料。売掛金はこの分も減ります。</div></div>
       <div><label>方法</label><select onchange="PAY_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div><label>備考</label><input value="${attr(c.note||'')}" oninput="PAY_CTX.note=this.value"></div>
     </div>
-    ${bal? `<div class="infobar" style="margin-top:12px;">この取引先の売掛金残高（今月末時点）：<b class="num">¥${arAmt(bal.closing)}</b>
+    ${attPendHtml('pay','payments',c.id,{hint:'振込明細・入金の控えをドロップ'})}
+    ${bal? `<div class="infobar" style="margin-top:12px;">この取引先の売掛金残高（税込・今月末時点）：<b class="num">¥${arAmt(bal.closing)}</b>
       ${bal.overdue>0?` ・ <span class="minus">うち期限超過 ¥${moneyPlain(bal.overdue)}</span>`:''}${c.id?' （この入金を含む）':''}</div>` : ''}
     <div class="modal-actions ${c.id?'split':''}">
       ${c.id?`<button class="btn danger" onclick="payDelete()">削除</button>`:''}
@@ -3902,9 +4077,10 @@ function paySave(){
   const old=c.id? findById('payments',c.id) : null;
   const same = old && String(old.companyId)===String(c.companyId) && num(old.amount)===num(c.amount) && num(old.fee)===num(c.fee);
   const allocations = same? (old.allocations||[]) : arFifoAlloc(c.companyId, num(c.amount)+num(c.fee), c.id);
-  commitRecord('payments', { companyId:c.companyId, date:c.date, amount:num(c.amount), fee:num(c.fee),
+  const res=commitRecord('payments', { companyId:c.companyId, date:c.date, amount:num(c.amount), fee:num(c.fee),
     method:c.method, note:c.note, allocations, status:'確定' }, { existingId:c.id });
   closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast('入金を記録しました。','ok');
+  if(attPendCount('pay')) attPendFlush('pay', res.record.id);
 }
 function payDelete(){
   if(!PAY_CTX.id) return;
@@ -3977,6 +4153,7 @@ function viewBills(){
   const q=(SEARCH[p]||'').toLowerCase();
   let rows=q? all.filter(r=>((r.no||'')+companyName(r.companyId)+(r.note||'')).toLowerCase().includes(q)) : all.slice();
   rows=rows.filter(r=>fcolPass(p,r));
+  if(ATT_MISS_ONLY[p]) rows=rows.filter(r=>attMissing('bills', r));
   const t=today();
   const over=openBills().filter(b=>isOverdue(b));
   const soon=openBills().filter(b=>effDue(b)&&effDue(b)>=t&&effDue(b)<=addDays(t,7));
@@ -4009,7 +4186,7 @@ function viewBills(){
       if(b>0&&isOverdue(r)) return `<span class="badge b-red">${esc(r.dueDate)}</span>`;
       if(b>0&&effDue(r)<=addDays(t,7)) return `<span class="badge b-amber">${esc(r.dueDate)}</span>`;
       return esc(r.dueDate); }},
-    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('bills', r.id)},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('bills', r.id, r)},
     {key:'status', label:'状態', raw:r=>billStatus(r), val:r=>statusBadge(billStatus(r))},
     {key:'act', label:'', noFilter:true, val:r=>{
       let h='';
@@ -4017,7 +4194,7 @@ function viewBills(){
       if(r.status==='作成中'&&canEdit('bills')) h+=`<a class="pillbtn pill-new" onclick="event.stopPropagation();confirmBill('${r.id}')">確定</a>`;
       return h; }},
   ];
-  const tools=`${searchBox(p,'支払先・番号で検索')}${filterClearBtn(p)}
+  const tools=`${searchBox(p,'支払先・番号で検索')}${filterClearBtn(p)}${attMissToggle(p,'bills')}
     ${canCreate('bills')?`<button class="btn" onclick="openForm('bills')">＋ 支払請求を登録</button>`:''}
     ${canCreate('bills')&&costItemsSorted().some(isApCost)?`<button class="btn secondary" onclick="openGenBills()">定期の支払を作成（月まとめ）</button>`:''}
     ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('bills')">${IC.doc} CSV出力</button>
@@ -4027,10 +4204,20 @@ function viewBills(){
     
     tools, body: alert+kpis+dataTable(p, rows, cols, { allRows:all, stick:true, onRow:r=>`openDetail('bills','${r.id}')` }) });
 }
-function confirmBill(id){
+/* ★ 2026-09-16 利用者の指示: 支払請求は 請求書のファイルが付いていないと 確定できない。
+   ここ（画面）と backend（authz.ts billsNeedingFile）の二か所で見る。数は必ずサーバーに聞き直す。 */
+async function confirmBill(id){
   const b=findById('bills',id); if(!b) return;
+  let n=0;
+  try{ n=await attCountFresh('bills', id); }catch(e){ toast('ファイルの有無を確かめられませんでした（通信）。','err'); return; }
+  if(!n){
+    toast('請求書のファイルが付いていません。付けてから確定してください。','err');
+    if(!document.getElementById('attConfirmBtn')) attOpen('bills', id);
+    return;
+  }
   if(!confirm(`支払請求 ${b.no} を確定します。確定後は削除できません（取消のみ）。`)) return;
-  b.status='確定'; b.locked=true; markDirty('bills',b); renderPage(CURRENT_PAGE); toast('確定しました。','ok');
+  b.status='確定'; b.locked=true; markDirty('bills',b);
+  closeModal2(); renderPage(CURRENT_PAGE); toast('確定しました。','ok');
 }
 
 
@@ -4118,9 +4305,9 @@ function viewApBook(){
 
   const T=apTotals(A.ym);
   const L = A.now
-    ? { billed:'今月の支払請求', paid:'今月の支払', paidSub:'支払日が今月', bal:'買掛金残高', over:'期日超過額', col:'現在残高' }
+    ? { billed:'今月の支払請求', paid:'今月の支払', paidSub:'支払日が今月', bal:'買掛金残高（税込）', over:'期日超過額', col:'現在残高' }
     : { billed:`${arYmLabel(A.ym)}の支払請求`, paid:`${arYmLabel(A.ym)}の支払`, paidSub:'支払日がその月',
-        bal:`買掛金残高（${A.m}月末）`, over:`期日超過額（${A.m}月末）`, col:`${A.m}月末残高` };
+        bal:`買掛金残高（${A.m}月末・税込）`, over:`期日超過額（${A.m}月末）`, col:`${A.m}月末残高` };
   const drafts=(DB.bills||[]).filter(b=>b.status==='作成中');
   const kpis=`<div class="kpi-grid ar-kpis">
     <div class="kpi"><div class="lbl">${L.billed}</div><div class="num">¥${moneyPlain(T.billed)}</div><div class="sub">${arYmLabel(A.ym)}（計上月・税込）</div></div>
@@ -4183,15 +4370,15 @@ function apCellPop(ev, companyId, ym){
       <a class="ar-x" onclick="arPopClose()" aria-label="閉じる">${IC.close}</a></div>
     <table class="ar-pop-t">
       <tr><td>前月残高</td><td class="r num">¥${arAmt(r.opening)}</td></tr>
-      <tr><td>支払請求</td><td class="r num">＋ ¥${moneyPlain(r.billed)}</td></tr>
+      <tr><td>支払請求（税込）</td><td class="r num">＋ ¥${moneyPlain(r.billed)}</td></tr>
       <tr><td>支払</td><td class="r num">− ¥${moneyPlain(r.payment)}</td></tr>
       <tr class="sum"><td>月末残高</td><td class="r num ${r.overdue>0?'minus':''}">¥${arAmt(r.closing)}</td></tr>
       ${r.overdue>0?`<tr><td class="minus">うち期日超過</td><td class="r num minus">¥${moneyPlain(r.overdue)}</td></tr>`:''}
     </table>
     ${list(bills,'支払請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.no||b.doc.bookMonth||'')} <span class="muted">期日 ${esc(b.doc.dueDate||'-')}</span></span>
-      <span class="num">${moneyPlain(b.amount)} <a onclick="arPopClose();openDetail('bills','${attr(b.doc.id)}')">開く</a></span></div>`)}
+      <span class="num">${attBtn('bills', b.doc.id, b.doc)} ${moneyPlain(b.amount)} <a onclick="arPopClose();openDetail('bills','${attr(b.doc.id)}')">開く</a></span></div>`)}
     ${list(pays,'支払', x=>`<div class="ar-pop-i"><span>${esc(x.date)}${x.doc.method?` <span class="muted">${esc(x.doc.method)}</span>`:''}</span>
-      <span class="num">${moneyPlain(x.amount)}${canEdit('payouts')?` <a onclick="arPopClose();openPayout('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
+      <span class="num">${attBtn('payouts', x.doc.id, x.doc)} ${moneyPlain(x.amount)}${canEdit('payouts')?` <a onclick="arPopClose();openPayout('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
     <div class="ar-pop-f"><a onclick="arPopClose();openApLedger('${attr(companyId)}')">買掛元帳を見る ›</a></div>`;
   document.body.appendChild(pop);
   const rc=ev&&ev.currentTarget&&ev.currentTarget.getBoundingClientRect? ev.currentTarget.getBoundingClientRect() : {left:40,bottom:120,top:100};
@@ -4221,17 +4408,16 @@ function openApLedger(companyId){
         <div><span class="badge ${g.cls} ar-grade">${esc(g.g)}</span> <span class="why">${esc(g.why)}</span></div></div>
     </div>
     ${months.length>MAX?`<div class="infobar" style="margin:0 0 8px;">直近 ${MAX}か月を表示しています（それより前の分は 前月残高 に含まれます）。</div>`:''}
-    <div class="table-wrap ar-led"><table>
-      <thead><tr><th>年月</th><th class="r">前月残高</th><th class="r">支払請求</th><th class="r">支払</th><th class="r">月末残高</th></tr></thead>
-      <tbody>${rows.map(r=>`<tr class="${r.ym===tm?'ar-cur':''}">
-        <td>${r.ym.replace('-','/')}</td><td class="r num ${r.opening?'':'zero'}">${arAmt(r.opening)}</td>
-        <td class="r num ${r.billed?'':'zero'}">${moneyPlain(r.billed)}</td><td class="r num ${r.payment?'':'zero'}">${moneyPlain(r.payment)}</td>
-        <td class="r num ${r.overdue>0?'ar-over':(r.closing>0?'ar-pos':'zero')}" ${r.overdue>0?`title="うち期日超過 ${moneyPlain(r.overdue)}"`:''}>${arAmt(r.closing)}</td></tr>`).join('')}
-      </tbody></table></div>
+    ${ledOpenInit('ap', companyId, shown, f)}
+    <div class="table-wrap ar-led"><table id="ledTbl">
+      <thead><tr><th>年月</th><th class="r">前月残高</th><th class="r">支払請求（税込）</th><th class="r">支払</th><th class="r">月末残高</th><th class="r">証憑</th></tr></thead>
+      <tbody>${ledRowsHtml('ap', rows, f)}</tbody></table></div>
+    <div class="fhelp" style="margin-top:6px;">行を押すと、その月の支払請求・支払が1件ずつ出ます。📎 で請求書 PDF・振込の控えを見る／付ける。</div>
     <div class="modal-actions split">
       <div style="display:flex;gap:8px;">${c?`<button class="btn secondary" onclick="closeModal();openDetail('companies','${attr(companyId)}')">支払先の情報</button>`:''}</div>
       <div style="display:flex;gap:8px;">${canCreate('payouts')?`<button class="btn secondary" onclick="closeModal();openPayout(null,{companyId:'${attr(companyId)}'})">＋ 支払を記録</button>`:''}
         <button class="btn" onclick="closeModal()">閉じる</button></div></div>`,'lg');
+  ledScrollEnd();
 }
 
 /* ============================================================================
@@ -4478,6 +4664,7 @@ function viewPayouts(){
   const q=(SEARCH[p]||'').toLowerCase();
   let rows=q? all.filter(r=>(companyName(r.companyId)+(r.note||'')).toLowerCase().includes(q)) : all.slice();
   rows=rows.filter(r=>fcolPass(p,r));
+  if(ATT_MISS_ONLY[p]) rows=rows.filter(r=>attMissing('payouts', r));
   const thisM=all.filter(x=>(x.date||'').slice(0,7)===thisMonth()&&x.status!=='取消');
 
   const kpis=`<div class="kpi-grid">
@@ -4492,11 +4679,11 @@ function viewPayouts(){
       const a=(r.allocations||[]); if(!a.length) return '<span class="badge b-amber">未消込</span>';
       const f=findById('bills',a[0].billId);
       return `${esc(f?f.no:'-')}${a.length>1?` <span class="muted">他${a.length-1}件</span>`:''}`; }},
-    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payouts', r.id)},
+    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payouts', r.id, r)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
     {key:'note', label:'備考', noFilter:true, val:r=>esc(r.note||'')},
   ];
-  const tools=`${searchBox(p,'支払先で検索')}${filterClearBtn(p)}
+  const tools=`${searchBox(p,'支払先で検索')}${filterClearBtn(p)}${attMissToggle(p,'payouts')}
     ${canCreate('payouts')?`<button class="btn" onclick="openPayout()">＋ 支払を記録</button>`:''}
     ${toolsMenu(`<button class="btn secondary" onclick="exportCsvTable('payouts')">${IC.doc} CSV出力</button>`)}`;
   return pageShell({ title:'支払実行', count:all.length, shown:rows.length,
@@ -4514,6 +4701,7 @@ function openPayout(id, preset){
   PO_CTX={ id:id||null, companyId:p?p.companyId:(preset?.companyId||''), date:p?p.date:today(),
     amount:p?num(p.amount):num(preset?.amount||0), method:p?p.method:'銀行振込', note:p?p.note:'',
     allocations:p?(p.allocations||[]).map(a=>Object.assign({},a)):[] };
+  attPendReset('po','payouts');
   drawPayoutModal();
   if(!id&&preset) setTimeout(()=>poAuto(),0);
 }
@@ -4525,7 +4713,8 @@ function drawPayoutModal(){
   const s=Object.values(map).reduce((t,v)=>t+v,0), rest=num(c.amount)-s;
   const rows=open.map(b=>{
     const bal=balanceOfBill(b)+(c.id?(map[b.id]||0):0);
-    return `<tr><td>${esc(b.no)}</td><td>${esc(b.bookMonth||'')}</td>
+    /* ★ 2026-09-16: 払う前に 請求書のファイルを見て確かめられるように */
+    return `<tr><td>${esc(b.no)}</td><td>${attBtn('bills', b.id, b)}</td><td>${esc(b.bookMonth||'')}</td>
       <td>${isOverdue(b)?`<span class="badge b-red">${esc(b.dueDate)}</span>`:esc(b.dueDate||'')}</td>
       <td class="r num">${moneyPlain(bal)}</td>
       <td style="width:130px;"><input class="num" style="width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:right;font-size:12px;"
@@ -4537,16 +4726,17 @@ function drawPayoutModal(){
       <div><label>支払日</label><input type="date" value="${attr(c.date)}" onchange="PO_CTX.date=this.value"></div>
       <div><label>支払先</label><select onchange="PO_CTX.companyId=this.value;PO_CTX.allocations=[];drawPayoutModal()">
         <option value="">-</option>${(DB.companies||[]).filter(x=>!x._gone).map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
-      <div><label>支払額</label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PO_CTX.amount=num(this.value);poRest()"></div>
+      <div><label>支払額 <span class="muted" style="font-weight:400;">（振り込んだ金額）</span></label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PO_CTX.amount=num(this.value);poRest()"></div>
       <div><label>方法</label><select onchange="PO_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div class="full"><label>備考</label><input value="${attr(c.note||'')}" oninput="PO_CTX.note=this.value"></div>
     </div>
     <div class="form-section" style="margin-top:14px;">${IC.yen} 消込先
       <a class="pillbtn pill-save" style="margin-left:auto;" onclick="poAuto()">期日の古い順に自動で割り当て</a></div>
     ${c.companyId? (open.length?`<div class="table-wrap"><table>
-      <thead><tr><th>番号</th><th>計上月</th><th>期日</th><th class="r">残高</th><th class="r">消込額</th></tr></thead>
+      <thead><tr><th>番号</th><th>請求書</th><th>計上月</th><th>期日</th><th class="r">残高（税込）</th><th class="r">消込額</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`:'<div class="infobar">この支払先に未払はありません。</div>')
       :'<div class="warnbar">先に支払先を選んでください。</div>'}
+    ${attPendHtml('po','payouts',c.id,{hint:'振込の控え・領収書をドロップ'})}
     <div id="poRest" style="margin-top:10px;font-size:13px;text-align:right;">消込合計 <b class="num">${moneyPlain(s)}</b> ／ 未消込 <b class="num">${moneyPlain(rest)}</b></div>
     <div class="modal-actions ${c.id?'split':''}">
       ${c.id?`<button class="btn danger" onclick="poDelete()">削除</button>`:''}
@@ -4577,9 +4767,10 @@ function poAuto(){
 function poSave(){
   const c=PO_CTX;
   if(!c.companyId||!num(c.amount)){ toast('支払先と金額を入力してください。','err'); return; }
-  commitRecord('payouts', { companyId:c.companyId, date:c.date, amount:num(c.amount), method:c.method,
+  const res=commitRecord('payouts', { companyId:c.companyId, date:c.date, amount:num(c.amount), method:c.method,
     note:c.note, allocations:c.allocations, status:'確定' }, { existingId:c.id });
   closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast('支払を記録しました。','ok');
+  if(attPendCount('po')) attPendFlush('po', res.record.id);
 }
 function poDelete(){ if(PO_CTX.id && deleteRecord('payouts',PO_CTX.id,'支払記録')){ closeModal(); renderPage(CURRENT_PAGE); } }
 
@@ -5402,6 +5593,25 @@ const ATT_LABEL = { invoices:'請求書', payments:'入金', bills:'支払請求
   costItems:'費目', properties:'物件', companies:'取引先' };
 const ATT_MAX = 10*1024*1024;
 let ATT_COUNTS = {}, _attLoading = {};
+/* ★ 2026-09-16 利用者の指示: 書類の種類を付ける（人も AI も「どれが請求書か」で迷わないように）。
+   backend/src/files.ts の DOC_TYPES と同じ並び。 */
+const DOC_TYPES = ['請求書','領収書','振込明細','契約書','その他'];
+const DOC_TYPE_DEFAULT = { invoices:'請求書', bills:'請求書', payments:'振込明細', payouts:'振込明細',
+  companies:'契約書', properties:'契約書', costItems:'その他', expenses:'領収書' };
+/* ★ 2026-09-16: 証憑（ファイル）が要る伝票。backend/src/apiv1/attachments.ts の NEEDS_FILE と同じ判定。
+   支払請求は ファイルが無いと 確定できない（下の attGateBill・backend authz.ts billsNeedingFile）。 */
+const ATT_NEEDS = {
+  bills:    r => !['作成中','取消'].includes(String(r.status||'作成中')),
+  invoices: r => !['作成中','取消'].includes(String(r.status||'作成中')),
+  payments: r => String(r.status||'')!=='取消',
+  payouts:  r => String(r.status||'')!=='取消',
+};
+/** 証憑なし（数が分かっていて、要るのに0）。数がまだ分からなければ false（決めつけない）。デモは数えない。 */
+function attMissing(entity, r){
+  if(!r || r.demo || !ATT_NEEDS[entity] || !ATT_NEEDS[entity](r)) return false;
+  const c=ATT_COUNTS[entity]; if(!c) { if(GTOKEN) attLoadCounts(entity); return false; }
+  return !c[r.id];
+}
 
 async function attLoadCounts(entity){
   if(_attLoading[entity]) return;
@@ -5414,33 +5624,86 @@ async function attLoadCounts(entity){
   _attLoading[entity]=false;
   /* 数が分かったら、今の画面だけ描き直す（入力中の画面は描き直さない） */
   const a=document.activeElement;
-  if(!(a && /INPUT|TEXTAREA|SELECT/.test(a.tagName))) renderPage(CURRENT_PAGE);
+  if(!(a && /INPUT|TEXTAREA|SELECT/.test(a.tagName))){
+    renderPage(CURRENT_PAGE);
+    if(LED_OPEN && document.getElementById('ledTbl')) ledRedraw();       // 開いている元帳も数を入れ直す
+  }
 }
-/** 一覧の行に置く小さなボタン。数がまだ分からなければ、裏で取りに行く。 */
-function attBtn(entity, id){
+/** 1件の本当の数（確定の前など、古い数を信じてはいけないとき） */
+async function attCountFresh(entity, id){
+  const r=await fetch(API_BASE+'/files?entity='+encodeURIComponent(entity)+'&id='+encodeURIComponent(id),{headers:headers()});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  (ATT_COUNTS[entity]=ATT_COUNTS[entity]||{})[id]=(d.items||[]).length;
+  return (d.items||[]).length;
+}
+/** 一覧の行に置く小さなボタン。数がまだ分からなければ、裏で取りに行く。
+    rec を渡すと「証憑なし」（要るのに0件）を赤で出す。 */
+function attBtn(entity, id, rec){
   if(!ATT_PAGE[entity] || !id) return '';
   if(!ATT_COUNTS[entity] && !_attLoading[entity] && GTOKEN) attLoadCounts(entity);
   const n=(ATT_COUNTS[entity]||{})[id]||0;
-  return `<a class="attbtn${n?' has':''}" onclick="event.stopPropagation();attOpen('${entity}','${attr(id)}')" title="添付ファイル${n?`（${n}件）`:''}">${IC.clip}${n?`<span>${n}</span>`:''}</a>`;
+  const miss = rec && attMissing(entity, rec);
+  return `<a class="attbtn${n?' has':''}${miss?' miss':''}" onclick="event.stopPropagation();attOpen('${entity}','${attr(id)}')"
+    title="${miss?'証憑（ファイル）がありません — 押して付ける':`添付ファイル${n?`（${n}件）`:''}`}">${IC.clip}${n?`<span>${n}</span>`:(miss?'<span>証憑なし</span>':'')}</a>`;
 }
 const attSize = b => b>=1048576 ? (b/1048576).toFixed(1)+'MB' : Math.max(1,Math.round(b/1024))+'KB';
+/** どの伝票のファイルかを1行で（プレビューの上に出す） */
+function attRecordLine(entity, id){
+  const r=findById(entity, id); if(!r) return '';
+  const co=r.companyId? esc(arCoName(r.companyId)) : '';
+  if(entity==='invoices'||entity==='bills')
+    return `${esc(ATT_LABEL[entity])} ${esc(r.no||'')} ・ ${co} ・ ${esc(r.bookMonth||'')} ・ <b class="num">¥${moneyPlain(docTotal(r))}</b>（税込）${entity==='bills'?` ・ ${statusBadge(billStatus(r))}`:''}`;
+  if(entity==='payments'||entity==='payouts')
+    return `${esc(ATT_LABEL[entity])} ${esc(r.date||'')} ・ ${co} ・ <b class="num">¥${moneyPlain(r.amount)}</b>`;
+  return `${esc(ATT_LABEL[entity])} ・ ${esc(r.name||r.no||'')}`;
+}
 
+/** 一覧の上の「証憑なしのみ」 */
+let ATT_MISS_ONLY={};
+function attMissToggle(p, entity){
+  const list=DB[entity]||[], n=ATT_COUNTS[entity]? list.filter(r=>attMissing(entity,r)).length : null;
+  return `<label class="ar-chk" title="ファイルが要るのに1つも付いていない伝票だけ"><input type="checkbox" ${ATT_MISS_ONLY[p]?'checked':''}
+    onchange="ATT_MISS_ONLY['${p}']=this.checked;renderPage('${p}')"> 証憑なしのみ${n?` <span class="badge b-red">${n}</span>`:''}</label>`;
+}
+
+/* ============================================================================
+   添付ファイルの窓 — 左に一覧、右にその場でプレビュー（PDF・画像）
+   ----------------------------------------------------------------------------
+   ★ 2026-09-16 利用者の指示:「一覧からファイルを押したら その場でプレビュー」。
+     以前は新しいタブで開いていた（ポップアップが止められて開かないことがあった）。
+   ========================================================================== */
+let ATT_VIEW=null;       // { entity, id, url }
 async function attOpen(entity, id){
   const page=ATT_PAGE[entity];
   const canUp=canEdit(page)||canCreate(page), canDel=canDelete(page);
-  openModal2(`<h3>${IC.clip} 添付ファイル　<span style="font-size:12px;color:var(--muted);font-weight:400;">${esc(ATT_LABEL[entity]||'')}</span></h3>
-    ${canUp? `<label class="attdrop" id="attDrop" ondragover="event.preventDefault();this.classList.add('over')"
-        ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');attUpload('${entity}','${attr(id)}',event.dataTransfer.files)">
-        <input type="file" multiple style="display:none;" onchange="attUpload('${entity}','${attr(id)}',this.files)"
-          accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.xlsx,.xls,.docx,.doc">
-        <b>ここにファイルをドロップ</b> または <u>選ぶ</u><br>
-        <span class="muted" style="font-size:11.5px;">PDF・画像・Excel・Word ／ 1ファイル10MBまで（マクロ入りは受け付けません）</span></label>`
-      : `<div class="infobar">見るだけの権限です。付ける・消すには この画面の編集権限が要ります。</div>`}
-    <div id="attList" style="margin-top:10px;"><div class="empty">読み込み中…</div></div>
-    <div class="modal-actions"><button class="btn" onclick="closeModal2()">閉じる</button></div>`,'lg');
-  attRefresh(entity, id, canDel);
+  attPrevRevoke();
+  ATT_VIEW={ entity, id, url:'' };
+  const rec=findById(entity, id);
+  const gate = entity==='bills' && rec && rec.status==='作成中' && canEdit('bills');
+  openModal2(`<h3>${IC.clip} 添付ファイル　<span style="font-size:12px;color:var(--muted);font-weight:400;">${attRecordLine(entity,id)}</span></h3>
+    <div class="attwin">
+      <div class="attside">
+        ${canUp? `<label class="attdrop" id="attDrop" ondragover="event.preventDefault();this.classList.add('over')"
+            ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');attUpload('${entity}','${attr(id)}',event.dataTransfer.files)">
+            <input type="file" multiple style="display:none;" onchange="attUpload('${entity}','${attr(id)}',this.files)"
+              accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.xlsx,.xls,.docx,.doc">
+            <b>ここにファイルをドロップ</b> または <u>選ぶ</u><br>
+            <span class="muted" style="font-size:11.5px;">PDF・画像・Excel・Word ／ 1ファイル10MBまで</span></label>
+          <div class="attkind"><span class="muted">書類の種類</span>
+            <select id="attDocType">${DOC_TYPES.map(t=>`<option ${t===(DOC_TYPE_DEFAULT[entity]||'その他')?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`
+          : `<div class="infobar">見るだけの権限です。付ける・消すには この画面の編集権限が要ります。</div>`}
+        <div id="attList" style="margin-top:8px;"><div class="empty">読み込み中…</div></div>
+      </div>
+      <div class="attprev" id="attPrev"><div class="empty">ファイルを選ぶと、ここに表示します。</div></div>
+    </div>
+    <div class="modal-actions ${gate?'split':''}">
+      ${gate?`<button class="btn" id="attConfirmBtn" disabled onclick="confirmBill('${attr(id)}')">この支払請求を確定する</button>`:''}
+      <button class="btn secondary" onclick="closeModal2()">閉じる</button></div>`,'xl');
+  attRefresh(entity, id, canDel, true);
 }
-async function attRefresh(entity, id, canDel){
+function attPrevRevoke(){ if(ATT_VIEW && ATT_VIEW.url){ try{ URL.revokeObjectURL(ATT_VIEW.url); }catch(e){} ATT_VIEW.url=''; } }
+async function attRefresh(entity, id, canDel, autoPreview){
   try{
     const r=await fetch(API_BASE+'/files?entity='+encodeURIComponent(entity)+'&id='+encodeURIComponent(id),{headers:headers()});
     const d=await r.json().catch(()=>({}));
@@ -5449,36 +5712,76 @@ async function attRefresh(entity, id, canDel){
     if(!r.ok){ box.innerHTML=`<div class="alertbar">${esc(d.message||'添付を取得できませんでした（HTTP '+r.status+'）')}</div>`; return; }
     const items=d.items||[];
     (ATT_COUNTS[entity]=ATT_COUNTS[entity]||{})[id]=items.length;
-    box.innerHTML = items.length? `<div class="table-wrap"><table><thead><tr><th>ファイル</th><th>種類</th><th class="r">大きさ</th><th>付けた人・日時</th><th></th></tr></thead>
-      <tbody>${items.map(f=>`<tr>
-        <td><a onclick="attView('${attr(f.id)}','${attr(f.mime)}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(f.fileName)}</a></td>
-        <td><span class="badge b-gray">${esc(f.kind)}</span></td><td class="r num">${attSize(f.size)}</td>
-        <td class="muted" style="font-size:11.5px;">${esc(String(f.uploadedBy||'').split('@')[0])} ・ ${esc(String(f.createdAt).slice(0,16).replace('T',' '))}</td>
-        <td class="r"><a class="pillbtn pill-save" onclick="attDownload('${attr(f.id)}','${attr(f.fileName)}')">保存</a>
-          ${canDel?`<a class="pillbtn pill-del" onclick="attDelete('${entity}','${attr(id)}','${attr(f.id)}','${attr(f.fileName)}')">削除</a>`:''}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">まだ添付はありません。</div>';
+    const canUp=canEdit(ATT_PAGE[entity])||canCreate(ATT_PAGE[entity]);
+    const cb=document.getElementById('attConfirmBtn'); if(cb) cb.disabled=!items.length;
+    box.innerHTML = items.length? `<div class="attlist">${items.map(f=>`<div class="attrow" data-f="${attr(f.id)}"
+          onclick="attPreview('${attr(f.id)}','${attr(f.mime)}','${attr(f.fileName)}')">
+        <div class="attname">${esc(f.fileName)}</div>
+        <div class="attmeta">
+          ${canUp? `<select onclick="event.stopPropagation()" onchange="attSetType('${entity}','${attr(id)}','${attr(f.id)}',this.value)">
+              ${DOC_TYPES.map(t=>`<option ${t===(f.docType||'その他')?'selected':''}>${esc(t)}</option>`).join('')}</select>`
+            : `<span class="badge b-blue">${esc(f.docType||'その他')}</span>`}
+          <span class="badge b-gray">${esc(f.kind)}</span> <span class="muted num">${attSize(f.size)}</span>
+          <span class="muted">${esc(String(f.uploadedBy||'').split('@')[0])} ・ ${esc(String(f.createdAt).slice(0,10))}</span></div>
+        <div class="attact"><a class="pillbtn pill-save" onclick="event.stopPropagation();attDownload('${attr(f.id)}','${attr(f.fileName)}')">保存</a>
+          ${canDel?`<a class="pillbtn pill-del" onclick="event.stopPropagation();attDelete('${entity}','${attr(id)}','${attr(f.id)}','${attr(f.fileName)}')">削除</a>`:''}</div>
+      </div>`).join('')}</div>`
+      : `<div class="empty">まだ添付はありません。${entity==='bills'?'<br><b>請求書のファイルを付けると 確定できます。</b>':''}</div>`;
+    const first=items.find(f=>/^(application\/pdf|image\/)/.test(f.mime))||items[0];
+    if(autoPreview && first) attPreview(first.id, first.mime, first.fileName);
+    else if(!items.length){ const pv=document.getElementById('attPrev'); if(pv) pv.innerHTML='<div class="empty">ファイルを選ぶと、ここに表示します。</div>'; }
   }catch(e){ const b=document.getElementById('attList'); if(b) b.innerHTML='<div class="alertbar">通信に失敗しました。</div>'; }
+}
+/** 右側にプレビュー。PDF は iframe、画像は img。それ以外は保存を案内。 */
+async function attPreview(fileId, mime, name){
+  const pv=document.getElementById('attPrev'); if(!pv) return;
+  document.querySelectorAll('#attList .attrow').forEach(x=>x.classList.toggle('on', x.dataset.f===fileId));
+  if(!/^(application\/pdf|image\/(png|jpeg|gif|webp))/.test(mime||'')){
+    pv.innerHTML=`<div class="empty">${esc(name||'')}<br>この種類はプレビューできません。<br>
+      <a class="pillbtn pill-save" style="margin-top:8px;" onclick="attDownload('${attr(fileId)}','${attr(name||'')}')">保存して開く</a></div>`; return; }
+  pv.innerHTML='<div class="empty">読み込み中…</div>';
+  try{
+    const b=await attBlob(fileId);
+    attPrevRevoke();
+    const url=URL.createObjectURL(b); if(ATT_VIEW) ATT_VIEW.url=url;
+    pv.innerHTML = /^image\//.test(mime)? `<img src="${url}" alt="${attr(name||'')}">`
+      : `<iframe src="${url}#view=FitH" title="${attr(name||'')}"></iframe>`;
+  }catch(e){ pv.innerHTML=`<div class="alertbar">表示できませんでした：${esc(e.message)}</div>`; }
+}
+async function attSetType(entity, id, fileId, docType){
+  try{
+    const r=await fetch(API_BASE+'/files/'+encodeURIComponent(fileId),{method:'PATCH',headers:headers(),body:JSON.stringify({docType})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); toast(d.message||'変更できませんでした。','err'); }
+    else toast('書類の種類を「'+docType+'」にしました。','ok');
+  }catch(e){ toast('通信に失敗しました。','err'); }
 }
 function attReadB64(file){
   return new Promise((ok,ng)=>{ const fr=new FileReader(); fr.onload=()=>ok(String(fr.result).split(',')[1]||''); fr.onerror=ng; fr.readAsDataURL(file); });
 }
+/** 1ファイル送る。{ok, message} */
+async function attSend(entity, id, f, docType){
+  if(f.size>ATT_MAX) return { ok:false, message:`${f.name}：10MBを超えています` };
+  try{
+    const dataBase64=await attReadB64(f);
+    const r=await fetch(API_BASE+'/files',{method:'POST',headers:headers(),body:JSON.stringify({entity, entityId:id, fileName:f.name, dataBase64, docType})});
+    const d=await r.json().catch(()=>({}));
+    return r.ok? { ok:true } : { ok:false, message:`${f.name}：${d.message||('HTTP '+r.status)}` };
+  }catch(e){ return { ok:false, message:`${f.name}：通信に失敗しました` }; }
+}
 async function attUpload(entity, id, fileList){
   const files=[...(fileList||[])]; if(!files.length) return;
   const box=document.getElementById('attList');
+  const sel=document.getElementById('attDocType');
+  const docType=(sel&&sel.value)||DOC_TYPE_DEFAULT[entity]||'その他';
   let okN=0; const errs=[];
   for(const f of files){
-    if(f.size>ATT_MAX){ errs.push(`${f.name}：10MBを超えています`); continue; }
     if(box) box.insertAdjacentHTML('afterbegin', `<div class="infobar" data-up="${attr(f.name)}">「${esc(f.name)}」を送っています…</div>`);
-    try{
-      const dataBase64=await attReadB64(f);
-      const r=await fetch(API_BASE+'/files',{method:'POST',headers:headers(),body:JSON.stringify({entity, entityId:id, fileName:f.name, dataBase64})});
-      const d=await r.json().catch(()=>({}));
-      if(r.ok) okN++; else errs.push(`${f.name}：${d.message||('HTTP '+r.status)}`);
-    }catch(e){ errs.push(`${f.name}：通信に失敗しました`); }
+    const res=await attSend(entity, id, f, docType);
+    if(res.ok) okN++; else errs.push(res.message);
   }
   if(okN) toast(`${okN}件 添付しました。`,'ok');
   if(errs.length) toast('付けられなかったファイルがあります：\n'+errs.join('\n'),'err');
-  attRefresh(entity, id, canDelete(ATT_PAGE[entity]));
+  attRefresh(entity, id, canDelete(ATT_PAGE[entity]), true);
   renderPage(CURRENT_PAGE);
 }
 async function attBlob(fileId){
@@ -5493,7 +5796,7 @@ async function attDownload(fileId, name){
     setTimeout(()=>URL.revokeObjectURL(url), 4000);
   }catch(e){ toast('保存できませんでした：'+e.message,'err'); }
 }
-/** PDF と画像はその場で開く。それ以外は保存。 */
+/** 以前の呼び口（新しいタブで開く）。他の画面から呼ばれても動くように残す。 */
 async function attView(fileId, mime){
   if(!/^(application\/pdf|image\/(png|jpeg|gif|webp))/.test(mime||'')){ return attDownload(fileId); }
   try{
@@ -5511,7 +5814,7 @@ async function attDelete(entity, id, fileId, name){
     if(!r.ok){ toast(d.message||'消せませんでした。','err'); return; }
     toast('消しました。','ok');
   }catch(e){ toast('通信に失敗しました。','err'); }
-  attRefresh(entity, id, true); renderPage(CURRENT_PAGE);
+  attRefresh(entity, id, true, true); renderPage(CURRENT_PAGE);
 }
 /** 詳細モーダルの中に置く「添付」の欄（数だけ出し、押すと開く） */
 function attSection(entity, id){
@@ -5519,6 +5822,72 @@ function attSection(entity, id){
   const n=(ATT_COUNTS[entity]||{})[id]||0;
   return `<div class="form-section" style="margin-top:14px;">${IC.clip} 添付ファイル
     <a class="pillbtn pill-save" style="margin-left:auto;" onclick="attOpen('${entity}','${attr(id)}')">${n?`${n}件を見る・追加`:'ファイルを付ける'}</a></div>`;
+}
+
+/* ============================================================================
+   入力フォームの中の「ファイルを付ける」— 保存する前に選んでおき、保存のあとで送る
+   ----------------------------------------------------------------------------
+   ★ 2026-09-16 利用者の指示: 入金を記録・支払を記録・請求額・支払請求 の画面で その場で付けたい。
+   ・添付は「サーバーにある伝票」にしか付けられない（backend files.ts）。
+     → 保存 → サーバーへ送り切る（attPushNow）→ ファイルを送る、の順。
+   ・画面を描き直してもファイルが消えないように、選んだファイルは ATT_PEND に持つ。
+   ========================================================================== */
+let ATT_PEND={};          // key → { entity, files:[File], docType }
+function attPendReset(key, entity){ ATT_PEND[key]={ entity, files:[], docType:DOC_TYPE_DEFAULT[entity]||'その他' }; }
+function attPendHtml(key, entity, existingId, opt){
+  opt=opt||{};
+  if(!ATT_PEND[key]) attPendReset(key, entity);
+  const P=ATT_PEND[key];
+  const n=existingId? ((ATT_COUNTS[entity]||{})[existingId]||0) : 0;
+  return `<div class="form-section" style="margin-top:14px;">${IC.clip} 証憑ファイル${opt.required?' <span style="color:var(--danger)">*確定に必要</span>':''}
+      ${existingId?`<a class="pillbtn pill-save" style="margin-left:auto;" onclick="attOpen('${entity}','${attr(existingId)}')">${n?`付いている ${n}件を見る`:'付いているファイルを見る'}</a>`:''}</div>
+    <div class="attpend">
+      <label class="attdrop sm" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')"
+        ondrop="event.preventDefault();this.classList.remove('over');attPendAdd('${key}',event.dataTransfer.files)">
+        <input type="file" multiple style="display:none;" onchange="attPendAdd('${key}',this.files);this.value=''"
+          accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.xlsx,.xls,.docx,.doc">
+        <b>${esc(opt.hint||'請求書・振込明細などをドロップ')}</b> または <u>選ぶ</u>
+        <span class="muted" style="font-size:11px;">（保存と一緒に送ります）</span></label>
+      <select title="書類の種類" onchange="ATT_PEND['${key}'].docType=this.value">${DOC_TYPES.map(t=>`<option ${t===P.docType?'selected':''}>${esc(t)}</option>`).join('')}</select>
+    </div>
+    <div id="attp-${key}">${attPendList(key)}</div>`;
+}
+function attPendList(key){
+  const P=ATT_PEND[key]; if(!P||!P.files.length) return '';
+  return `<div class="attplist">${P.files.map((f,i)=>`<span class="attchip">${IC.clip} ${esc(f.name)} <span class="muted">${attSize(f.size)}</span>
+    <a onclick="attPendDel('${key}',${i})" title="外す">×</a></span>`).join('')}</div>`;
+}
+function attPendAdd(key, list){
+  const P=ATT_PEND[key]; if(!P) return;
+  for(const f of [...(list||[])]){
+    if(f.size>ATT_MAX){ toast(`${f.name}：10MBを超えています`,'err'); continue; }
+    P.files.push(f);
+  }
+  const el=document.getElementById('attp-'+key); if(el) el.innerHTML=attPendList(key);
+}
+function attPendDel(key, i){ const P=ATT_PEND[key]; if(!P) return; P.files.splice(i,1); const el=document.getElementById('attp-'+key); if(el) el.innerHTML=attPendList(key); }
+const attPendCount = key => (ATT_PEND[key] && ATT_PEND[key].files.length) || 0;
+/** 手元の変更をサーバーへ送り切る（添付の前に、伝票がサーバーにある状態にする） */
+async function attPushNow(){
+  clearTimeout(_pushTimer);
+  for(let i=0;i<40 && (pendingCount()||_pushing);i++){
+    if(_pushing) await new Promise(ok=>setTimeout(ok,150));
+    else { const before=pendingCount(); await pushDelta(); if(pendingCount() && pendingCount()>=before) break; }
+  }
+  return !pendingCount();
+}
+/** 選んでおいたファイルを送る。送れなかったものは知らせる。 */
+async function attPendFlush(key, id){
+  const P=ATT_PEND[key]; if(!P || !P.files.length || !id) return { ok:0, errs:[] };
+  if(!(await attPushNow())) return { ok:0, errs:['伝票をサーバーに保存できなかったため、ファイルを送れませんでした'] };
+  let ok=0; const errs=[];
+  for(const f of P.files){ const r=await attSend(P.entity, id, f, P.docType); if(r.ok) ok++; else errs.push(r.message); }
+  P.files=[];
+  (ATT_COUNTS[P.entity]=ATT_COUNTS[P.entity]||{})[id]=((ATT_COUNTS[P.entity]||{})[id]||0)+ok;
+  if(ok) toast(`${ok}件のファイルを付けました。`,'ok');
+  if(errs.length) toast('付けられなかったファイルがあります：\n'+errs.join('\n'),'err');
+  renderPage(CURRENT_PAGE);
+  return { ok, errs };
 }
 
 /* ============================================================================
@@ -8029,6 +8398,22 @@ function notifItems(){
   const apOver=openBills().filter(b=>isOverdue(b));
   if(apOver.length) out.push({ sev:'danger', key:'ap-over', label:'支払期日を過ぎた支払',
     n:apOver.length, amount:apOver.reduce((s,b)=>s+balanceOfBill(b),0), go:"goto('apbook')" });
+
+  /* ── 証憑（ファイル）が無い伝票（直近3か月・デモは数えない）── ★ 2026-09-16 */
+  {
+    const from=addMonths(thisMonth(),-2), PAGE_OF={ bills:'bills', payouts:'payouts', payments:'receipts' };
+    const miss={}; let known=true;
+    Object.keys(PAGE_OF).forEach(e=>{
+      if(!canSee(PAGE_OF[e])){ miss[e]=0; return; }
+      if(!ATT_COUNTS[e]){ known=false; if(GTOKEN) attLoadCounts(e); return; }
+      miss[e]=(DB[e]||[]).filter(r=>{ const m=String(e==='bills'? (r.bookMonth||'') : (r.date||'')).slice(0,7); return m>=from && attMissing(e,r); }).length;
+    });
+    const n=known? miss.bills+miss.payouts+miss.payments : 0;
+    const top=miss.bills?'bills':(miss.payouts?'payouts':'payments');
+    if(n) out.push({ sev:miss.bills?'warn':'info', key:'att-miss', label:'証憑（ファイル）が無い伝票', n,
+      go:`ATT_MISS_ONLY['${PAGE_OF[top]}']=true;goto('${PAGE_OF[top]}')`,
+      sub:[miss.bills?`支払請求 ${miss.bills}件`:'', miss.payouts?`支払 ${miss.payouts}件`:'', miss.payments?`入金 ${miss.payments}件`:''].filter(Boolean).join('・')+'（直近3か月）' });
+  }
 
   const apSoon=openBills().filter(b=>effDue(b)&&effDue(b)>=t&&effDue(b)<=addDays(t,7));
   if(apSoon.length) out.push({ sev:'warn', key:'ap-soon', label:'7日以内に支払う',

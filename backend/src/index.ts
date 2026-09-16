@@ -13,8 +13,8 @@ import cors from 'cors'
 import { pool, ensureTables, cfgGet, cfgSet } from './db'
 import { verifyBearer, loginWithToken, profileOf, canWriteAtAll } from './auth'
 import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from './merge'
-import { checkCollections, checkMoneyRules, permOf } from './authz'
-import { initFiles, filesRouter } from './files'
+import { checkCollections, checkMoneyRules, permOf, billsNeedingFile } from './authz'
+import { initFiles, filesRouter, attachmentCounts } from './files'
 import { loadStateCached } from './statecache'
 import { mfRouter } from './mfinvoice'
 /* CSV_MAP_WORKER / CSV_MAP_ASSIGN は crmsync.ts に残してあります（人を扱う必要が戻ったら
@@ -354,6 +354,21 @@ app.put('/state-delta', async (req, res) => {
               ? '確定済み伝票の金額変更は管理者・マネージャーのみです。'
               : 'この操作の権限がありません（管理者にご確認ください）。'
           return res.status(403).json({ error: bad.reason, detail: bad.detail, message: msg })
+        }
+      }
+    }
+
+    // Lớp 4 — 支払請求 を確定にするには 請求書のファイルが要る（2026-09-16 利用者の指示）
+    {
+      const need = billsNeedingFile(merged, changed)
+      if (need.length) {
+        const cnt = await attachmentCounts(client, 'bills', need)
+        const missing = need.filter(id => !cnt[id])
+        if (missing.length) {
+          await client.query('ROLLBACK'); client.release()
+          syncLog(req, email, 'blocked', 'bill-needs-file', { ids: missing })
+          return res.status(403).json({ error: 'bill-needs-file', detail: { ids: missing },
+            message: '請求書のファイルが付いていない支払請求は「確定」にできません。先に 📎 からファイルを付けてください。' })
         }
       }
     }

@@ -37,9 +37,11 @@ const pool = { query: async (sql, p) => {
   const q = String(sql).replace(/\s+/g, ' ').trim();
   const live = r => !r.deleted_at;
   if (q.startsWith('INSERT INTO attachments')) {
-    rows.push({ id: p[0], entity: p[1], entity_id: p[2], file_name: p[3], mime: p[4], kind: p[5], size_bytes: p[6], sha256: p[7], data: p[8], uploaded_by: p[9], created_at: new Date().toISOString(), deleted_at: null });
+    rows.push({ id: p[0], entity: p[1], entity_id: p[2], file_name: p[3], mime: p[4], kind: p[5], size_bytes: p[6], sha256: p[7], data: p[8], uploaded_by: p[9], doc_type: p[10], created_at: new Date().toISOString(), deleted_at: null });
     return { rows: [] };
   }
+  if (q.startsWith('UPDATE attachments SET doc_type')) { const r = rows.find(x => x.id === p[0]); if (r) r.doc_type = p[1]; return { rows: [] }; }
+  if (q.startsWith('SELECT entity, entity_id, doc_type')) return { rows: rows.filter(r => r.id === p[0] && live(r)) };
   if (q.startsWith('UPDATE attachments SET deleted_at')) { const r = rows.find(x => x.id === p[0]); if (r) { r.deleted_at = 'now'; r.deleted_by = p[1]; } return { rows: [] }; }
   if (q.includes('COUNT(*)')) {
     const m = {}; rows.filter(r => r.entity === p[0] && live(r)).forEach(r => { m[r.entity_id] = (m[r.entity_id] || 0) + 1; });
@@ -87,7 +89,7 @@ const MACRO = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(
   const server = app.listen(0); await new Promise(r => server.once('listening', r));
   const B = 'http://127.0.0.1:' + server.address().port;
   const call = (who, method, url, body) => fetch(B + url, { method, headers: Object.assign({ 'content-type': 'application/json' }, who ? { 'x-test-user': who } : {}), body: body ? JSON.stringify(body) : undefined });
-  const up = (who, entityId, name, data, entity) => call(who, 'POST', '/files', { entity: entity || 'invoices', entityId, fileName: name, dataBase64: data });
+  const up = (who, entityId, name, data, entity, docType) => call(who, 'POST', '/files', { entity: entity || 'invoices', entityId, fileName: name, dataBase64: data, docType });
 
   console.log('\n― 入れない人 ―');
   eq('ログインしていない → 401', (await call(null, 'GET', '/files?entity=invoices&id=INV1')).status, 401);
@@ -106,6 +108,20 @@ const MACRO = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(
   eq('マクロ入りは断る → 415', (await up('admin', 'INV1', 'a.xlsx', MACRO)).status, 415);
   eq('10MB を超えると断る → 413', (await up('admin', 'INV1', 'big.pdf', Buffer.concat([Buffer.from('%PDF-'), Buffer.alloc(10 * 1024 * 1024 + 10)]).toString('base64'))).status, 413);
   eq('付けた記録が監査に残る', AUDIT.some(a => a.action === 'upload' && a.detail.fileName === '請求書_9月.pdf'), true);
+
+  console.log('\n― 書類の種類（2026-09-16） ―');
+  eq('種類を送らなければ「その他」', f1.docType, 'その他');
+  const r2 = await up('staff', 'INV1', '振込.pdf', PDF, 'invoices', '振込明細');
+  const f2 = (await r2.json()).item;
+  eq('送った種類で保存', f2.docType, '振込明細');
+  eq('知らない種類は「その他」', (await (await up('staff', 'INV1', 'z.pdf', PDF, 'invoices', '<script>')).json()).item.docType, 'その他');
+  eq('閲覧のみは種類を変えられない → 403', (await call('viewer', 'PATCH', '/files/' + f2.id, { docType: '請求書' })).status, 403);
+  const pt = await call('staff', 'PATCH', '/files/' + f2.id, { docType: '請求書' });
+  eq('編集できる人は種類を変えられる', [pt.status, (await pt.json()).docType], [200, '請求書']);
+  eq('変えた記録（前→後）が監査に残る', AUDIT.some(a => a.action === 'update' && a.detail.docType && a.detail.docType.from === '振込明細' && a.detail.docType.to === '請求書'), true);
+  eq('一覧にも新しい種類', (await (await call('viewer', 'GET', '/files?entity=invoices&id=INV1')).json()).items.find(x => x.id === f2.id).docType, '請求書');
+  eq('無いファイルの種類は変えられない → 404', (await call('admin', 'PATCH', '/files/NOPE', { docType: '請求書' })).status, 404);
+  for (const x of rows.filter(r => r.id !== f1.id)) x.deleted_at = 'test';     // 以下の件数テストのため、f1 だけに戻す
 
   console.log('\n― 見る ―');
   const l1 = await call('viewer', 'GET', '/files?entity=invoices&id=INV1');

@@ -5,6 +5,7 @@
    ・表の一覧は collections.ts から自動生成。表を足したら仕様書も増える。
    ============================================================================ */
 import { COLLECTIONS } from './collections'
+import { ATT_SCREEN_IDS, MISSING_SCREENS } from './attachments'
 
 export function buildOpenApi(publicBase: string) {
   const base = String(publicBase || '').replace(/\/+$/, '')
@@ -18,7 +19,8 @@ export function buildOpenApi(publicBase: string) {
       description:
         '読み取り専用の業務API。ヘッダー `X-API-Key: bl_live_…` が必要です（鍵は 設定 › API・AI連携 で発行）。\n\n' +
         '| 表 | 画面 | 必要なスコープ |\n|---|---|---|\n' + collectionTable +
-        '\n\n書き込みの口はありません（AI・外部システムから金額を動かせないようにするため）。',
+        '\n\n書き込みの口はありません（AI・外部システムから金額を動かせないようにするため）。' +
+        '\n\n証憑（添付ファイル）は /attachments/… で読めます（付ける・消すことはできません）。',
     },
     servers: [{ url: base + '/api/v1' }],
     security: [{ ApiKeyAuth: [] }],
@@ -99,6 +101,37 @@ export function buildOpenApi(publicBase: string) {
           parameters: [
             { name: 'mode', in: 'query', schema: { type: 'string', enum: ['week', 'month'], default: 'week' } },
             { name: 'periods', in: 'query', schema: { type: 'integer', default: 12, maximum: 52 } },
+          ],
+          responses: { 200: { description: 'ok' } },
+        },
+      },
+      /* ★ 2026-09-16: 証憑（添付ファイル）— 読むだけ。スコープは その伝票の表の read */
+      '/attachments/{screen}/{id}': {
+        get: {
+          summary: '伝票1件に付いたファイルの一覧（書類の種類・会社・月・金額つき）  スコープ: その表の read',
+          parameters: [
+            { name: 'screen', in: 'path', required: true, schema: { type: 'string', enum: ATT_SCREEN_IDS } },
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { 200: { description: 'ok' }, 403: { description: 'スコープ不足' }, 404: { description: '見つかりません' } },
+        },
+      },
+      '/attachments/file/{fileId}': {
+        get: {
+          summary: 'ファイルの中身（PDF・画像・Excel・Word）  スコープ: そのファイルが付いた表の read',
+          parameters: [{ name: 'fileId', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { 200: { description: 'ファイル本体', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } }, 404: { description: '見つかりません' } },
+        },
+      },
+      '/attachments/missing': {
+        get: {
+          summary: '証憑（ファイル）が付いていない伝票  スコープ: 各表の read（読める表だけ返す）',
+          parameters: [
+            { name: 'screen', in: 'query', schema: { type: 'string', enum: MISSING_SCREENS }, description: '省略すると読める表すべて' },
+            { name: 'month_from', in: 'query', schema: { type: 'string' }, description: 'YYYY-MM' },
+            { name: 'month_to', in: 'query', schema: { type: 'string' }, description: 'YYYY-MM' },
+            { name: 'company_id', in: 'query', schema: { type: 'string' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 100, maximum: 500 } },
           ],
           responses: { 200: { description: 'ok' } },
         },

@@ -175,7 +175,7 @@ export function invoiceDetail(st: any, inv: any) {
   return {
     id: inv.id, no: inv.no || '', company: brief(st, inv.companyId), book_month: inv.bookMonth || null,
     issue_date: inv.issueDate || null, due_date: inv.dueDate || null,
-    total: F.docTotal(inv), net: F.docNet(inv), paid: F.paidOfInvoice(st, inv), balance: F.balanceOfInvoice(st, inv),
+    total: F.docTotal(inv), net: F.docNet(inv, st), tax_category: (inv.items || []).length ? null : F.docTaxCat(inv, st), paid: F.paidOfInvoice(st, inv), balance: F.balanceOfInvoice(st, inv),
     status: F.invoiceStatus(st, inv), aging_bucket: F.agingBucket(inv, st),
     items: (inv.items || []).map((it: any) => ({ account_code: it.accountCode || null, account_label: F.accountLabel(st, it.accountCode), name: it.name || '', qty: it.qty ?? null, price: it.price ?? null, amount: F.itemAmount(it), tax_category: it.taxCat || null })),
     payments: pays, note: inv.note || null, updated_at: inv.updatedAt || null,
@@ -195,7 +195,7 @@ export function billDetail(st: any, bill: any) {
   return {
     id: bill.id, no: bill.no || '', company: brief(st, bill.companyId), book_month: bill.bookMonth || null,
     received_date: bill.recvDate || null, due_date: bill.dueDate || null,
-    total: F.docTotal(bill), net: F.docNet(bill), paid: F.paidOfBill(st, bill), balance: F.balanceOfBill(st, bill),
+    total: F.docTotal(bill), net: F.docNet(bill, st), paid: F.paidOfBill(st, bill), balance: F.balanceOfBill(st, bill),
     status: F.billStatus(st, bill),
     items: (bill.items || []).map((it: any) => ({ account_code: it.accountCode || null, account_label: F.accountLabel(st, it.accountCode), kind: F.accountKind(st, it.accountCode), name: it.name || '', amount: F.itemAmount(it), tax_category: it.taxCat || null })),
     payouts: outs, note: bill.note || null, updated_at: bill.updatedAt || null,

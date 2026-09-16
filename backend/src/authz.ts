@@ -121,3 +121,28 @@ export function checkMoneyRules(state: any, role: string, changed: any, deleted:
   }
   return { ok: true, reason: '' }
 }
+
+/* ───────── 支払請求を「確定」にするには 請求書のファイルが要る ─────────
+   ★ 2026-09-16 利用者の指示:「支払請求は 請求書のファイルを付けてから確定」。
+   ここは「どの伝票に ファイルの確認が要るか」を決めるだけ（DB は見ない）。
+   数えるのは index.ts（attachments の表）。画面でも同じ判定をするが、ここが最後の関所。
+   ・要る: いま 作成中／取消／新規 だった伝票が、作成中・取消 以外（確定・一部支払…）になるとき
+   ・要らない: すでに確定していた伝票（前からあるものを急に止めない）／デモデータ
+   ・添付は「保存済みの伝票」にしか付けられない → 画面は 作成中で保存 → 添付 → 確定 の順に送る */
+const BILL_OPEN = ['', '作成中', '取消']
+export function billsNeedingFile(state: any, changed: any): string[] {
+  const inc: any[] = Array.isArray(changed?.bills) ? changed.bills : []
+  if (!inc.length) return []
+  const base: any[] = Array.isArray(state?.bills) ? state.bills : []
+  const byId = new Map(base.map((r: any) => [String(r?.id), r]))
+  const out: string[] = []
+  for (const rec of inc) {
+    if (!rec || !rec.id || rec.demo) continue
+    const now = String(rec.status || '')
+    if (BILL_OPEN.includes(now)) continue
+    const old: any = byId.get(String(rec.id))
+    if (old && !BILL_OPEN.includes(String(old.status || ''))) continue
+    out.push(String(rec.id))
+  }
+  return out
+}

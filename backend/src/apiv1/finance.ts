@@ -120,13 +120,21 @@ export function docTotal(doc: any): number {
   if (Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items) + itemsTax(doc.items)
   return num(doc.total)
 }
+/** 明細の無い伝票の税区分: 伝票に付いた税区分 → 取引先の税区分 → 課税10%（web/index.html の docTaxCat と同じ） */
+export function docTaxCat(doc: any, st?: any): string {
+  if (doc && TAX_RATE[doc.taxCat] != null) return String(doc.taxCat)
+  const c = st && doc ? arr(st, 'companies').find((x: any) => String(x.id) === String(doc.companyId)) : null
+  if (c && TAX_RATE[c.taxCat] != null) return String(c.taxCat)
+  return '課税10%'
+}
 /** 税抜合計（予実はこちら） */
-export function docNet(doc: any): number {
+export function docNet(doc: any, st?: any): number {
   if (!doc) return 0
   if (Array.isArray(doc.items) && doc.items.length) return itemsSubtotal(doc.items)
   // Money Forward 等から取り込んだ請求は 税抜（subtotal）を持っている → それを使う（web/index.html と同じ式）
   if (doc.subtotal != null && doc.subtotal !== '') return num(doc.subtotal)
-  return Math.round(num(doc.total) / 1.1)
+  /* ★ 2026-09-16: 以前は いつも ÷1.1。非課税・対象外の請求まで税を抜いていた → 税区分で割る */
+  return Math.round(num(doc.total) / (1 + (TAX_RATE[docTaxCat(doc, st)] || 0)))
 }
 export const ymOfDoc = (d: any) => String((d && d.bookMonth) || '').slice(0, 7)
 
@@ -198,7 +206,7 @@ export function actualSeries(st: any, fy: number, kind: string): number[] {
       if (inv.status === '取消') return
       const ym = ymOfDoc(inv); if (idx[ym] == null) return
       ;(inv.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === 'revenue') addTo(ym, itemAmount(it)) })
-      if (!(inv.items || []).length) addTo(ym, docNet(inv))
+      if (!(inv.items || []).length) addTo(ym, docNet(inv, st))
     })
   } else {
     /* ★ 2026-09-16: 費用の実績は actuals（会計事務所の試算表からの手入力・税抜）だけ。
