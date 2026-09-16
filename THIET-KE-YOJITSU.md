@@ -10,10 +10,16 @@
 
 | # | Mục tiêu | Trang | Câu hỏi màn hình trả lời |
 |---|---|---|---|
-| 1 | 予実管理 | `yojitsu` `compare` | Tháng này so kế hoạch bao nhiêu %? So tháng trước / cùng kỳ năm ngoái / các năm? Cuối năm về đâu (着地見込)? |
-| 2 | 売掛金 | `invoices` `receipts` `aging` | Ai còn nợ mình? Quá hạn bao lâu? Tháng này thu được bao nhiêu? |
-| 3 | 買掛金 | `bills` `payouts` `cashflow` | Mình còn nợ ai? Tuần này phải trả bao nhiêu? Tiền có đủ không? |
-| 4 | OKR | `okr` | Mục tiêu quý đang ở đâu? Ai chịu trách nhiệm? Số liệu tự lấy từ 予実. |
+| 1 | 予実管理 | `yojitsu` `compare` `mikomi` | Tháng này so kế hoạch bao nhiêu %? Cuối năm về đâu (着地見込)? — **費用の実績 nhập tay từ 試算表, 売上 tự lấy từ 請求書** |
+| 2 | 売掛金 | `arbook` `receipts` `archeck` `dunning` | Ai còn nợ mình? Quá hạn bao lâu? Tháng này thu được bao nhiêu? |
+| 3 | 買掛金 | `apbook` `bills` `payouts` `cashflow` | Mình còn nợ ai? Tuần này phải trả bao nhiêu? Tiền có đủ không? |
+| 4 | 費用 | `expenses` `properties` | Mỗi tháng **dự kiến** chi bao nhiêu, cho科目/対象 nào? (không phải số thực tế) |
+| 5 | OKR | `okr` | Mục tiêu quý đang ở đâu? Ai chịu trách nhiệm? Số liệu tự lấy từ 予実. |
+
+> **Ba điều chủ dự án chốt 2026-09-16**: ① 予実 kiểm soát được — 実績 chi phí nhập tay từ 試算表 của 会計事務所,
+> 売上 vẫn tự lấy từ 請求書 (Money Forward). ② 売掛金 / 買掛金 = công nợ thật. ③ 費用 = bảng CHI PHÍ DỰ KIẾN
+> theo cây 勘定科目 大›中›小›対象. Ngoài ra: màn hình không viết lời giải thích (dồn vào 入力ガイド),
+> bảng nhập và màn chi tiết phải nhìn một màn là thấy.
 
 ---
 
@@ -128,16 +134,18 @@ Công ty không có quy tắc nào → không bị bỏ sót: màn hình 請求�
 | `payments` | 入金 | `date · companyId · amount · fee · allocations[{invoiceId, amount}]` |
 | `bills` | 支払請求 (買掛) | `no · companyId · bookMonth · recvDate · dueDate · items[] · total · status` |
 | `payouts` | 支払実行 | `date · companyId · amount · allocations[{billId, amount}]` |
-| `expenses` | 経費 (trả ngay, không qua 買掛) | `date · bookMonth · accountCode · vendor · amount · taxCat · deptCode · **costItemId**` |
-| `costItems` | 費目マスタ — **hàng** của 月次費用表 | `name · accountCode · kind(fixed/variable) · monthly(月額予定・税込) · taxCat · vendor · method · startYm · endYm` |
+| `costPlans` | **費用表の1マス** (予定・税込) | `costItemId · ym('YYYY-MM') · amount(税込・予定)` |
+| `expenses` | 経費 — **di sản**, không dùng nữa từ 2026-09-16 | `date · bookMonth · accountCode · vendor · amount · taxCat · deptCode · costItemId` |
+| `costItems` | 対象 (費目マスタ) — **hàng** của 費用表 | `name · accountCode · kind(fixed/variable) · companyId(支払先) · payMode(即払い/買掛) · propertyId · monthly(月額・税込) · taxCat · startYm · endYm`（`vendor` · `method` giữ dữ liệu, đã bỏ khỏi form） |
 
-**費用管理 = 月次費用表 (quyết định 2026-09-05).** Không nhập từng phiếu. Màn hình là **1 bảng**: 費目 (hàng) × 12 tháng (cột).
-Mỗi ô = **1 dòng `expenses`** khoá bằng `costItemId + bookMonth`, nhập **税込**. Vì ô vẫn là `expenses` nên 予実
-không phải đổi gì (`actualSeries` vẫn quy về 税抜 bằng `taxCat`). Ô = 0/để trống → xoá luôn dòng đó.
-`monthly` là mốc so sánh: lệch ≥10% thì ô đổi màu → nhìn ra ngay khoản nào bị tăng giá.
-`endYm` = tháng cuối còn hiệu lực (hợp đồng đã huỷ) → các tháng sau không nhập được nữa.
-Chi phí nhập lẻ trước đây (`costItemId` rỗng) **không bị giấu**: gom thành hàng 「個別入力」, bấm vào xem chi tiết.
-Số chính thức để quyết toán vẫn là 試算表 của 会計事務所 — bảng này để **theo dõi**, không thay kế toán.
+**費用 = 費用表 1 tấm (làm lại 2026-09-16).** Bảng = cây 勘定科目 `大 › 中 › 小 › 対象` (hàng) × 12 tháng của năm tài chính (cột).
+Mỗi ô = **1 dòng `costPlans`** khoá bằng `costItemId + ym`, nhập **税込** và là **số dự kiến, không phải thực tế**.
+Ô = 0/để trống → xoá luôn dòng đó. Ngoài `startYm`〜`endYm` → `—`, không nhập được.
+Hàng 科目 là tổng của các con, đóng/mở bằng ▼ (nhớ trong `localStorage: bl_yj_cost_open`, mặc định mở hết).
+Nút **「→12」** (hàng 定期) và **「定期をすべて→12」** (toolbar): từ tháng hiện tại (nếu `CUR_FY` là năm hiện tại, không thì tháng đầu)
+tới hết năm, **chỉ điền các ô trống** bằng số của tháng gần nhất bên trái (không có thì `monthly`) — ô đã có số không đổi.
+Đối tượng 買掛 dùng chính ô đó để sinh 支払請求 (`apPlanFor`: ô của tháng → không có thì `monthly`).
+**Số thực tế (実績) không nằm ở đây**: xem §4.3 — nhập tay từ 試算表 của 会計事務所.
 
 **Luật kế toán (viết ra để không ai làm sai về sau):**
 
@@ -178,18 +186,24 @@ Hoá đơn (tạo · 明細 · thuế · PDF · gửi · trạng thái) do **Mon
 |---|---|---|
 | `budgets` | `fy · month · accountCode · deptCode` | 予算 — nhập cả năm 1 lần |
 | `forecasts` | `fy · month · accountCode · deptCode` | 見込 — cập nhật hàng tháng |
-| `actualAdjust` | `fy · month · accountCode · deptCode` | 実績調整 — số kế toán ngoài hệ / sửa tay |
+| `actuals` | `fy · mIndex · accountCode` | **実績（費用）** — nhập tay từ 試算表 của 会計事務所 (税抜), từ 2026-09-16 |
+| `actualAdjust` | `fy · month · accountCode · deptCode` | 実績調整 — **di sản**: không nhập nữa, nhưng vẫn cộng vào 実績 (không làm đổi số cũ) |
 
-**実績 KHÔNG lưu.** Luôn tính lại:
+**実績 (quyết định 2026-09-16 của chủ dự án):**
 
 ```
-actual(month, account) = Σ invoices.items(bookMonth, account)      ← doanh thu
-                       + Σ bills.items(bookMonth, account)         ← chi phí có công nợ
-                       + Σ expenses(bookMonth, account)            ← chi phí trả ngay
-                       + actualAdjust(month, account)              ← điều chỉnh tay
+売上の実績   = Σ invoices.items(bookMonth, 収益科目)  (invRevenue — KHÔNG lưu, tính lại mỗi lần)
+              + actualAdjust(revenue)                 ← di sản
+費用の実績   = Σ actuals(fy, mIndex, accountCode)     ← nhập tay từ 試算表 (税抜)
+              + actualAdjust(cogs/sga/nonop)          ← di sản
 ```
 
-Nếu có `actualAdjust` mà cũng có chứng từ → hiện **cả hai** kèm badge `調整あり`, không giấu (công thức §0.10).
+- `bills` (支払請求) và `costPlans` (費用表) **không** vào 実績 nữa: chúng là *lời hứa/dự kiến*, không phải số kế toán.
+  Nhờ vậy 予実 luôn khớp 試算表, không lệch vì quên tạo chứng từ.
+- Nhập ở 予実 › 入力 › 実績: hàng 収益 để **readonly** (lấy từ hoá đơn), hàng 売上原価/販管費/営業外 là ô nhập (税抜).
+- Xem 税込: 実績 費用 quy đổi bằng thuế suất của 勘定科目 (`grossRateOf` — lấy `taxCat` của `costItems` cùng科目, không có thì 10%, 営業外 0%).
+- `lastActualIdx` = tháng cuối có hoá đơn **hoặc** có `actuals`.
+- `backend/src/apiv1/finance.ts` là bản sao của đúng các công thức này (`test/apiv1.js` so từng con số).
 
 ### 4.4 OKR
 
@@ -229,7 +243,8 @@ autoSource: { type:'workers', metric:'active' }                 // 在籍者数
 ─ マスタ ─
   取引先管理        công ty (CRM + tay), 請求ルール
   特定技能者        mirror CRM (chỉ đọc) + số người theo tháng/công ty
-  費用管理          月次費用表 — 費目 × 12か月の1枚（定期費用の増減を見る）
+  費用表            勘定科目 大›中›小›対象 × 12か月の1枚（予定・税込。実績ではない）
+  物件（建物）      物件ごとの契約と12か月の予定
   勘定科目          cây tài khoản
   CRM連携           trạng thái đồng bộ, log, nút 今すぐ同期, nạp CSV
 ─ システム ─

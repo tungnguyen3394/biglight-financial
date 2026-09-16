@@ -81,7 +81,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://finance.biglight.jp/mcp
 2. **まとめて選ぶ** … 押すと下のチェックが一気に決まります。
    | 段 | 中身 |
    |---|---|
-   | 基本 | 合計の数字＋毎日の経理で使う表（取引先・請求ルール・請求・入金・支払請求・支払・経費・予算・勘定科目） |
+   | 基本 | 合計の数字＋毎日の経理で使う表（取引先・請求ルール・請求・入金・支払請求・支払・費用表のマス・対象・予算・費用の実績・勘定科目） |
    | 全画面 | 個人情報の表を除く すべての表 |
    | 全画面＋個人情報 | ★ 特定技能者・在籍期間も読める。管理者の判断で |
 3. 必要なら個別に足し引き（チェックは常に出ています）。
@@ -128,6 +128,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://finance.biglight.jp/mcp
 | 口 | 内容 |
 |---|---|
 | `/api/v1/collections` | 読める表の一覧（鍵の範囲つき） |
+
+> **2026-09-16 に増えた表**
+> - `cost_plans` … 費用表の1マス（`costItemId · ym · amount`）。金額は**税込の予定額**で、実績ではありません。
+> - `actuals` … 費用の**実績**（`fy · mIndex · accountCode · amount`・税抜）。会計事務所の試算表から手で入れた数字です。
+>
+> **「実績」の意味（重要）**: 売上の実績は請求書から毎回計算します。費用の実績は `actuals` **だけ**です。
+> 支払請求（`bills`）・費用表（`cost_plans`）・旧「経費」（`expenses`）は予実の費用に入りません。
+> `expenses` と `actual_adjust` は過去のデータを読むためだけに残しています。
 | `/api/v1/records/{表}` | 表の中身。`limit` `cursor` `updated_since`（前回からの差分だけ取れます） |
 | `/api/v1/records/{表}/{id}` | 1行 |
 | `/api/v1/reports/receivables` | 未回収＋債権年齢表 |

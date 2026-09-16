@@ -38,7 +38,7 @@ export function plReport(st: any, fy: number) {
       vs_last_year_ytd: rate(F.sumRange(act.revenue, 0, i), F.sumRange(prev.revenue, 0, i)),
     },
     revenue_ytd: rev.ytd_actual,
-    note: '実績は保存せず、請求書・支払請求・経費から毎回計算しています。計上月（bookMonth）基準・発生主義。',
+    note: '売上の実績は請求書から毎回計算、費用の実績は会計事務所の試算表から手入力した数字（actuals）です。計上月（bookMonth）基準・発生主義。',
   }
 }
 

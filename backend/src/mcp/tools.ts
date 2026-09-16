@@ -94,7 +94,7 @@ export const TOOLS: ToolDef[] = [
   /* ══════ 業務ツール ══════ */
   {
     name: 'get_yojitsu_summary', title: '予実（損益）のまとめ', scope: 'yojitsu.read',
-    description: '会計年度（8月〜翌7月）の損益を、実績・予算・前年・着地見込で返す。売上高／売上原価／売上総利益／販管費／営業利益／営業外収支／経常利益の7行と、粗利率・営業利益率・予算達成率・前年比。金額は税抜、計上月（発生主義）基準。',
+    description: '会計年度（8月〜翌7月）の損益を、実績・予算・前年・着地見込で返す。売上高／売上原価／売上総利益／販管費／営業利益／営業外収支／経常利益の7行と、粗利率・営業利益率・予算達成率・前年比。金額は税抜、計上月（発生主義）基準。売上の実績は請求書から、費用の実績は会計事務所の試算表から手入力した数字（費用表は予定なので実績には入らない）。',
     inputSchema: { type: 'object', properties: { fiscal_year: { type: 'integer', description: '年度の西暦。2025 = 2025年8月〜2026年7月。省略すると今の年度' } }, additionalProperties: false },
     async run(ctx, a) { const st = await loadStateCached(ctx.pool); return R.plReport(st, fyArg(st, a)) },
   },

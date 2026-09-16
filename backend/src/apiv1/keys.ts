@@ -30,7 +30,7 @@ export const hasScope = (scopes: string[] | null, need: string) =>
 
 /** 画面で選ぶ「段」。細かいチェックは常に出すが、ここを押せば一気に決まる（公式 §17.3） */
 export const SCOPE_LEVELS = [
-  { id: 'basic', label: '基本', note: '毎日の経理で使う表（取引先・請求・入金・支払・経費・予算・科目）＋合計の数字',
+  { id: 'basic', label: '基本', note: '毎日の経理で使う表（取引先・請求・入金・支払・費用表・費用の実績・予算・科目）＋合計の数字',
     scopes: SCOPES.filter(s => s.basic).map(s => s.id) },
   { id: 'all', label: '全画面', note: '個人情報の表（特定技能者・在籍期間）を除く すべての表',
     scopes: SCOPES.filter(s => !s.danger).map(s => s.id) },
