@@ -28,7 +28,7 @@ export default {
     },
     bell: {
       page: 'dashboard', run: ev(`toggleNotif()`), clip: ['#notif > .icon-btn', '#notifMenu'], clipPad: 16,
-      marks: { menu: '#notifMenu', items: '#notifMenu .nm-item >> nth=0' },
+      marks: { menu: '#notifMenu', items: '#notifMenu .nm-item >> nth=0', att: '#notifMenu .nm-item:has-text("証憑")' },
     },
     search: {
       page: 'dashboard',
@@ -92,9 +92,13 @@ export default {
       marks: { pop: '#arPop', cell: '.ar-tbl tbody tr >> nth=0 >> td.ar-c >> nth=3' },
     },
     ar_ledger: {
-      page: 'arbook', run: async p => { await p.locator('.ar-tbl tbody tr >> nth=0 >> .ar-name').click(); await p.waitForTimeout(400) },
+      page: 'arbook', run: async p => {
+        await p.locator('.ar-tbl tbody tr:has-text("東和フーズ") .ar-name').click(); await p.waitForTimeout(500)
+        await p.evaluate(() => { LED_OPEN.open = { '2026-06': true, '2026-07': true }; ledRedraw(); ledScrollEnd() }); await p.waitForTimeout(500)
+      },
       clip: '#modal',
-      marks: { grade: '#modal :text("評価")', table: '#modal table >> nth=0', pay: '#modal button:has-text("入金を記録")' },
+      marks: { grade: '#modal :text("評価")', col: '#ledTbl th:has-text("証憑")', row: '#ledTbl tr.ledrow:has-text("2026/06")',
+        det: '#ledTbl tr.leddet >> nth=0', miss: '#ledTbl tr.ledrow .attbtn.miss >> nth=0', pay: '#modal button:has-text("入金を記録")' },
     },
     payment: {
       page: 'arbook',
@@ -107,7 +111,8 @@ export default {
         await p.locator('#modal label:has-text("入金額") + input, #modal label:has-text("入金額") ~ input').first().fill('150000').catch(() => {})
       },
       clip: '#modal',
-      marks: { date: '#modal input[type="date"]', co: '#modal select >> nth=0', amt: '#modal label:has-text("入金額") + *', fee: '#modal label:has-text("振込手数料") + *', save: '#modal button:has-text("保存")' },
+      marks: { date: '#modal input[type="date"]', co: '#modal select >> nth=0', amt: '#modal label:has-text("入金額") + *', fee: '#modal label:has-text("振込手数料") + *',
+        files: '#modal .attpend', save: '#modal button:has-text("保存")' },
     },
     mf: {
       page: 'arbook', run: ev(`openMfImport()`), clip: '#modal',
@@ -142,7 +147,7 @@ export default {
     genbills: { page: 'bills', run: ev(`openGenBills()`), clip: '#modal', marks: { month: '#modal select, #modal input >> nth=0', go: '#modal button:has-text("この内容で作成")' } },
     bill_form: {
       page: 'bills', run: ev(`openForm('bills')`), clip: '#modal',
-      marks: { co: '#modal label:has-text("支払先") >> ..', book: '#modal label:has-text("計上月") >> ..', due: '#modal label:has-text("支払期日") >> ..', lines: '#modal a:has-text("行を追加")' },
+      marks: { co: '#modal label:has-text("支払先") >> ..', book: '#modal label:has-text("計上月") >> ..', due: '#modal label:has-text("支払期日") >> ..', lines: '#modal a:has-text("行を追加")', files: '#modal .attpend' },
     },
     payout: {
       page: 'apbook',
@@ -158,9 +163,48 @@ export default {
         await p.waitForTimeout(300)
       },
       clip: '#modal',
-      marks: { amt: '#modal label:has-text("支払額") ~ input, #modal label:has-text("支払額") + input', auto: '#modal :text("期日の古い順に自動で割り当て")', co: '#modal select >> nth=0', alloc: '#modal table', save: '#modal button:has-text("保存")' },
+      marks: { inv: '#modal table .attbtn >> nth=0', files: '#modal .attpend', amt: '#modal label:has-text("支払額") ~ input, #modal label:has-text("支払額") + input', auto: '#modal :text("期日の古い順に自動で割り当て")', co: '#modal select >> nth=0', alloc: '#modal table', save: '#modal button:has-text("保存")' },
     },
     cashflow: { page: 'cashflow', marks: { seg: '#main .seg', start: '#main button:has-text("開始残高を設定")' } },
+
+    /* ── 証憑（ファイル）── */
+    arbill_form: {
+      page: 'arbook',
+      run: async p => {
+        await p.evaluate(() => openArBillForm()); await p.waitForTimeout(300)
+        const sel = p.locator('#abCo'); await sel.selectOption(await sel.evaluate(s => [...s.options].find(o => o.text.includes('あおば')).value))
+        await p.fill('#abTotal', '330000'); await p.dispatchEvent('#abTotal', 'input')
+        await p.selectOption('#abTax', '非課税'); await p.dispatchEvent('#abTax', 'change')
+      },
+      clip: '#modal',
+      marks: { tax: '#abTax', total: '#abTotal', net: '#abNet', files: '#modal .attpend' },
+    },
+    att_window: {
+      page: 'arbook',
+      run: async p => {
+        await p.evaluate(() => { const c = DB.companies.find(x => x.name.includes('東和フーズ')); const f = arFacts(c.id);
+          const b = f.bills.slice().sort((a, b) => a.ym.localeCompare(b.ym)).reverse().find(x => x.ym < '2026-07'); attOpen('invoices', b.doc.id) })
+        await p.waitForTimeout(1800)
+      },
+      clip: '#modal2',
+      marks: { head: '#modal2 h3', drop: '#attDrop', type: '#attDocType', list: '#attList .attrow >> nth=0', rowtype: '#attList .attrow select >> nth=0', prev: '#attPrev' },
+    },
+    att_missing: {
+      page: 'bills', run: ev(`ATT_MISS_ONLY.bills=true; renderPage('bills')`),
+      marks: { toggle: '.toolbar-left label.ar-chk', miss: '#main .attbtn.miss >> nth=0' },
+    },
+    bill_gate: {
+      page: 'bills',
+      run: async p => {
+        const id = await p.evaluate(() => { const c = DB.companies.find(x => x.name.includes('クリーンサポート'));
+          apCreateBills('2026-10', [{ company: c, items: [{ accountCode: '6900', name: '寮 共用部清掃', amount: 30000, taxCat: '課税10%' }] }]);
+          return DB.bills.filter(b => b.status === '作成中').map(b => b.id).pop() })
+        await p.evaluate(() => renderPage('bills')); await p.waitForTimeout(300)
+        await p.evaluate(id => confirmBill(id), id); await p.waitForTimeout(900)
+      },
+      clip: '#modal2',
+      marks: { head: '#modal2 h3', drop: '#attDrop', btn: '#attConfirmBtn' },
+    },
 
     /* ── 6. 費用 ── */
     expenses: {

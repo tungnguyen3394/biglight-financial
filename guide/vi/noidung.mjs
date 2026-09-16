@@ -77,6 +77,8 @@ export default {
               ['`年度` · `四半期` · `上期` `下期` · `通期`', 'Năm tài chính · quý · nửa đầu, nửa sau năm · cả năm', 'Năm tài chính: **1/8 → 31/7 năm sau**'],
               ['`累計`', 'Luỹ kế', 'Cộng dồn từ đầu năm tài chính'],
               ['`督促`', 'Nhắc nợ', ''],
+              ['`証憑` · `証憑なし`', 'File chứng từ gốc · chưa có file', 'Hoá đơn PDF, sao kê chuyển khoản, biên lai, hợp đồng'],
+              ['`税区分`', 'Loại thuế', '`課税10%` · `軽減8%` · `非課税` (miễn thuế) · `対象外` (không thuộc diện thuế)'],
             ] },
           ],
         },
@@ -179,6 +181,7 @@ export default {
             { shot: 'bell', modal: true, maxH: 120, label: 'Chuông', steps: [
               { mark: 'menu', text: 'Bấm **chuông** để mở danh sách `やること` (việc cần làm).' },
               { mark: 'items', text: 'Mỗi dòng là một loại việc: hoá đơn quá hạn, nhắc nợ hôm nay, vượt hạn mức, khoản phải trả quá hạn, hợp đồng thuê sắp hết… **Bấm vào để mở đúng màn hình.**' },
+              { mark: 'att', text: '`証憑（ファイル）が無い伝票`: chứng từ 3 tháng gần nhất **chưa có file**. Bấm để mở danh sách đã lọc sẵn.' },
             ] },
             { shot: 'search', modal: true, maxH: 70, label: 'Tìm kiếm', steps: [
               { mark: 'box', text: 'Gõ một phần tên (VD `さくら`) vào ô tìm kiếm trên cùng.' },
@@ -376,19 +379,28 @@ export default {
           tip: 'Lựa chọn được **nhớ trên trình duyệt của bạn** và dùng chung cho cả 売掛金 và 買掛金. File CSV (`ツール` › `CSV出力`) luôn xuất **theo tháng**, kèm cột 請求額 và 入金額 từng tháng.',
         },
         {
-          title: 'Xem chi tiết: một ô và sổ chi tiết (売掛元帳)',
+          title: 'Xem chi tiết một ô',
           screens: [
-            { shot: 'ar_pop', modal: true, maxH: 58, label: 'Bấm một ô', steps: [
-              { mark: 'cell', text: 'Bấm vào một ô số dư.' },
-              { mark: 'pop', text: 'Hộp nhỏ: số dư đầu tháng, hoá đơn và tiền vào **của tháng đó**, nguồn (`MF` / `手入力`).' },
+            { shot: 'ar_pop', modal: true, maxH: 80, steps: [
+              { mark: 'cell', text: 'Bấm vào một ô số dư trong bảng 売掛金.' },
+              { mark: 'pop', text: 'Hộp nhỏ: số dư đầu tháng, hoá đơn (có **loại thuế**) và tiền vào **của tháng đó**, nguồn (`MF` / `手入力`). Bấm 📎 ở mỗi dòng để xem file.' },
             ] },
-            { shot: 'ar_ledger', modal: true, maxH: 104, label: 'Bấm tên công ty', steps: [
+          ],
+        },
+        {
+          title: 'Sổ chi tiết (売掛元帳) và file chứng từ',
+          lead: 'Bấm **tên công ty** trong bảng 売掛金. Sổ chi tiết của 買掛金 (`買掛元帳`) dùng y hệt.',
+          screens: [
+            { shot: 'ar_ledger', modal: true, maxH: 118, steps: [
               { mark: 'grade', text: '**Đánh giá** cách trả tiền: A = luôn đúng hạn … D = hay trễ.' },
-              { mark: 'table', text: 'Từng tháng: `前月残高` + `請求額` − `入金額` = `月末残高`.' },
+              { mark: 'col', text: 'Cột `証憑`: số file của tháng. Chữ đỏ `証憑なし` = có chứng từ **chưa có file**.', badge: 'right' },
+              { mark: 'row', text: '**Bấm vào dòng tháng** (▶) để mở danh sách từng chứng từ của tháng đó.' },
+              { mark: 'det', text: 'Mỗi dòng: `請求` (hoá đơn) hoặc `入金` (tiền vào), ngày, số, số tiền. Bấm 📎 để **xem file ngay** hoặc đính thêm.' },
+              { mark: 'miss', text: 'Tháng có chứng từ thiếu file → bấm dòng tháng rồi bấm `証憑なし` để đính.', badge: 'right' },
               { mark: 'pay', text: 'Ghi tiền vào ngay từ đây.' },
             ] },
           ],
-          tip: 'In sổ chi tiết ra là có ngay **bảng đối chiếu công nợ** để gửi khách.',
+          tip: 'Công thức mỗi tháng: `前月残高` + `請求額（税込）` − `入金額` = `月末残高`. In sổ chi tiết ra là có ngay **bảng đối chiếu công nợ** để gửi khách.',
         },
         {
           title: 'Lấy hoá đơn từ Money Forward',
@@ -400,20 +412,38 @@ export default {
               { mark: 'csv', text: '**Cách 2 — CSV**: xuất danh sách hoá đơn từ MF rồi kéo file vào đây.' },
             ] },
             { shot: 'arbill', maxH: 70, label: 'Hoá đơn không có trong MF', crop: 520, steps: [
-              { mark: 'item', text: '`ツール` › `＋ 請求額を手入力（MF にない分）`: gõ tay số tiền cho hoá đơn **không làm ở MF**. Nhập cả `うち税抜` (phần chưa thuế) — đây là số vào doanh thu 予実.' },
+              { mark: 'item', text: '`ツール` › `＋ 請求額を手入力（MF にない分）`: gõ tay số tiền cho hoá đơn **không làm ở MF** (trang sau).' },
             ] },
           ],
-          note: 'Hoá đơn đã có trong MF thì **luôn lấy từ MF**, đừng gõ tay — sẽ bị tính hai lần.',
+          blocks: [
+            { p: 'Hoá đơn lấy từ MF được **tự gắn loại thuế**: nếu 税込 = 税抜 thì là `対象外` (hoặc `非課税` theo 取引先), tỉ lệ 10% → `課税10%`, 8% → `軽減8%`, lẫn nhiều loại → `混在`.' },
+          ],
+          note: 'Hoá đơn đã có trong MF thì **luôn lấy từ MF**, đừng gõ tay — sẽ bị tính hai lần. File PDF của hoá đơn MF **không tự lấy về** — đính tay bằng 📎.',
+        },
+        {
+          title: 'Nhập tay hoá đơn và chọn loại thuế',
+          lead: 'Dùng cho hoá đơn **không làm ở Money Forward**. Có những khoản **không chịu thuế** — chọn đúng `税区分` để doanh thu 予実 không bị trừ thuế oan.',
+          screens: [{
+            shot: 'arbill_form', modal: true, maxH: 118,
+            steps: [
+              { mark: 'tax', text: '`税区分`: `課税10%` · `軽減8%` · `非課税` · `対象外（不課税）`. Mặc định theo 取引先.' },
+              { mark: 'total', text: '`請求額（税込）`: số tiền trên hoá đơn (đã gồm thuế nếu có).' },
+              { mark: 'net', text: '`うち税抜`: **tự tính** theo loại thuế — `非課税`/`対象外` thì bằng đúng số 税込. Hoá đơn lẫn nhiều loại thuế → gõ tay.' },
+              { mark: 'files', text: 'Kéo thả **file PDF hoá đơn** vào đây — file được gửi cùng lúc bấm `保存`.' },
+            ],
+          }],
+          note: 'Doanh thu 予実 lấy số `うち税抜`. Trước đây hệ thống luôn chia 1.1 — hoá đơn không chịu thuế cần chọn đúng `税区分`.',
         },
         {
           title: 'Ghi tiền vào (入金を記録)',
           screens: [{
-            shot: 'payment', modal: true, maxH: 70,
+            shot: 'payment', modal: true, maxH: 82,
             steps: [
               { mark: 'date', text: '`入金日`: ngày tiền vào tài khoản (theo sao kê).' },
               { mark: 'co', text: '`取引先`: công ty đã chuyển tiền. Bên dưới hiện **số dư hiện tại** của công ty đó để đối chiếu.' },
               { mark: 'amt', text: '`入金額`: số tiền **thực nhận** trên sao kê.' },
               { mark: 'fee', text: '`振込手数料`: nếu khách **trừ phí chuyển khoản** trước khi chuyển, ghi phí đó ở đây. Số dư sẽ giảm cả phần phí.' },
+              { mark: 'files', text: '**File chứng từ**: kéo thả sao kê / giấy báo có, chọn loại (`振込明細`…). File được gửi sau khi lưu.' },
               { mark: 'save', text: 'Bấm `保存`.' },
             ],
           }],
@@ -490,25 +520,28 @@ export default {
         {
           title: 'Đăng ký một hoá đơn phải trả',
           screens: [{
-            shot: 'bill_form', modal: true, maxH: 120,
+            shot: 'bill_form', modal: true, maxH: 128,
             steps: [
               { mark: 'co', text: '`支払先`: nhà cung cấp gửi hoá đơn.' },
               { mark: 'book', text: '`計上月`: tháng mà khoản chi **thuộc về** (không phải tháng trả tiền).' },
               { mark: 'due', text: '`支払期日`: hạn phải trả. Nếu `計上月` đã có sẵn khi chọn `支払先`, hạn tự điền theo 締日・サイト của nhà cung cấp — sửa được.' },
-              { mark: 'lines', text: '`＋ 行を追加`: thêm từng dòng — tài khoản, nội dung, số lượng, đơn giá, thuế.' },
+              { mark: 'lines', text: '`＋ 行を追加`: thêm từng dòng — tài khoản, nội dung, số lượng, đơn giá, **loại thuế**.' },
+              { mark: 'files', text: '**File hoá đơn** (`*確定に必要`): bắt buộc nếu muốn lưu ở trạng thái `確定`.' },
             ],
           }],
-          tip: 'Đặt `状態` là `確定` rồi `保存` nếu đã chắc chắn. Để `作成中` nếu còn phải kiểm tra.',
+          tip: 'Đặt `状態` là `確定` + kéo file hoá đơn vào → `保存`: hệ thống tự lưu `作成中` → gửi file → chuyển `確定`. Chưa có file thì để `作成中`.',
         },
         {
           title: 'Ghi tiền đã trả (支払を記録)',
           screens: [{
-            shot: 'payout', modal: true, maxH: 100,
+            shot: 'payout', modal: true, maxH: 118,
             steps: [
               { mark: 'co', text: '`支払先`: chọn nhà cung cấp. Danh sách hoá đơn chưa trả của họ hiện ra bên dưới.' },
+              { mark: 'inv', text: 'Cột `請求書`: bấm 📎 để **xem file hoá đơn trước khi trả**.' },
               { mark: 'amt', text: '`支払額`: số tiền đã chuyển.' },
               { mark: 'auto', text: '`期日の古い順に自動で割り当て`: tự gán tiền cho hoá đơn **hạn sớm nhất** trước.' },
               { mark: 'alloc', text: 'Hoặc tự gõ số tiền vào cột `消込額` của từng hoá đơn. Một lần chuyển có thể trả nhiều hoá đơn.' },
+              { mark: 'files', text: 'Kéo thả file sao kê chuyển khoản / biên lai (gửi sau khi lưu).' },
               { mark: 'save', text: 'Kiểm tra `未消込 0` rồi bấm `保存`.' },
             ],
           }],
@@ -526,6 +559,94 @@ export default {
             { p: 'Bảng tự tính: **tiền sẽ vào** (theo hạn của hoá đơn đã gửi khách) − **tiền sẽ ra** (theo hạn của 支払請求) → **số dư dự kiến** từng tuần / tháng. Không cần nhập gì thêm.' },
           ],
           tip: 'Nếu có tuần nào số dư dự kiến thấp, hãy xem sớm để kịp xoay tiền.',
+        },
+      ],
+    },
+
+    /* ================================================================== */
+    {
+      title: '証憑 — file chứng từ',
+      summary: 'Xem trước PDF · loại chứng từ · chứng từ thiếu file · 支払請求 phải có file mới 確定 · AI đọc file',
+      pages: [
+        {
+          title: 'Xem và đính file chứng từ',
+          lead: 'Bấm 📎 ở bất kỳ đâu (danh sách 入金 / 支払請求 / 支払実行, sổ chi tiết, hộp chi tiết một ô). File gắn vào **từng chứng từ**.',
+          screens: [{
+            shot: 'att_window', modal: true, maxH: 104,
+            steps: [
+              { mark: 'head', text: 'Dòng trên cùng cho biết file này thuộc **chứng từ nào**: loại, số, công ty, tháng, số tiền (税込).' },
+              { mark: 'drop', text: '**Kéo thả** file vào đây (hoặc bấm `選ぶ`). PDF, ảnh, Excel, Word — tối đa 10MB/file.' },
+              { mark: 'type', text: 'Chọn **loại chứng từ** trước khi thả: `請求書` · `領収書` · `振込明細` · `契約書` · `その他`.' },
+              { mark: 'list', text: 'Danh sách file. **Bấm vào một file** để xem bên phải.' },
+              { mark: 'rowtype', text: 'Chọn sai loại? Đổi ngay ở đây (có ghi lại lịch sử). `保存` tải về, `削除` xoá (theo quyền).' },
+              { mark: 'prev', text: '**Xem trước PDF / ảnh ngay trong hộp** — phóng to, in, tải về bằng thanh công cụ của PDF.', badge: 'right' },
+            ],
+          }],
+          tip: 'Đặt đúng loại chứng từ giúp người khác và **AI** tìm đúng file (VD: “hoá đơn của nhà cung cấp A tháng 7”).',
+        },
+        {
+          title: 'Chứng từ còn thiếu file (証憑なし)',
+          screens: [{
+            shot: 'att_missing', maxH: 104,
+            steps: [
+              { mark: 'toggle', text: 'Tích `証憑なしのみ` để chỉ xem chứng từ **chưa có file**. Số đỏ bên cạnh = số chứng từ thiếu. Có ở `入金` · `支払請求` · `支払実行`.' },
+              { mark: 'miss', text: 'Nhãn đỏ `証憑なし` ở cột 添付 — **bấm vào để đính file ngay**.' },
+            ],
+          }],
+          blocks: [
+            { h: 'Chứng từ nào cần file?' },
+            { head: ['Chứng từ', 'Cần file khi'], table: [
+              ['`支払請求` (hoá đơn phải trả)', 'đã `確定` (không tính `作成中` / `取消`)'],
+              ['`請求` (hoá đơn gửi khách)', 'đã xác nhận (không tính `作成中` / `取消`)'],
+              ['`入金` · `支払`', 'mọi khoản, trừ `取消`'],
+            ] },
+            { p: 'Chuông thông báo đếm chứng từ thiếu file của **3 tháng gần nhất**. Dữ liệu mẫu 【デモ】 không được đếm.' },
+          ],
+        },
+        {
+          title: '支払請求 phải có file hoá đơn mới 確定 được',
+          lead: 'Quy định từ 16/9/2026: hoá đơn phải trả **không có file hoá đơn thì không xác nhận được** — kể cả khi gửi thẳng lên máy chủ.',
+          screens: [{
+            shot: 'bill_gate', modal: true, maxH: 100,
+            steps: [
+              { mark: 'head', text: 'Bấm `確定` ở một 支払請求 chưa có file → hệ thống báo lỗi và **mở ngay hộp đính file** của khoản đó.' },
+              { mark: 'drop', text: 'Kéo thả file hoá đơn của nhà cung cấp vào.' },
+              { mark: 'btn', text: 'Khi đã có file, nút `この支払請求を確定する` sáng lên → bấm để xác nhận.' },
+            ],
+          }],
+          blocks: [
+            { h: 'Quy trình hằng tháng cho khoản định kỳ' },
+            { list: [
+              '`定期の支払を作成（月まとめ）` → các khoản được tạo ở trạng thái `作成中`.',
+              'Khi nhận hoá đơn của nhà cung cấp: bấm 📎 ở khoản đó → thả file → `この支払請求を確定する`.',
+              'Khoản đã `確定` **từ trước ngày 16/9/2026** không bị khoá lại, nhưng sẽ hiện `証憑なし` cho đến khi đính file.',
+            ] },
+          ],
+          note: 'Chỉ **支払請求** bắt buộc. 入金 / 支払 / 請求 thiếu file chỉ bị **nhắc** (nhãn đỏ, chuông), vẫn lưu bình thường.',
+        },
+        {
+          title: 'AI đọc file chứng từ như thế nào',
+          lead: 'AI (ChatGPT qua MCP) và hệ thống khác (API) **chỉ được đọc**. Không có cách nào để AI đính, xoá hay đổi file.',
+          blocks: [
+            { head: ['Công cụ của AI', 'Làm gì'], table: [
+              ['`list_attachments`', 'Liệt kê file của một chứng từ, kèm loại chứng từ, công ty, tháng, số tiền'],
+              ['`get_attachment`', 'Mở một file: PDF và ảnh được gửi cho AI đọc (tối đa 5MB). Excel / Word chỉ trả thông tin'],
+              ['`list_missing_attachments`', 'Tìm chứng từ **chưa có file** — theo tháng, theo công ty'],
+            ] },
+            { h: 'Quyền' },
+            { list: [
+              'AI chỉ thấy file của những màn hình mà **khoá API** được phép đọc (VD: khoá không có `bills.read` thì không thấy file hoá đơn phải trả).',
+              'Hỏi file ngoài quyền → AI nhận câu trả lời **“không có”** (không lộ là file có tồn tại).',
+              'Mỗi lần AI / hệ thống bên ngoài đọc file đều được ghi lại — xem ở `設定` › `API・AI連携` › `連携ログ`.',
+            ] },
+            { h: 'Để AI làm việc tốt' },
+            { list: [
+              'Chọn đúng **loại chứng từ** khi đính file.',
+              'Mỗi chứng từ **một file** hoá đơn tương ứng (không gộp nhiều hoá đơn vào một PDF).',
+              'Đặt tên file dễ hiểu, VD `請求書_丸山不動産_2026-07.pdf`.',
+            ] },
+          ],
+          tip: 'Ví dụ câu hỏi cho AI: “Liệt kê các 支払請求 tháng 7 chưa có file hoá đơn” · “Đọc hoá đơn của 支払請求 BIL-202607-001 và cho biết số tiền”.',
         },
       ],
     },
@@ -675,13 +796,14 @@ export default {
             { check: 'Mỗi ngày', items: [
               'Mở **chuông** — xem danh sách `やること`.',
               '`回収` › `督促（今日やること）` → liên hệ các công ty trong `今日やる`, bấm `記録` sau mỗi lần liên hệ.',
-              'Có tiền vào → `＋ 入金を記録`. Có chuyển tiền đi → `＋ 支払を記録`.',
+              'Có tiền vào → `＋ 入金を記録`. Có chuyển tiền đi → `＋ 支払を記録`. **Kéo luôn file sao kê vào form.**',
             ] },
             { check: 'Đầu mỗi tháng', items: [
               '`回収` › `Money Forward から取り込む` → lấy hoá đơn tháng trước.',
-              '`支払` › `支払請求` › `定期の支払を作成（月まとめ）` → kiểm tra → `確定`.',
+              '`支払` › `支払請求` › `定期の支払を作成（月まとめ）` → đính file hoá đơn (📎) → `確定`.',
               'Hoá đơn phải trả khác nhận được → `＋ 支払請求を登録`.',
               '`回収` › `入金チェック` → xem `不足` / `過入金` / `未入金`.',
+              'Tích `証憑なしのみ` ở `入金` / `支払請求` / `支払実行` → đính file còn thiếu.',
             ] },
             { check: 'Khi nhận được 試算表 của văn phòng kế toán', items: [
               '`予実管理` › `入力` › `実績` → gõ chi phí tháng đó (chưa thuế).',
@@ -710,6 +832,10 @@ export default {
                 '`請求額` là **toàn bộ hoá đơn, đã gồm thuế**. Doanh thu 予実 chỉ tính **phần doanh thu, chưa thuế**. Hai số khác nhau là bình thường.'],
               ['Đổi sang năm cũ thì các ô số trên cùng của 売掛金 đổi nhãn?',
                 'Khi xem năm cũ, các ô và cột bên phải lấy **cuối năm đó** (VD `7月末残高`) để cả màn hình cùng một mốc thời gian. Xem năm hiện tại thì là **hôm nay** (`現在残高`).'],
+              ['Bấm `確定` 支払請求 thì bị báo lỗi?',
+                'Khoản đó **chưa có file hoá đơn**. Hệ thống mở sẵn hộp đính file — thả file vào rồi bấm `この支払請求を確定する`.'],
+              ['Hoá đơn không chịu thuế thì nhập thế nào?',
+                'Ở `請求額を手入力` chọn `税区分` = `非課税` hoặc `対象外` → 税抜 = 税込. Nên đặt luôn `税区分` của 取引先 để lần sau tự chọn.'],
               ['Không thấy một màn hình hoặc một nút?',
                 'Do **quyền** của tài khoản. Hỏi quản trị viên (`設定` › `ユーザー`).'],
               ['Màn hình hiển thị cũ, hoặc số không cập nhật?',

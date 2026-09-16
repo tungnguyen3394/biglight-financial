@@ -36,7 +36,7 @@ const RESET = `(() => {
   document.getElementById('notif')?.classList.remove('open');
   document.getElementById('acctMenu')?.classList.remove('open');
   const q = document.getElementById('quickSearch'); if (q) { q.value = ''; globalSearch(''); }
-  try { BOOK_VIEW = { per: 'month', cum: false }; YJ_TAB = 'pl'; YJ_VIEW = 'compare'; } catch (e) {}
+  try { BOOK_VIEW = { per: 'month', cum: false }; YJ_TAB = 'pl'; YJ_VIEW = 'compare'; ATT_MISS_ONLY = {}; LED_OPEN = null; } catch (e) {}
   try { setFY(${C.fy ?? 'CUR_FY'}); document.getElementById('fyPick').value = String(CUR_FY); } catch (e) {}
   window.scrollTo(0, 0); document.querySelectorAll('.table-wrap').forEach(t => t.scrollLeft = 0);
 })()`
