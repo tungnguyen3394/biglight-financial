@@ -541,8 +541,11 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .cellin:focus{border-color:var(--primary); background:var(--input-bg); box-shadow:0 0 0 2px var(--primary-soft); outline:none;}
   .cellin.dirty{background:var(--warning-soft);}
   /* 直せないマス（収益の実績＝請求書から自動）。灰色にして「ここは触らない」と分かるように */
-  .cellin.ro{background:var(--surface-2); color:var(--muted); cursor:default; border-color:var(--border);}
-  .cellin.ro:hover{background:var(--surface-2); border-color:var(--border);}
+  .cellin.ro{background:transparent; color:var(--muted); cursor:default; border-color:transparent;}
+  .cellin.ro:hover{background:transparent; border-color:transparent;}
+  /* 入力表（予実の入力・費用表）のマスは、触れると分かるように薄い枠を常に出す。 */
+  .cellin.ed{border-color:var(--border); background:var(--input-bg);}
+  .cellin.ed:hover{border-color:var(--border-strong);}
   /* 費用表: 勘定科目の木（大›中›小）と 対象の行 */
   .ctw{display:inline-block; width:14px; color:var(--muted); cursor:pointer;}
   tr.cgrp>td{background:var(--surface-2);}
@@ -2676,7 +2679,7 @@ function yjInputTable(fy){
         const cells = FY_MONTH_LABELS.map((_,mi)=>{
           if(ro) return `<td class="r"><input class="cellin ro" value="${auto[mi]?moneyPlain(auto[mi]):''}" readonly tabindex="-1"></td>`;
           const v = planCell(which, fy, mi, a.code);
-          return `<td class="r"><input class="cellin" value="${v?moneyPlain(v):''}"
+          return `<td class="r"><input class="cellin ed" value="${v?moneyPlain(v):''}"
             oninput="onPlanInput(this,'${which}',${mi},'${attr(a.code)}')" placeholder="0"></td>`;
         }).join('');
         const tot = ro? auto.reduce((t,v)=>t+v,0) : FY_MONTH_LABELS.reduce((t,_,mi)=>t+planCell(which,fy,mi,a.code),0);
@@ -2685,7 +2688,7 @@ function yjInputTable(fy){
   }).join('');
   /* 数字が切れないだけの幅を確保する（足りないと 5,750,000 が「5,75」に見えてしまう） */
   return seg+`<div class="table-wrap"><table class="stick1"><thead><tr><th style="min-width:150px;">勘定科目</th>
-    ${FY_MONTH_LABELS.map(m=>`<th class="r" style="min-width:86px;">${m}</th>`).join('')}<th class="r" style="min-width:100px;">年間</th></tr></thead>
+    ${FY_MONTH_LABELS.map(m=>`<th class="r" style="min-width:104px;">${m}</th>`).join('')}<th class="r" style="min-width:100px;">年間</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
 function yjSpread(which){
@@ -6901,7 +6904,7 @@ function viewExpenses(){
     const cells = r.cells.map((v,i)=>{
       if(v==null) return `<td class="r"><span class="zero">—</span></td>`;
       if(!canE) return mcell(v,i);
-      return `<td class="r ${i===curIdx?'curcol':''}"><input class="cellin" value="${v?moneyPlain(v):''}"
+      return `<td class="r ${i===curIdx?'curcol':''}"><input class="cellin ed" value="${v?moneyPlain(v):''}"
         inputmode="numeric" oninput="onCostInput(this,'${attr(r.it.id)}',${i})"></td>`;
     }).join('');
     return `<tr>
@@ -8118,7 +8121,7 @@ function guideDiagram(){
   const lbl=(x,y,t)=>`<text x="${x}" y="${y}" font-size="10.5" fill="var(--muted)">${t}</text>`;
   const pth=d=>`<path d="${d}" stroke="var(--muted)" stroke-width="1.3" fill="none" marker-end="url(#gdar)"/>`;
   return `<div style="overflow-x:auto;margin-bottom:10px;">
-  <svg viewBox="0 0 860 320" width="580" style="max-width:100%;height:auto;">
+  <svg viewBox="0 0 860 320" width="600" style="width:100%;max-width:600px;height:auto;">
     <defs><marker id="gdar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
     <rect x="6" y="26" width="716" height="78" rx="10" fill="rgba(59,130,246,.08)"/>
