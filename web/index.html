@@ -242,6 +242,13 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .kpi .num{font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em;}
   .kpi .sub{font-size:11px; color:var(--muted); margin-top:2px;}
   .kpi.clickable{cursor:pointer;} .kpi.clickable:hover{border-color:var(--primary);}
+  /* モーダルの中は「1画面で見える」ことを優先して詰める（2026-09-16） */
+  .modal .kpi{padding:8px 11px;} .modal .kpi .num{font-size:18px;}
+  .modal .table-wrap th,.modal .table-wrap td{padding:6px 9px;}
+  .modal .form-section{margin:8px 0 2px; padding:5px 10px;}
+  .modal .modal-actions{margin-top:10px; padding-top:9px;}
+  .gtbl th,.gtbl td{padding:3px 8px !important; font-size:12px; line-height:1.4;}
+  .modal .sectabs{margin-top:8px !important;}
   .dash-section{border-radius:14px; margin-bottom:16px; overflow:hidden; border:1px solid var(--border); background:var(--card); box-shadow:var(--shadow-sm);}
   .dash-head{padding:11px 16px; font-size:14px; font-weight:650; color:#fff; display:flex; align-items:center; gap:8px;}
   .dash-head .cnt{margin-left:auto; background:rgba(255,255,255,.25); padding:2px 11px; border-radius:13px; font-size:13px; font-weight:700;}
@@ -529,17 +536,21 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
 
   /* ===== Ô nhập số tiền trong bảng (予実・予算入力) ===== */
   .cellin{width:100%; border:1px solid transparent; background:transparent; color:var(--text); text-align:right;
-    font-size:12.5px; font-variant-numeric:tabular-nums; padding:4px 6px; border-radius:5px; font-family:inherit;}
+    font-size:12.5px; font-variant-numeric:tabular-nums; padding:4px 3px; border-radius:5px; font-family:inherit;}
   .cellin:hover{border-color:var(--border-strong); background:var(--input-bg);}
   .cellin:focus{border-color:var(--primary); background:var(--input-bg); box-shadow:0 0 0 2px var(--primary-soft); outline:none;}
   .cellin.dirty{background:var(--warning-soft);}
-  .cellin.ro{background:var(--surface-2); color:var(--muted); cursor:default;}
+  /* 直せないマス（収益の実績＝請求書から自動）。灰色にして「ここは触らない」と分かるように */
+  .cellin.ro{background:var(--surface-2); color:var(--muted); cursor:default; border-color:var(--border);}
+  .cellin.ro:hover{background:var(--surface-2); border-color:var(--border);}
   /* 費用表: 勘定科目の木（大›中›小）と 対象の行 */
   .ctw{display:inline-block; width:14px; color:var(--muted); cursor:pointer;}
   tr.cgrp>td{background:var(--surface-2);}
   tr.cgrp.d0>td{font-weight:700;}
   tr.cgrp.d1>td{font-weight:600;}
   tr.cgrp.d2>td{font-weight:500;}
+  /* マスの数字が切れないように、金額の列だけ詰める（1,265,000 が「1,265,00」に見えてしまうため） */
+  .cost-table td.r,.cost-table th.r{padding-left:5px; padding-right:5px;}
   .cellin.over{background:var(--danger-soft); color:var(--danger-hover); font-weight:700;
     box-shadow:inset 3px 0 0 var(--danger);}
   .cellin.under{background:var(--success-soft); color:var(--success); box-shadow:inset 3px 0 0 var(--success);}
@@ -2672,8 +2683,9 @@ function yjInputTable(fy){
         return `<tr><td>${esc(a.code)} ${esc(a.label)}</td>${cells}<td class="r num"><b>${moneyPlain(tot)}</b></td></tr>`;
       }).join('');
   }).join('');
-  return seg+`<div class="table-wrap"><table class="stick1"><thead><tr><th style="min-width:160px;">勘定科目</th>
-    ${FY_MONTH_LABELS.map(m=>`<th class="r">${m}</th>`).join('')}<th class="r">年間</th></tr></thead>
+  /* 数字が切れないだけの幅を確保する（足りないと 5,750,000 が「5,75」に見えてしまう） */
+  return seg+`<div class="table-wrap"><table class="stick1"><thead><tr><th style="min-width:150px;">勘定科目</th>
+    ${FY_MONTH_LABELS.map(m=>`<th class="r" style="min-width:86px;">${m}</th>`).join('')}<th class="r" style="min-width:100px;">年間</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
 function yjSpread(which){
@@ -5028,8 +5040,8 @@ function viewProperties(){
         <th class="r" style="min-width:110px;">年間計</th></tr></thead>
       <tbody>
         ${rows.map(rowHtml).join('')}
-        ${orphan.length? `<tr class="grprow"><td colspan="${NCOL}">物件に紐づいていない費目（通信・リースなど、建物に関係しないもの）</td></tr>
-          <tr><td><b>物件なし</b><div class="muted" style="font-size:10.5px;">${orphan.length}費目</div></td><td></td><td></td><td></td>
+        ${orphan.length? `<tr class="grprow"><td colspan="${NCOL}">物件に紐づいていない対象（通信・リースなど、建物に関係しないもの）</td></tr>
+          <tr><td><b>物件なし</b><div class="muted" style="font-size:10.5px;">${orphan.length}件</div></td><td></td><td></td><td></td>
           ${orphanCells.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`).join('')}
           <td class="r num">${moneyPlain(orphanCells.reduce((s,v)=>s+v,0))}</td></tr>`:''}
         <tr class="totrow"><td><b>物件の合計</b></td><td></td><td></td>
@@ -5038,7 +5050,7 @@ function viewProperties(){
           <td class="r num">${moneyPlain(yearTotal)}</td></tr>
       </tbody></table></div>`
     : `<div class="warnbar">まだ物件がありません。「＋ 物件を追加」から、借りている建物（社宅・寮・事務所・駐車場）を登録してください。
-        登録したら、費用管理の費目に その物件を選ぶと、ここに毎月の金額が集まります。</div>`;
+        登録したら、費用表の対象に その物件を選ぶと、ここに毎月の予定が集まります。</div>`;
 
   /* ★ 2026-09-16: ここに集まるのは 費用表の「予定」（実績ではない）。 */
   return pageShell({ title:'物件（建物）', count:rows.length,
@@ -5072,7 +5084,7 @@ function propertyDetail(id){
 
     <div class="form-section" style="margin-top:14px;">${IC.yen} ${fyLabel(fy)}の費用の予定（対象ごと・税込）</div>
     ${me.items.length? `<div class="table-wrap"><table>
-      <thead><tr><th style="min-width:130px;">費目</th><th style="min-width:92px;">勘定科目</th>
+      <thead><tr><th style="min-width:130px;">対象</th><th style="min-width:92px;">勘定科目</th>
         ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:84px;">${m}</th>`).join('')}
         <th class="r" style="min-width:96px;">年間計</th></tr></thead>
       <tbody>${me.items.map(r=>`<tr>
@@ -5150,8 +5162,7 @@ let GENB_CTX=null;
 function openGenBills(){
   const ym=thisMonth();
   openModal(`<h3>定期の支払をまとめて作成</h3>
-    <div class="mdsub">費目マスタで「買掛」にした費目から、その月の支払請求（作成中）を会社ごとにまとめて作ります。
-      支払期日は、その会社の締日・支払サイト・支払日から自動で決まります。</div>
+    <div class="mdsub">費用表で「買掛」にした対象から、その月の支払請求（作成中）を会社ごとにまとめて作ります。金額は費用表のマス（無ければ月額）。</div>
     <div class="form-grid"><div class="full"><label>対象月（計上月）</label>
       <input id="genbYm" type="month" value="${attr(ym)}" onchange="genBillsPreview()"></div></div>
     <div id="genbBox" style="margin-top:12px;"></div>
@@ -5180,9 +5191,9 @@ function genBillsPreview(){
           <td class="r num"><b>${moneyPlain(total)}</b></td>
           <td>${p.company.paySite==null||p.company.paySite===''?'<span class="badge b-amber">条件未設定</span>':esc(due)}</td></tr>`;
       }).join('')}</tbody></table></div>`
-      : `<div class="warnbar">この月に作れる定期支払はありません。費目マスタで「払い方＝買掛」「支払先」「月額予定」を入れると、ここに出てきます。</div>`}
+      : `<div class="warnbar">この月に作れる定期支払はありません。費用表で「払い方＝買掛」「支払先」「月額」を入れると、ここに出てきます。</div>`}
     ${done.length? `<div class="infobar">すでに ${ym} の支払請求がある支払先（作りません）：${done.map(p=>esc(p.company.name)).join('、')}</div>`:''}
-    ${noCo.length? `<div class="warnbar">支払先が未設定の費目：${noCo.map(it=>`<a onclick="closeModal();openForm('costItems','${it.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(it.name)}</a>`).join('、')}
+    ${noCo.length? `<div class="warnbar">支払先が未設定の対象：${noCo.map(it=>`<a onclick="closeModal();openForm('costItems','${it.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(it.name)}</a>`).join('、')}
       <div style="margin-top:4px;font-weight:400;">支払先を決めないと、支払期日が計算できません。</div></div>`:''}`;
 }
 /** 実際に作るところ。画面（チェックボックス）から切り離してあるのでテストできる。 */
@@ -6919,12 +6930,12 @@ function viewExpenses(){
   const total=Array(12).fill(0);
   rows.forEach(r=>r.cells.forEach((v,i)=>{ if(v) total[i]+=v; }));
 
-  const table = rows.length? `<div class="table-wrap"><table class="stick1">
+  const table = rows.length? `<div class="table-wrap"><table class="stick1 cost-table">
       <thead><tr>
-        <th style="min-width:210px;">勘定科目 › 対象</th><th style="min-width:120px;">支払先</th>
-        <th style="min-width:110px;">物件</th><th class="r" style="min-width:92px;">月額</th>
-        ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:104px;">${m}</th>`).join('')}
-        <th class="r" style="min-width:112px;">年間計</th><th style="min-width:56px;"></th></tr></thead>
+        <th style="min-width:196px;">勘定科目 › 対象</th><th style="min-width:104px;">支払先</th>
+        <th style="min-width:92px;">物件</th><th class="r" style="min-width:84px;">月額</th>
+        ${FY_MONTH_LABELS.map((m,i)=>`<th class="r ${i===curIdx?'curcol':''}" style="min-width:92px;">${m}</th>`).join('')}
+        <th class="r" style="min-width:100px;">年間計</th><th style="min-width:52px;"></th></tr></thead>
       <tbody>
         ${tree.map(nodeRows).join('')}
         <tr class="totrow"><td colspan="4"><b>合計（税込）</b></td>
@@ -7934,11 +7945,11 @@ function notifItems(){
   if(draftB.length) out.push({ sev:'info', key:'draftb', label:'「作成中」のままの支払請求',
     n:draftB.length, amount:draftB.reduce((s,b)=>s+docTotal(b),0), go:"goto('bills')" });
 
-  /* ── 定期費用の入力もれ（今月・月次費用表） ── */
+  /* ── 費用表の定期の予定が空いている（今月） ── */
   if(fyOf(ym)===CUR_FY){
     const i=fyIndexOf(ym);
-    const miss=costRowsOf(CUR_FY).rows.filter(r=>!r.ap && r.kind==='fixed' && r.cells[i]!=null && !r.cells[i] && num(r.it.monthly));
-    if(miss.length) out.push({ sev:'info', key:'costmiss', label:`${FY_MONTH_LABELS[i]}の定期費用が未入力`,
+    const miss=costRowsOf(CUR_FY).rows.filter(r=>r.kind==='fixed' && r.cells[i]!=null && !r.cells[i] && num(r.it.monthly));
+    if(miss.length) out.push({ sev:'info', key:'costmiss', label:`${FY_MONTH_LABELS[i]}の費用表が未入力`,
       n:miss.length, go:"goto('expenses')", sub:miss.slice(0,4).map(r=>r.it.name).join('、')+(miss.length>4?' ほか':'') });
   }
 
@@ -8027,23 +8038,21 @@ function markNotifSeen(){ try{ localStorage.setItem(NOTIF_SEEN_KEY, today()); }c
 const PAGE_GUIDE = {
   dashboard:  { step:'', what:'（入力はありません）', effect:'今日の数字：売上・未回収・支払予定・目標' },
 
-  arbook:     { step:'③', what:'<b>Money Forward から取り込む</b>（請求）→ 入金を記録。MF に無い請求だけ「請求額を手入力」',
-                effect:'取引先ごとに 前月残高＋請求−入金＝月末残高。期日を過ぎた残りは<b>期限超過</b>になります' },
+  arbook:     { step:'③', what:'<b>Money Forward から取り込む</b>→ 入金を記録',
+                effect:'前月残高＋請求−入金＝月末残高。期日超過は赤' },
   invoices:   { step:'③', what:'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>。単発は「＋ 個別に請求を作成」',
                 effect:'確定して初めて<b>売上</b>と<b>売掛金</b>になります' },
-  archeck:    { step:'⑤', what:'（入力なし）請求1枚ごとに 全額・遅れ・分割・手数料差引・過入金・不足・未入金 を判定。上の札を押すと その件だけ',
-                effect:'足りない会社・多く払った会社が すぐ分かります。行を押すと 売掛元帳' },
-  receipts:   { step:'④', what:'入金を記録する（取引先・入金日・金額）。請求書ごとの消込はしません',
+  archeck:    { step:'⑤', what:'（入力なし）請求1枚ごとの 全額・遅れ・分割・手数料・過不足の判定',
+                effect:'足りない会社・多く払った会社が分かります' },
+  receipts:   { step:'④', what:'入金を記録する（取引先・入金日・金額）',
                 effect:'売掛残高が減ります。損益は動きません' },
   aging:      { step:'⑤', what:'（入力なし）どの会社がどれだけ遅れているかを見る',
                 effect:'61日以上は要対応。会社名から台帳へ飛べます' },
 
   apbook:     { step:'⑤', what:'（入力なし）支払先×月の 月末残高。＋ 支払を記録／＋ 支払請求を登録 もここから。マスを押すと内訳、会社名で 買掛元帳',
                 effect:'前月残高＋支払請求−支払＝月末残高。期日を過ぎた残りは 期日超過（赤）' },
-  apsuii:     { step:'⑥', what:'（入力なし）勘定科目 大 › 中 › 小 › 支払先（または物件）× 12か月。大・中・小 のボタンで開く深さ、「明細」で伝票の一覧',
-                effect:'定期の費用・突発の費用・今月以降の見込 が1枚で分かります。既定は税込、税抜は予実と同じ数字' },
-  bills:      { step:'③', what:'<b>定期の支払を作成（月まとめ）</b>、または個別に登録 → <b>確定</b>',
-                effect:'確定して初めて<b>買掛金</b>になります。明細（勘定科目）が無いと予実に入りません' },
+  bills:      { step:'③', what:'<b>定期の支払請求を作成（月まとめ）</b>、または個別に登録 → <b>確定</b>',
+                effect:'確定して初めて<b>買掛金</b>になります（支払期日・残高で追えます）' },
   payouts:    { step:'④', what:'支払を記録し、どの支払請求に充てるかを決める',
                 effect:'買掛残高が減ります。損益は動きません' },
   apaging:    { step:'⑤', what:'（入力なし）自社が期日を過ぎている支払を見る',
@@ -8055,8 +8064,8 @@ const PAGE_GUIDE = {
                 effect:'入金期日・年齢表・資金繰り・台帳の色、すべてのもとになります' },
   vendors:    { step:'①', what:'BIGLIGHTが<b>サービスを受けている会社</b>（大家・電力・水道・通信・清掃・外注）と、その締日・支払サイト・支払日',
                 effect:'費目や物件の「支払先」で選べるようになり、支払期日が自動で決まります' },
-  dunning:    { step:'⑤', what:'今日やる督促を上から。電話・訪問は「記録」で <b>内容と入金の約束日</b>を残す。メールは「✉」でその段階の文面が開く（送ると自動で記録）',
-                effect:'約束日を過ぎた会社・予定日の会社・次の段階に入った会社が、毎日ここに出ます' },
+  dunning:    { step:'⑤', what:'今日やる督促を上から。電話・訪問は「記録」で <b>約束日</b>を残す。メールは「✉」',
+                effect:'約束を過ぎた会社・次の段階の会社が毎日ここに出ます' },
   arco:       { step:'⑥', what:'（入力なし）期間に動いた会社の一覧 → 押すと その会社の 評価・未回収・過入金・<b>次回請求額（繰越式）</b>・履歴・タイムライン。メールもここから',
                 effect:'「どこから、いくら回収すべきか」がこの1枚で分かります' },
   apco:       { step:'⑦', what:'（入力なし）期間に動いた支払先の一覧 → 押すと その会社の 未払・過払・評価・履歴・タイムライン',
@@ -8066,52 +8075,88 @@ const PAGE_GUIDE = {
   workers:    { step:'', what:'（入力なし・CRMから取り込み）',
                 effect:'人数×単価の請求の根拠になります' },
 
-  expenses:   { step:'②', what:'<b>費目</b>を作る：勘定科目・<b>支払先</b>・<b>物件</b>・<b>払い方</b>（即払い／買掛）・月額予定。あとは毎月マスに金額を打つだけ',
-                effect:'税抜に直して予実の費用へ。買掛にすると支払請求と期日で管理できます' },
-  kbunrui:    { step:'', what:'（入力なし）大分類 › 中分類 › 小分類 › 建物 の順に開いて金額を見る',
-                effect:'金額を押すと、その月に動いた伝票そのものが出ます' },
+  expenses:   { step:'②', what:'<b>対象</b>を作る（勘定科目・支払先・物件・払い方・月額）→ 毎月のマスに<b>予定の金額</b>（税込）を打つ。「→12」で右の月をまとめて埋める',
+                effect:'これから出ていくお金の予定表。<b>実績ではありません</b>（買掛の対象は 支払請求のもとになります）' },
   properties: { step:'②', what:'借りている建物：貸主・契約期間・家賃・共益費・駐車場代',
-                effect:'物件ごとの12か月の費用。契約満了の90日前から知らせます' },
+                effect:'物件ごとの12か月の<b>予定</b>。契約満了の90日前から知らせます' },
 
-  yojitsu:    { step:'①', what:'年間の<b>予算</b>（前年実績×○%からも作れます）。必要なら<b>見込</b>と<b>実績調整</b>',
-                effect:'予実の予算列・着地見込。実績は伝票から自動で出ます' },
+  yojitsu:    { step:'①', what:'入力タブで <b>予算</b>・<b>見込</b>・<b>実績</b>。実績は会計事務所の<b>試算表</b>の費用を税抜で打つ（売上は請求書から自動で灰色）',
+                effect:'予実対比・勘定科目別・着地見込。費用の実績はここに打った数字がそのまま出ます' },
   compare:    { step:'', what:'（入力なし）先月・前年・他の年度と比べる', effect:'伸びているか、落ちているか' },
   mikomi:     { step:'', what:'（入力なし）会議に出す形', effect:'四半期・累積・年間×前年比' },
 
   okr:        { step:'⑤', what:'目標（Objective）と主要成果（KR）。KRは予実から<b>自動で取れます</b>',
                 effect:'手で写さないこと。写すと必ずズレます' },
 
-  accounts:   { step:'①', what:'<b>勘定科目</b>を 大分類 › 中分類 › 小分類 で定義する。区分は大分類でだけ決める',
-                effect:'予実の行・分類別集計。伝票で選べるのは末端だけです' },
-  settings:   { step:'①', what:'資金繰りの開始残高（通帳の残高）・デモデータ',
-                effect:'資金繰りの残高見込みが実際の数字になります' },
-  crmlink:    { step:'①', what:'CRMから 所属機関（取引先）を取り込む（CSVでも可）',
-                effect:'CRMから来た項目は同期で上書き。<b>締日・サイト・口座・請求ルールは触られません</b>' },
-  users:      { step:'', what:'役割（管理者／経営／経理／閲覧）とページごとの権限', effect:'見える画面・できる操作が変わります' },
-  apilink:    { step:'', what:'外部システムやAIに<b>読ませる</b>ための鍵。1人1鍵', effect:'読むだけ。金額は書き換えられません' },
-  audit:      { step:'', what:'（入力なし）誰が・いつ・どの項目を いくら→いくら に', effect:'消したデータもここから戻せます' },
+  accounts:   { step:'①', what:'<b>勘定科目</b>を 大 › 中 › 小 で作る（区分は大分類で決める）',
+                effect:'予実の行・費用表の木。選べるのは末端だけ' },
+  settings:   { step:'①', what:'資金繰りの開始残高・デモデータ', effect:'資金繰りの残高見込みが実際の数字に' },
+  crmlink:    { step:'①', what:'CRMから 所属機関（取引先）を取り込む', effect:'締日・サイト・口座・請求ルールは触られません' },
+  users:      { step:'', what:'役割と画面ごとの権限', effect:'見える画面・できる操作が変わります' },
+  apilink:    { step:'', what:'外部システムやAIに<b>読ませる</b>鍵（1人1鍵）', effect:'読むだけ。書き換えはできません' },
+  audit:      { step:'', what:'（入力なし）誰が・いつ・何を いくらに', effect:'消したデータも戻せます' },
 };
 function openGuide(secId){
   const secs=SECTIONS.filter(x=>x.tabs.some(t=>canSee(t.id)));
   const sec=secs.find(x=>x.id===secId) || secs.find(x=>x.id==='sec-ar') || secs[0];
   if(!sec) return;
   openModal(`<h3>入力ガイド　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(sec.label)}</span></h3>
-    ${guidePromise()}
+    ${guideDiagram()}${guidePromise()}
     <div class="sectabs" style="margin-top:12px;">
       ${secs.map(x=>`<button class="${x.id===sec.id?'on':''}" onclick="openGuide('${x.id}')">${esc(x.label)}</button>`).join('')}
     </div>
     ${guideSection(sec)}
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">閉じる</button></div>`,'lg');
 }
+/** 関係の図 — どの数字が どこから来て どこへ行くか を1枚で。
+    ★ 2026-09-16 利用者の指示: 画面から説明文を外したかわりに、ここに図を置く。 */
+function guideDiagram(){
+  const box=(x,y,w,t,sub)=>`<rect x="${x}" y="${y}" width="${w}" height="34" rx="7" fill="var(--card)" stroke="var(--border-strong)"/>
+    <text x="${x+w/2}" y="${y+(sub?15:22)}" text-anchor="middle" font-size="12.5" fill="var(--text)">${t}</text>`
+    +(sub?`<text x="${x+w/2}" y="${y+27}" text-anchor="middle" font-size="10" fill="var(--muted)">${sub}</text>`:'');
+  const ar=(x1,y1,x2,y2)=>`<path d="M${x1} ${y1} L${x2} ${y2}" stroke="var(--muted)" stroke-width="1.3" fill="none" marker-end="url(#gdar)"/>`;
+  const lbl=(x,y,t)=>`<text x="${x}" y="${y}" font-size="10.5" fill="var(--muted)">${t}</text>`;
+  const pth=d=>`<path d="${d}" stroke="var(--muted)" stroke-width="1.3" fill="none" marker-end="url(#gdar)"/>`;
+  return `<div style="overflow-x:auto;margin-bottom:10px;">
+  <svg viewBox="0 0 860 320" width="580" style="max-width:100%;height:auto;">
+    <defs><marker id="gdar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+    <rect x="6" y="26" width="716" height="78" rx="10" fill="rgba(59,130,246,.08)"/>
+    ${lbl(16,42,'回収（売掛金）')}
+    <rect x="6" y="150" width="716" height="78" rx="10" fill="rgba(245,158,11,.10)"/>
+    ${lbl(16,166,'支払（買掛金）')}
+    <rect x="150" y="246" width="562" height="62" rx="10" fill="rgba(16,185,129,.10)"/>
+    ${lbl(158,284,'予実管理')}
+    ${box(14,110,92,'取引先')}
+    ${box(124,50,92,'得意先')}
+    ${box(240,50,170,'請求（Money Forward取込）')}
+    ${box(436,50,92,'売掛金')}
+    ${box(552,50,92,'入金')}
+    ${box(124,174,92,'支払先')}
+    ${box(240,174,170,'費用表の対象','費用表＝予定（見込み）')}
+    ${box(436,174,92,'支払請求')}
+    ${box(552,174,92,'買掛金')}
+    ${box(660,174,58,'支払')}
+    ${box(748,110,100,'資金繰り')}
+    ${box(250,258,270,'予算・見込・実績')}
+    ${box(560,258,148,'試算表（会計事務所）')}
+    ${pth('M106 120 L124 74')}${pth('M106 134 L124 186')}
+    ${pth('M216 67 L240 67')}${pth('M410 67 L436 67')}${pth('M552 67 L528 67')}
+    ${pth('M216 191 L240 191')}${pth('M410 191 L436 191')}${pth('M528 191 L552 191')}${pth('M660 191 L644 191')}
+    ${pth('M528 78 L748 120')}${pth('M644 208 L748 148')}
+    ${pth('M300 84 L300 122 L228 122 L228 275 L246 275')}
+    ${pth('M560 275 L524 275')}
+    ${lbl(236,138,'売上（請求書から自動）')}
+    ${lbl(556,316,'費用の実績はここを見て手入力（税抜）')}
+  </svg></div>`;
+}
 /** どの区を見ても最初に目に入るところ。ここを間違えると全部ずれる。 */
 function guidePromise(){
-  return `<div class="infobar" style="display:block;line-height:1.9;">
+  return `<div class="infobar" style="display:block;line-height:1.65;padding:7px 11px;margin-bottom:8px;">
     <b>数字の約束（ここだけは覚えてください）</b><br>
-    ・予実に効くのは <b>計上月</b>。入金日・支払日ではありません（発生主義）<br>
+    ・予実の<b>費用の実績</b>は 会計事務所の<b>試算表</b>から手入力。<b>売上</b>は請求書から自動（計上月・税抜）<br>
     ・<b>入金・支払は損益を動かしません</b>。売掛金・買掛金の残高が減るだけです<br>
-    ・予実の金額は <b>税抜</b>。消費税は預り金であって儲けではないため<br>
-    ・<b>実績は保存していません</b>。請求書・支払請求・費用から毎回計算しています<br>
-    ・会計年度は <b>8月1日〜翌7月31日</b>（Q1=8〜10月）</div>`;
+    ・<b>費用表は「予定」</b>であって実績ではありません（会計年度は 8月1日〜翌7月31日）</div>`;
 }
 function guideSection(sec){
   const tabs=sec.tabs.filter(t=>canSee(t.id));
@@ -8119,11 +8164,12 @@ function guideSection(sec){
     const g=PAGE_GUIDE[t.id]||{what:'',effect:''};
     return `<tr><td style="white-space:nowrap;text-align:center;">${esc(g.step||'')}</td>
       <td style="white-space:nowrap;"><a onclick="closeModal();goto('${t.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(t.label)}</a></td>
-      <td>${g.what||''}</td><td class="muted" style="font-size:11.5px;">${g.effect||''}</td></tr>`;
+      <td style="white-space:normal;">${g.what||''}</td>
+      <td class="muted" style="font-size:11.5px;white-space:normal;">${g.effect||''}</td></tr>`;
   }).join('');
-  return `<div class="table-wrap" style="margin-top:10px;"><table>
-      <thead><tr><th style="min-width:44px;">順番</th><th style="min-width:120px;">画面</th>
-        <th>入れるもの</th><th style="min-width:200px;">どこに効くか</th></tr></thead>
+  return `<div class="table-wrap gtbl" style="margin-top:8px;"><table style="table-layout:fixed;width:100%;">
+      <thead><tr><th style="width:44px;">順番</th><th style="width:130px;">画面</th>
+        <th>入れるもの</th><th style="width:34%;">どこに効くか</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     ${GUIDE_NOTE[sec.id]? `<div class="fhelp" style="margin-top:8px;">${GUIDE_NOTE[sec.id]}</div>`:''}`;
 }
@@ -8131,12 +8177,12 @@ function guideSection(sec){
 const GUIDE_NOTE = {
   'sec-ar':'入金が請求より多いとき（過入金）もそのまま記録できます。残りは「未消込」として残り、ベルにも出ます。<br>'
     +'請求を「確定」しないと、売上にも売掛金にも入りません。',
-  'sec-ap':'支払請求に<b>明細（勘定科目）</b>が無いと、金額が予実の費用に入りません（一覧に「明細なし」の札が出ます）。<br>'
-    +'毎月同じ額を払うもの（家賃・リース・保守）は、費用管理で費目を「買掛」にしておくと毎月の支払請求が自動で作られます。',
+  'sec-ap':'毎月同じ額を払うもの（家賃・リース・保守）は、費用表で対象を「買掛」にしておくと、その月の予定額で支払請求をまとめて作れます。<br>'
+    +'支払請求と支払は<b>残高と期日</b>のためのもので、予実の費用は動かしません。',
   'sec-co':'CRMに無い会社（仕入先・大家さんなど）はここで追加します。締日・支払サイト・支払日を入れると、期日が自動で決まります。',
-  'sec-cost':'費目に<b>物件</b>を選ぶと、物件（建物）の画面に毎月の金額が集まります。家賃・電気・水道・ガスはここで紐づけてください。',
-  'sec-yj':'実績はどこにも保存していません。請求書・支払請求・費用を直せば、予実は自動で直ります。',
-  'sec-sys':'確定した伝票は削除できません（取消のみ）。金額の変更は管理者・マネージャーだけです。',
+  'sec-cost':'費用表は<b>予定</b>です（実績は 予実 › 入力 › 実績）。対象に<b>物件</b>を選ぶと、物件（建物）の画面に集まります。',
+  'sec-yj':'売上の実績は請求書から自動。<b>費用の実績は会計事務所の試算表を見て手で打ちます</b>（入力タブ › 実績・税抜）。',
+  'sec-sys':'確定した伝票は削除できません（取消のみ）。',
 };
 /* ============================================================================
    デモデータ — 画面の動きを実際の形で確かめるための、作り物のデータ
