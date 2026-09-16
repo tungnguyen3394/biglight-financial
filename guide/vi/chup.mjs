@@ -22,7 +22,7 @@ export default {
     home: {
       page: 'dashboard',
       marks: {
-        menu: '#navList', fy: '#fyPick', guide: 'button[aria-label="入力ガイド"]', bell: '#notif > .icon-btn',
+        menu: '#navList', fy: '.fy-bar', cmp: '#cmpBtn', guide: 'button[aria-label="入力ガイド"]', bell: '#notif > .icon-btn',
         search: '.topsearch', avatar: '#avatarBox', tax: '.toolbar-left .seg', theme: '#themeToggle', burger: '#menuBtn',
       },
     },
@@ -41,6 +41,24 @@ export default {
       marks: { tabs: '#modal .sectabs', diagram: '#modal svg >> nth=0', table: '#modal .gtbl' },
     },
 
+    /* ── 期 ── */
+    period_cmp: {
+      page: 'yojitsu', height: 760,
+      run: async p => { await p.evaluate(() => { CMP_ON = true; paintPeriodBar(); renderPage('yojitsu') }); await p.waitForTimeout(400) },
+      marks: { bar: '.fy-bar', cmp: '#cmpBtn', cell: '#main table tbody tr >> nth=0 >> td >> nth=1', tot: '#main table tbody tr >> nth=0 >> td >> nth=13' },
+    },
+    period_guard: {
+      page: 'arbook',
+      run: async p => { await p.evaluate(() => { CMP_ON = false; paintPeriodBar(); openPayment(); PAY_CTX.companyId = DB.companies.find(c => c.kind === '得意先').id; PAY_CTX.amount = 1000; PAY_CTX.date = (CUR_FY + 1) + '-09-10'; paySave() }); await p.waitForTimeout(500) },
+      clip: '#modal2',
+      marks: { msg: '#modal2 .alertbar', go: '#modal2 button:has-text("切り替える")' },
+    },
+    period_close: {
+      page: 'settings', height: 1000,
+      run: async p => { await p.evaluate(() => { window.confirm = () => true; periodClose(CUR_FY - 1, true); goto('settings'); [...document.querySelectorAll('.panel')].find(x => x.innerText.includes('会計期間')).scrollIntoView() }); await p.waitForTimeout(500) },
+      clip: '.panel:has-text("会計期間（期）")',
+      marks: { first: '.panel:has-text("会計期間（期）") button:has-text("第1期を変える")', closed: '.panel:has-text("会計期間（期）") tr:has-text("締め済み")', btn: '.panel:has-text("会計期間（期）") button:has-text("を締める") >> nth=0' },
+    },
     /* ── 2. Dashboard ── */
     dash: {
       page: 'dashboard', height: 1180,
@@ -213,7 +231,7 @@ export default {
       page: 'bills',
       run: async p => {
         const id = await p.evaluate(() => { const c = DB.companies.find(x => x.name.includes('クリーンサポート'));
-          apCreateBills('2026-10', [{ company: c, items: [{ accountCode: '6900', name: '寮 共用部清掃', amount: 30000, taxCat: '課税10%' }] }]);
+          apCreateBills('2026-07', [{ company: c, items: [{ accountCode: '6900', name: '寮 共用部清掃', amount: 30000, taxCat: '課税10%' }] }]);
           return DB.bills.filter(b => b.status === '作成中').map(b => b.id).pop() })
         await p.evaluate(() => renderPage('bills')); await p.waitForTimeout(300)
         await p.evaluate(id => confirmBill(id), id); await p.waitForTimeout(900)

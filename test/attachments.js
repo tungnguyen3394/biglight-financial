@@ -57,6 +57,27 @@ console.log('\n■ 支払請求は ファイルが無いと 確定できない�
   eq('支払請求以外の表は見ない', AUTHZ.billsNeedingFile(st, { payments: [{ id: 'P1', status: '確定' }] }), []);
 }
 
+console.log('\n■ 締めた期は 変えられない（2026-09-17）');
+{
+  const st = { settings:{ closedFy:[2025] },
+    invoices:[{ id:'I5', bookMonth:'2026-03', total:100, allocations:[] }, { id:'I6', bookMonth:'2026-09', total:100 }, { id:'ID', bookMonth:'2026-03', total:1, demo:true }],
+    payments:[{ id:'P5', date:'2026-07-31', amount:100, allocations:[] }],
+    costPlans:[{ id:'C5', ym:'2026-02', amount:1 }], budgets:[{ id:'B5', fy:2025, amount:1 }] };
+  const chk = (changed, deleted) => AUTHZ.checkClosedPeriods(st, changed||{}, deleted||{}).ok;
+  eq('締めた期の請求の金額は変えられない', chk({ invoices:[{ ...st.invoices[0], total:200 }] }), false);
+  eq('締めた期に新しい請求は作れない', chk({ invoices:[{ id:'NEW', bookMonth:'2025-12', total:1 }] }), false);
+  eq('締めた期から今期へ動かすのも だめ', chk({ invoices:[{ ...st.invoices[0], bookMonth:'2026-08' }] }), false);
+  eq('今期の請求は変えられる', chk({ invoices:[{ ...st.invoices[1], total:300 }] }), true);
+  eq('締めた期の請求は消せない', chk({}, { invoices:['I5'] }), false);
+  eq('デモは消せる・作れる', [chk({}, { invoices:['ID'] }), chk({ invoices:[{ id:'D2', bookMonth:'2025-10', total:1, demo:true }] })], [true, true]);
+  eq('充て先・差額の処理・更新日時だけなら通す', chk({ payments:[{ ...st.payments[0], allocations:[{ invoiceId:'I6', amount:1 }], adjust:[{ type:'carry' }], updatedAt:'x' }] }), true);
+  eq('入金の金額は変えられない', chk({ payments:[{ ...st.payments[0], amount:99 }] }), false);
+  eq('費用表のマス・予算も止める', [chk({ costPlans:[{ ...st.costPlans[0], amount:2 }] }), chk({ budgets:[{ ...st.budgets[0], amount:2 }] })], [false, false]);
+  eq('締めていなければ 何でも通す', AUTHZ.checkClosedPeriods({ ...st, settings:{} }, { invoices:[{ ...st.invoices[0], total:9 }] }, {}).ok, true);
+  const idx=fs.readFileSync(ROOT+'/backend/src/index.ts','utf8');
+  eq('/state-delta で使っている（締めを外す送信は 外したあとで見る）', idx.includes('checkClosedPeriods(stNow'), true);
+}
+
 /* ══════ ② 偽のデータベース（attachments） ══════ */
 const PDF = Buffer.from('%PDF-1.4\n%テスト\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);

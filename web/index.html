@@ -94,6 +94,17 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   #topbar .topsearch .si{position:absolute; left:10px; top:10px; width:18px; height:18px; opacity:.55; pointer-events:none;}
   #topbar .top-right{display:flex; align-items:center; gap:10px; margin-left:auto;}
   .fy-pick{background:var(--card); color:var(--text); border:1px solid var(--border-strong); border-radius:8px; padding:7px 10px; font-size:12.5px; font-weight:600;}
+  /* 期の選択（2026-09-17） */
+  .fy-bar{display:flex; align-items:center; gap:4px;}
+  .fy-step{width:30px; height:34px; border:1px solid var(--border-strong); background:var(--card); color:var(--text); border-radius:8px; cursor:pointer; font-size:11px;}
+  .fy-step:disabled{opacity:.35; cursor:default;}
+  .cmp-btn{height:34px; border:1px solid var(--border-strong); background:var(--card); color:var(--text-secondary); border-radius:8px; padding:0 12px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap;}
+  .cmp-btn.on{background:var(--primary); border-color:var(--primary); color:#fff;}
+  @media(max-width:1100px){ .cmp-btn{padding:0 8px; font-size:11.5px;} }
+  .cmp{display:flex; justify-content:flex-end; gap:5px; font-size:10.5px; line-height:1.4; color:var(--muted); white-space:nowrap;}
+  .cmp b{font-weight:700;}
+  .cmp.up b{color:var(--success);} .cmp.down b{color:var(--danger);} .cmp.flat b{color:var(--muted);}
+  .closedbar{display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--border-strong); border-radius:10px; padding:8px 14px; margin:0 0 12px; font-size:13px;}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--primary-soft);color:var(--primary);
     display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;cursor:pointer;flex:none;overflow:hidden;}
   .avatar img{width:100%;height:100%;object-fit:cover;}
@@ -719,7 +730,12 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
     <div id="searchResults" class="ac-list"></div>
   </div>
   <div class="top-right">
-    <select id="fyPick" class="fy-pick" onchange="setFY(this.value)" title="会計年度（8月〜翌7月）"></select>
+    <div class="fy-bar" title="会計期間（8月〜翌7月）。入力は選んでいる期の中の日付だけ">
+      <button id="fyPrev" class="fy-step" onclick="stepFY(-1)" aria-label="前の期">◀</button>
+      <select id="fyPick" class="fy-pick" onchange="setFY(this.value)"></select>
+      <button id="fyNext" class="fy-step" onclick="stepFY(1)" aria-label="次の期">▶</button>
+    </div>
+    <button id="cmpBtn" class="cmp-btn" onclick="toggleCmp()" title="表に 前期の数字と 増減率 を出す">前期と比べる</button>
     <button class="icon-btn" onclick="openGuide()" title="入力ガイド（どの画面に・何を入れるか）" aria-label="入力ガイド">
       <svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><path d="M4 17.5A2 2 0 0 1 6 16h12"/><path d="M8 7.5h6"/></svg></button>
     <div class="notif" id="notif">
@@ -835,7 +851,65 @@ const QUARTERS = [{k:1,label:'Q1（8〜10月）',s:0},{k:2,label:'Q2（11〜1月
 let CUR_FY = 2025;                                  // 画面が見ている年度
 
 function fyOf(ym){ if(!ym) return null; const [y,m]=String(ym).split('-').map(Number); return m>=FY_START_MONTH? y : y-1; }
-function fyLabel(fy){ return `${fy}年度（${fy}/8〜${fy+1}/7）`; }
+/* ============================================================================
+   期（会計期間）— 2026-09-17 利用者の指示
+   ----------------------------------------------------------------------------
+   ・BIGLIGHT は 2025/8〜2026/7 が 第5期（第1期＝2021/8〜）。settings.firstFy で変えられる。
+   ・画面の上で ◀ 第5期 ▶ を選ぶ。入力はその期の中の日付だけ（periodGuard）。
+   ・締めた期（settings.closedFy）は見るだけ。backend authz.ts checkClosedPeriods でも止める。
+   ・「前期と比べる」（CMP_ON）で、表に 前期の数字と 増減率 を出す。
+   ========================================================================== */
+const firstFy = () => { const v=Number(DB&&DB.settings&&DB.settings.firstFy); return Number.isInteger(v)&&v>1990? v : 2021; };
+const periodNo = fy => Number(fy)-firstFy()+1;
+function fyLabel(fy){ return `第${periodNo(fy)}期（${fy}/8〜${fy+1}/7）`; }
+const fyShort = fy => `第${periodNo(fy)}期`;
+const fyStartDate = fy => `${fy}-08-01`;
+const fyEndDate   = fy => `${fy+1}-07-31`;
+const closedFys = () => ((DB&&DB.settings&&DB.settings.closedFy)||[]).map(Number);
+const isClosedFy = fy => closedFys().includes(Number(fy));
+/** 年月・日付 → 期（年度） */
+const fyOfDate = d => { const s=String(d||''); return /^\d{4}-\d{2}/.test(s)? fyOf(s.slice(0,7)) : null; };
+/** 入力の初期値: 今日が選んだ期の中なら今日、外なら期末（過去の期）か期首（未来の期） */
+function defaultDateIn(fy){ const t=today(); if(fyOfDate(t)===fy) return t; return t>fyEndDate(fy)? fyEndDate(fy) : fyStartDate(fy); }
+const defaultYmIn = fy => defaultDateIn(fy).slice(0,7);
+/** 入力の関所。dates（YYYY-MM／YYYY-MM-DD）が すべて選んだ期の中で、その期が締めていなければ true。
+    だめなときは理由と「第N期へ」のボタンを出して false。入力中の画面はそのまま残す。 */
+function periodGuard(dates, what){
+  const fy=CUR_FY;
+  if(isClosedFy(fy)){ periodAlert(`${fyLabel(fy)} は<b>締め済み</b>です。見るだけで、入力・修正はできません。`, null, what); return false; }
+  const fys=[...new Set((dates||[]).filter(Boolean).map(fyOfDate).filter(x=>x!=null))];
+  const other=fys.filter(x=>x!==fy);
+  if(!other.length) return true;
+  const to=other[0];
+  periodAlert(`${esc(what||'この入力')}の日付が いま選んでいる <b>${fyLabel(fy)}</b> の外です。<br>
+    ${fyLabel(to)} の日付です${other.length>1? '（ほかの期の日付もあります）' : ''}。${isClosedFy(to)? `<br><b>${fyShort(to)} は締め済み</b>なので入力できません。` : ''}`, isClosedFy(to)? null : to, what);
+  return false;
+}
+function periodAlert(html, to, what){
+  openModal2(`<h3>期の外です</h3>
+    <div class="alertbar" style="display:block;line-height:1.8;">${html}</div>
+    <div class="fhelp">入力は、いま選んでいる期（${fyShort(CUR_FY)}：${fyStartDate(CUR_FY)}〜${fyEndDate(CUR_FY)}）の中の日付だけです。</div>
+    <div class="modal-actions split"><button class="btn secondary" onclick="closeModal2()">戻って直す</button>
+      ${to!=null? `<button class="btn" onclick="closeModal2();setFY(${to})">${fyShort(to)} に切り替える</button>` : ''}</div>`);
+}
+/** 締め済みの期に属する伝票か（直す前に止める用） */
+const recClosed = (dates) => (dates||[]).filter(Boolean).map(fyOfDate).some(f=>f!=null && isClosedFy(f));
+
+/* ---- 前期と比べる ---- */
+const PCMP_KEY='bl_yj_cmp';
+let CMP_ON=false; try{ CMP_ON = localStorage.getItem(PCMP_KEY)==='1'; }catch(e){}
+function toggleCmp(){ CMP_ON=!CMP_ON; try{ localStorage.setItem(PCMP_KEY, CMP_ON?'1':'0'); }catch(e){} paintPeriodBar(); renderPage(CURRENT_PAGE); }
+/** 増減率（前期が0なら null） */
+const cmpRate = (cur, prev) => prev? (cur-prev)/Math.abs(prev)*100 : null;
+/** 前期との比べ（小さく2段目に出す）。good: true=増えると良い／false=増えると悪い／null=色なし */
+function cmpHtml(cur, prev, good, opt){
+  if(!CMP_ON) return '';
+  opt=opt||{};
+  const r=cmpRate(cur, prev);
+  const cls = r==null||Math.abs(r)<0.05||good==null? 'flat' : ((r>0)===!!good? 'up' : 'down');
+  const pct = r==null? (cur? '新規' : '—') : `${r>0?'▲':(r<0?'▼':'')}${r>0?'+':''}${r.toFixed(1)}%`;
+  return `<div class="cmp ${cls}" title="${fyShort(CUR_FY-1)} ${moneyPlain(prev)}"><span>前 ${opt.noPrev? '' : moneyPlain(prev)}</span><b>${pct}</b></div>`;
+}
 function fyMonths(fy){
   return Array.from({length:12},(_,i)=>{ const t=FY_START_MONTH+i;
     const y=fy+Math.floor((t-1)/12), m=((t-1)%12)+1; return `${y}-${String(m).padStart(2,'0')}`; });
@@ -1602,18 +1676,31 @@ document.addEventListener('click', e=>{
 
 /* ============ 年度セレクタ ============ */
 function fyChoices(){
-  const now=new Date(); const cur = fyOf(thisMonth());
+  const cur = fyOf(thisMonth());
   const set = new Set([cur-2, cur-1, cur, cur+1]);
+  for(let f=firstFy(); f<=cur+1; f++) set.add(f);          // 第1期から 来期まで
   (DB?.budgets||[]).forEach(b=>set.add(Number(b.fy)));
   (DB?.invoices||[]).forEach(i=>{ const f=fyOf(i.bookMonth); if(f) set.add(f); });
   return [...set].filter(n=>isFinite(n)).sort((a,b)=>b-a);
 }
 function buildFyPicker(){
   CUR_FY = Number(localStorage.getItem('bl_yj_fy')) || fyOf(thisMonth());
-  const sel=document.getElementById('fyPick');
-  sel.innerHTML = fyChoices().map(f=>`<option value="${f}" ${f===CUR_FY?'selected':''}>${f}年度</option>`).join('');
+  paintPeriodBar();
 }
-function setFY(v){ CUR_FY=Number(v); try{localStorage.setItem('bl_yj_fy',String(CUR_FY));}catch(e){} renderPage(CURRENT_PAGE); }
+/** 画面の上の ◀ 第5期 ▶ ・ 前期と比べる */
+function paintPeriodBar(){
+  const sel=document.getElementById('fyPick'); if(!sel) return;
+  const list=fyChoices();
+  if(!list.includes(CUR_FY)) list.push(CUR_FY);
+  list.sort((a,b)=>b-a);
+  sel.innerHTML = list.map(f=>`<option value="${f}" ${f===CUR_FY?'selected':''}>${fyShort(f)}（${f}/8〜${f+1}/7）${isClosedFy(f)?' 🔒':''}${f===fyOf(thisMonth())?' ・今期':''}</option>`).join('');
+  const cb=document.getElementById('cmpBtn'); if(cb) cb.classList.toggle('on', CMP_ON);
+  const pv=document.getElementById('fyPrev'), nx=document.getElementById('fyNext');
+  if(pv) pv.disabled = CUR_FY<=Math.min(...list);
+  if(nx) nx.disabled = CUR_FY>=Math.max(...list);
+}
+function setFY(v){ CUR_FY=Number(v); try{localStorage.setItem('bl_yj_fy',String(CUR_FY));}catch(e){} paintPeriodBar(); renderPage(CURRENT_PAGE); }
+function stepFY(d){ const list=fyChoices(); const n=CUR_FY+d; if(n<Math.min(...list)||n>Math.max(...list)) return; setFY(n); }
 
 /* ============ ナビ・ルーター ============ */
 function toggleSidebar(){
@@ -1717,7 +1804,12 @@ function renderPage(page){
       <span style="font-weight:400;">この内容を管理者にお伝えください。データは失われていません。</span></div>`;
     after=null;
   }
-  el.innerHTML = bar + html;          // ← 入れるのは1回だけ
+  /* ★ 2026-09-17: 締めた期は 画面の上に 帯を出す（期に関係ない画面は出さない） */
+  const NOPERIOD=['companies','vendors','crmlink','users','audit','apilink','accounts','settings','dunning','cashflow','okr'];
+  const closed = !NOPERIOD.includes(page) && isClosedFy(CUR_FY)
+    ? `<div class="closedbar">🔒 <b>${fyLabel(CUR_FY)} は締め済みです</b><span class="muted">見るだけです。入力・修正はできません。</span>
+        ${fyOf(thisMonth())!==CUR_FY? `<button class="btn sm" style="margin-left:auto;" onclick="setFY(${fyOf(thisMonth())})">今期（${fyShort(fyOf(thisMonth()))}）へ</button>` : ''}</div>` : '';
+  el.innerHTML = bar + closed + html;          // ← 入れるのは1回だけ
   if(after){ try{ after(); }catch(e){ console.error(e); } }
   syncBadge();
   try{ notifBadge(); }catch(e){ /* 通知が数えられなくても画面は出す */ }
@@ -2281,6 +2373,7 @@ function openForm(entKey, id, preset){
   const row = isEdit ? Object.assign({}, findById(E.key,id)) : Object.assign({}, preset||{});
   /* 払い方を入れていない古い費目は「即払い」。空欄のまま '-' と出ると、どちらか分からない。 */
   if(entKey==='costItems' && !row.payMode) row.payMode='即払い';
+  if(!isEdit && ['invoices','bills','expenses'].includes(entKey) && !row.bookMonth) row.bookMonth=defaultYmIn(CUR_FY);
   FORM_CTX = { entity:entKey, id: isEdit?id:null, items: (row.items||[]).map(x=>Object.assign({},x)) };
   /* 取引先（得意先／支払先）は 3列の専用レイアウト。入力欄そのものは下の formFieldHtml を共用する。 */
   if(entKey==='companies') return openCompanyModal('form', row, isEdit?id:null);
@@ -2430,6 +2523,11 @@ function saveForm(ev){
     const s=dunStatus(rec.companyId);
     if(!confirm(`この取引先は ${payGrade(rec.companyId,'ar').g==='D'?`延滞 ${moneyPlain(s.amount)}円（最長${s.maxDays}日）`:''}${creditOver(rec.companyId)?' 与信限度額超過':''} があります。\nそれでも請求書を作りますか？`)) return false;
   }
+  /* ★ 2026-09-17: 期の中の日付だけ */
+  if(['invoices','bills','expenses'].includes(entKey)){
+    const old=FORM_CTX.id? findById(E.key, FORM_CTX.id) : null;
+    if(!periodGuard([rec.bookMonth||rec.date, old&&(old.bookMonth||old.date)], E.label)) return false;
+  }
   // 伝票は保存前に自動計算（番号・期日・合計）
   if(entKey==='invoices'||entKey==='bills') prepareDoc(entKey, rec, FORM_CTX.id);
   if(entKey==='bills'){ saveBillForm(rec); return false; }
@@ -2467,6 +2565,7 @@ async function saveBillForm(rec){
 }
 function deleteFromForm(entKey,id){
   const E=ENTITIES[entKey];
+  if(['invoices','bills','expenses'].includes(entKey)){ const o=findById(E.key,id)||{}; if(!periodGuard([o.bookMonth||o.date], E.label+'の削除')) return; }
   if(deleteRecord(E.key,id)){ closeModal(); renderPage(CURRENT_PAGE); }
 }
 function prepareDoc(entKey, rec, existingId){
@@ -2658,6 +2757,7 @@ function setPlanCell(which, fy, mIndex, accountCode, amount){
   }
 }
 function onPlanInput(el, which, mIndex, accountCode){
+  if(isClosedFy(CUR_FY)){ toast(`${fyShort(CUR_FY)} は締め済みです。`,'err'); renderPage('yojitsu'); return; }
   fmtMoneyInput(el); el.classList.add('dirty');
   clearTimeout(el._t);
   el._t = setTimeout(()=>{ setPlanCell(which, CUR_FY, mIndex, accountCode, el.value); el.classList.remove('dirty'); syncBadge(); }, 500);
@@ -2673,13 +2773,13 @@ function viewYojitsu(){
   const kpis = `<div class="kpi-grid">
     <div class="kpi"><div class="lbl">当月売上（${FY_MONTH_LABELS[i]}）</div>
       <div class="num">${moneyPlain(cmpRev.month)}</div>
-      <div class="sub">予算比 ${bud.revenue[i]?((cmpRev.month/bud.revenue[i])*100).toFixed(0)+'%':'—'} ／ 前年 ${pct(cmpRev.month,cmpRev.lastYearMonth)}</div></div>
+      <div class="sub">予算比 ${bud.revenue[i]?((cmpRev.month/bud.revenue[i])*100).toFixed(0)+'%':'—'} ／ 前期 ${pct(cmpRev.month,cmpRev.lastYearMonth)}</div></div>
     <div class="kpi"><div class="lbl">年度累計 売上</div>
       <div class="num">${moneyPlain(cmpRev.ytd)}</div>
-      <div class="sub">前年同期 ${pct(cmpRev.ytd,cmpRev.lastYearYtd)}</div></div>
+      <div class="sub">前期同期 ${pct(cmpRev.ytd,cmpRev.lastYearYtd)}</div></div>
     <div class="kpi"><div class="lbl">年度累計 経常利益</div>
       <div class="num ${cmpOrd.ytd<0?'minus':'plus'}">${moneyPlain(cmpOrd.ytd)}</div>
-      <div class="sub">前年同期 ${pct(cmpOrd.ytd,cmpOrd.lastYearYtd)}</div></div>
+      <div class="sub">前期同期 ${pct(cmpOrd.ytd,cmpOrd.lastYearYtd)}</div></div>
     <div class="kpi"><div class="lbl">着地見込 売上</div>
       <div class="num">${moneyPlain(landingV(fy,'revenue',i))}</div>
       <div class="sub">年間予算 ${moneyPlain(sum12(bud.revenue))}（${sum12(bud.revenue)?((landingV(fy,'revenue',i)/sum12(bud.revenue))*100).toFixed(0)+'%':'—'}）</div></div>
@@ -2719,7 +2819,17 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
       <button class="${YJ_VIEW==='forecast'?'on':''}" onclick="setYjView('forecast')">見込</button>
     </div></div>`;
 
+  /* ★ 2026-09-17: 前期と比べる（前期の実績と、いま見えている数字）。率の行は出さない */
+  const pv=(row,mi)=> prev[row.key]? prev[row.key][mi] : 0;
   const cell = (row, mi) => {
+    const html=cell0(row, mi);
+    if(!CMP_ON || row.type==='rate') return html;
+    const a=act[row.key][mi], b=bud[row.key][mi], f=fc[row.key][mi];
+    const shown = YJ_VIEW==='budget'? b : (YJ_VIEW==='forecast'? (f||b) : (mi>lastIdx && !a? (f||b) : a));
+    if(!shown && !pv(row,mi)) return html;
+    return html + cmpHtml(shown, pv(row,mi), row.good);
+  };
+  const cell0 = (row, mi) => {
     const a=act[row.key]?act[row.key][mi]:0, b=bud[row.key]?bud[row.key][mi]:0, f=fc[row.key]?fc[row.key][mi]:0;
     if(row.type==='rate'){
       const base = act[row.base][mi], of = act[row.of][mi];
@@ -2744,6 +2854,14 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
       ${b||a?`<div style="font-size:10.5px;" class="${Math.abs(diff)<1?'zero':(good?'plus':'minus')}">${diff>0?'+':''}${moneyPlain(diff)}</div>`:''}</div>`;
   };
   const totCell = (row) => {
+    const html=totCell0(row);
+    if(!CMP_ON || row.type==='rate') return html;
+    /* 年度累計は 実績のある月まで（今期の途中なら 前期も同じ月まで）で比べる */
+    const upto = YJ_VIEW==='compare'||YJ_VIEW==='actual'? lastIdx : 11;
+    const cur = YJ_VIEW==='budget'? sum12(bud[row.key]) : (YJ_VIEW==='forecast'? fc[row.key].reduce((t,v,i)=>t+(v||bud[row.key][i]||0),0) : sumRange(act[row.key],0,upto));
+    return html + cmpHtml(cur, sumRange(prev[row.key],0,upto), row.good);
+  };
+  const totCell0 = (row) => {
     if(row.type==='rate'){
       const base=sum12(act[row.base]), of=sum12(act[row.of]);
       return base? `<span class="num">${(of/base*100).toFixed(1)}%</span>` : '<span class="zero">—</span>';
@@ -2763,7 +2881,7 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
   const body = PL_ROWS.map(row=>{
     const strong = row.strong? 'style="font-weight:700;background:var(--surface-2);"' : '';
     const land = row.type==='rate' ? '<span class="zero">—</span>'
-      : `<b class="num">${moneyPlain(landingV(fy,row.key,lastIdx))}</b>`;
+      : `<b class="num">${moneyPlain(landingV(fy,row.key,lastIdx))}</b>${cmpHtml(landingV(fy,row.key,lastIdx), sum12(prev[row.key]), row.good)}`;
     return `<tr ${strong}><td ${strong}>${esc(row.label)}</td>
       ${FY_MONTH_LABELS.map((_,mi)=>`<td class="r">${cell(row,mi)}</td>`).join('')}
       <td class="r">${totCell(row)}</td><td class="r">${land}</td></tr>`;
@@ -2781,11 +2899,13 @@ function yjAccountTable(fy){
     if(!list.length) return;
     const rows = list.map(a=>{
       const act = seriesByAccountV(fy,a.code,'actual'), bud = seriesByAccountV(fy,a.code,'budget');
+      const pa = CMP_ON? seriesByAccountV(fy-1,a.code,'actual') : null;
       const ta=sum12(act), tb=sum12(bud);
-      if(!ta && !tb) return '';
+      if(!ta && !tb && !(pa && sum12(pa))) return '';
+      const good = kind==='revenue' || kind==='nonop';
       return `<tr><td>${esc(a.code)} ${esc(a.label)}</td>
-        ${act.map((v,i)=>`<td class="r num">${money(v)}</td>`).join('')}
-        <td class="r"><b class="num">${moneyPlain(ta)}</b></td>
+        ${act.map((v,i)=>`<td class="r num">${money(v)}${pa && (v||pa[i])? cmpHtml(v, pa[i], good) : ''}</td>`).join('')}
+        <td class="r"><b class="num">${moneyPlain(ta)}</b>${pa? cmpHtml(ta, sumRange(pa,0,lastActualIdx(fy)), good) : ''}</td>
         <td class="r num">${moneyPlain(tb)}</td>
         <td class="r">${tb?`<span class="rate ${ta>=tb?(kind==='revenue'?'plus':'minus'):(kind==='revenue'?'minus':'plus')}">${(ta/tb*100).toFixed(0)}%</span>`:'<span class="zero">—</span>'}</td></tr>`;
     }).join('');
@@ -2835,6 +2955,7 @@ function yjInputTable(fy){
         const cells = FY_MONTH_LABELS.map((_,mi)=>{
           if(ro) return `<td class="r"><input class="cellin ro" value="${auto[mi]?moneyPlain(auto[mi]):''}" readonly tabindex="-1"></td>`;
           const v = planCell(which, fy, mi, a.code);
+          if(isClosedFy(fy)) return `<td class="r"><input class="cellin ro" value="${v?moneyPlain(v):''}" readonly tabindex="-1"></td>`;
           return `<td class="r"><input class="cellin ed" value="${v?moneyPlain(v):''}"
             oninput="onPlanInput(this,'${which}',${mi},'${attr(a.code)}')" placeholder="0"></td>`;
         }).join('');
@@ -2860,6 +2981,7 @@ function yjSpread(which){
       <button class="btn" onclick="yjSpreadGo('${which}')">12か月に入力</button></div>`);
 }
 function yjSpreadGo(which){
+  if(!periodGuard([], '年額の入力')) return;
   const acc=document.getElementById('spAcc').value, amt=num(document.getElementById('spAmt').value);
   if(!acc||!amt){ toast('科目と金額を入力してください。','err'); return; }
   const per=Math.round(amt/12), last=amt-per*11;
@@ -2868,13 +2990,14 @@ function yjSpreadGo(which){
 }
 function yjCopyBudget(){
   openModal(`<h3>前年実績から予算を作成</h3>
-    <div class="mdsub">${CUR_FY-1}年度の実績に倍率をかけて、${CUR_FY}年度の予算に入れます。既存の予算は上書きされます。</div>
+    <div class="mdsub">${fyLabel(CUR_FY-1)} の実績に倍率をかけて、${fyLabel(CUR_FY)} の予算に入れます。既存の予算は上書きされます。</div>
     <div class="form-grid"><div class="full"><label>倍率（％）</label>
       <input id="cpRate" type="number" value="110" style="text-align:right;"><div class="fhelp">110 = 前年実績の1.1倍。</div></div></div>
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
       <button class="btn" onclick="yjCopyBudgetGo()">作成する</button></div>`);
 }
 function yjCopyBudgetGo(){
+  if(!periodGuard([], '予算の作成')) return;
   const rate=num(document.getElementById('cpRate').value)/100 || 1;
   let n=0;
   accounts().forEach(a=>{
@@ -3146,6 +3269,12 @@ function bookNote(fy, what, flow){
 /** o: { rows, months, first, col, pop, ledger, ledgerTitle, badge, flow:[増,減] } → { head, body, foot, ncol } */
 function bookGrid(o){
   const { rows, months } = o, tm=thisMonth(), cum=!!BOOK_VIEW.cum;
+  /* ★ 2026-09-17: 前期と比べる。前期の同じ区切り（同じ月・四半期…）の 合計・請求・入金 */
+  const P = CMP_ON && o.prevOf? (()=>{ const pm=fyMonths(fyOf(months[0])-1); const z=()=>Array(12).fill(0);
+    const t={ closing:z(), billed:z(), payment:z() };
+    rows.forEach(r=>o.prevOf(r.id, pm).forEach((x,i)=>{ t.closing[i]+=x.closing; t.billed[i]+=x.billed; t.payment[i]+=x.payment; }));
+    return t; })() : null;
+  const G = o.good || {};
   const per=BOOK_PERS.some(x=>x[0]===BOOK_VIEW.per)? BOOK_VIEW.per : 'month';
   const B=bookBuckets(per);
   const lastIdx = b => { for(let i=b.e;i>=b.s;i--) if(months[i]<=tm) return i; return -1; };
@@ -3169,13 +3298,15 @@ function bookGrid(o){
   if(!rows.length) return { head, body:'', foot:'', ncol:B.length+2 };
   const tot=`<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${B.map(b=>{
       const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
-      return `<td class="r num">${arAmt(rows.reduce((t,r)=>t+r.m[k].closing,0))}</td>`; }).join('')}
+      const v=rows.reduce((t,r)=>t+r.m[k].closing,0);
+      return `<td class="r num">${arAmt(v)}${P? cmpHtml(v, P.closing[k], G.closing) : ''}</td>`; }).join('')}
       <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`;
   /* 合計の下の2行 — 残高を作る「動き」。売上（予実）とは別もの（全明細・税込）なので「売上」とは書かない */
   const flow=(key,label)=>`<tr class="ar-flow"><td class="ar-co">${label}${cum?'（累計）':''}</td>${B.map(b=>{
       const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
       let v=0; for(let i=(cum?0:b.s); i<=k; i++) rows.forEach(r=>{ v+=r.m[i][key]; });
-      return `<td class="r num">${v? moneyPlain(v) : '<span class="zero">0</span>'}</td>`; }).join('')}
+      let pvv=0; if(P) for(let i=(cum?0:b.s); i<=k; i++) pvv+=P[key][i];
+      return `<td class="r num">${v? moneyPlain(v) : '<span class="zero">0</span>'}${P && (v||pvv)? cmpHtml(v, pvv, G[key]) : ''}</td>`; }).join('')}
     <td class="r num ar-now"><span class="ar-y">年度計</span>${moneyPlain(rows.reduce((t,r)=>t+r.m.reduce((u,x)=>u+(x.future?0:x[key]),0),0))}</td></tr>`;
   return { head, body, foot: tot+flow('billed',o.flow[0])+flow('payment',o.flow[1]), ncol:B.length+2 };
 }
@@ -3228,7 +3359,7 @@ function viewArBook(){
   </div>`;
 
   const G=bookGrid({ rows, months, first:'取引先', col:L.col, pop:'arCellPop', ledger:'openArLedger', ledgerTitle:'売掛元帳を開く',
-    badge:arStatusBadge, flow:['＋ 請求額','− 入金額'] });
+    badge:arStatusBadge, flow:['＋ 請求額','− 入金額'], prevOf:(id,pm)=>arMonthly(id,pm), good:{ billed:true, payment:true, closing:false } });
   const table = all.length
     ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${G.head}</thead><tbody>${G.body||`<tr><td colspan="${G.ncol}" class="empty">条件に合う取引先はありません。</td></tr>`}${G.foot}</tbody></table></div>`
     : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「Money Forward から取り込む」で請求を取り込むか、入金を記録してください。</div></div>`;
@@ -3492,6 +3623,7 @@ function feeResolve(companyId, how, invoiceId){
   if(!canEdit('receipts')){ toast('入金を直す権限がありません。','err'); return; }
   const list=feeResiduals(companyId).filter(x=>!invoiceId || String(x.inv.id)===String(invoiceId));
   if(!list.length){ toast('片付ける差額はありません。','err'); return; }
+  if(list.some(x=>recClosed([x.pay.date, x.inv.bookMonth]))){ toast('締め済みの期の入金・請求が含まれています。締めを外してから片付けてください。','err'); return; }
   const tot=list.reduce((s,x)=>s+x.bal,0), name=arCoName(companyId);
   const msg = how==='carry'
     ? `${name} の差額 ${list.length}件・${moneyPlain(tot)}円 を「次回の請求に加算」にします。\nMoney Forward で次の請求書に ${moneyPlain(tot)}円 を足してください（「差額」の画面に残ります）。`
@@ -3602,9 +3734,9 @@ function openArBillForm(id, preset){
 let AB_ROWS=[];
 const abCustomers = () => (DB.companies||[]).filter(x=>!x._gone && x.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
 function abBlank(from){
-  const ym=(from&&from.bookMonth)||thisMonth();
+  const ym=(from&&from.bookMonth)||defaultYmIn(CUR_FY);
   /* 新しい行は 月と請求日だけ 前の行から引き継ぐ（取引先は選び直す）。まるごと写すのは「最後の行をコピー」 */
-  return { companyId:(from&&from.preset&&from.companyId)||'', hint:'', bookMonth:ym, issueDate:(from&&from.issueDate)||today(), taxCat:(from&&from.preset&&from.taxCat)||'',
+  return { companyId:(from&&from.preset&&from.companyId)||'', hint:'', bookMonth:ym, issueDate:(from&&from.issueDate)||defaultDateIn(CUR_FY), taxCat:(from&&from.preset&&from.taxCat)||'',
     total:'', net:'', netTouched:false, dueDate:'', dueTouched:false, no:'', note:'' };
 }
 function openArBillBulk(rows){
@@ -3710,6 +3842,7 @@ function abSave(){
   const ok=AB_ROWS.filter(r=>!abIssues(r).length);
   const skip=AB_ROWS.filter(r=>abIssues(r).length && (r.total||r.companyId));
   if(!ok.length){ toast('保存できる行がありません（取引先・計上月・請求額 が必要です）。','err'); return; }
+  if(!periodGuard(ok.map(r=>r.bookMonth), '請求の計上月')) return;
   const dup=ok.filter(abDupOf);
   const zeroTax=ok.filter(r=>!(TAX_RATE[r.taxCat]>0) && r.netTouched && num(r.net)!==num(r.total));
   const msg=[`${ok.length}件・${moneyPlain(ok.reduce((t,r)=>t+num(r.total),0))}円 を保存します。`];
@@ -3795,6 +3928,7 @@ function arBillSave(id){
   const g=k=>document.getElementById(k).value;
   const companyId=g('abCo'), bookMonth=g('abYm'), total=num(g('abTotal'));
   if(!companyId || !bookMonth || !total){ toast('取引先・計上月・請求額を入力してください。','err'); return; }
+  if(!periodGuard([bookMonth, id? arYmOfInv(findById('invoices',id)||{}) : ''], '請求の計上月')) return;
   const dup=(DB.invoices||[]).filter(i=>String(i.companyId)===String(companyId) && arYmOfInv(i)===bookMonth && AR_LIVE(i) && String(i.id)!==String(id));
   if(dup.length && !confirm(`この取引先には ${bookMonth} の請求がすでに ${dup.length}件 あります（${dup.map(i=>moneyPlain(docTotal(i))+'円').join('、')}）。\n二重にならないか確認しましたか？ 保存しますか？`)) return;
   let no=g('abNo').trim();
@@ -3812,6 +3946,7 @@ function arBillSave(id){
 }
 function arBillCancel(id){
   const inv=findById('invoices',id); if(!inv) return;
+  if(!periodGuard([arYmOfInv(inv)], '請求の取消')) return;
   if(!confirm(`この請求（${moneyPlain(docTotal(inv))}円）を取消にします。売掛金と予実から外れます。よろしいですか？`)) return;
   inv.status='取消'; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
   closeModal(); renderPage(CURRENT_PAGE); toast('取消にしました。','ok');
@@ -3972,8 +4107,10 @@ function mfExisting(x, companyId){
 }
 /** 取り込みの計画（画面の確認と、実際の取り込みで同じものを使う） */
 function mfPlan(){
-  const plan={ add:[], upd:[], same:[], unmapped:[], dupWarn:[] };
+  const plan={ add:[], upd:[], same:[], unmapped:[], dupWarn:[], outside:[] };
   MFI.items.forEach(x=>{
+    /* ★ 2026-09-17: 選んでいる期の外（計上月）は取り込まない */
+    if(fyOf((x.salesDate||x.billingDate||'').slice(0,7))!==CUR_FY){ plan.outside.push(x); return; }
     const cid=MFI.map[mfPartnerKey(x)];
     if(!cid || cid==='__skip'){ plan.unmapped.push(x); return; }
     const rec=mfToInvoice(x, cid==='__new'? '__new' : cid), ex=cid==='__new'? null : mfExisting(x, cid);
@@ -3998,6 +4135,7 @@ function mfPreviewHtml(){
       <span>読み込み <b>${MFI.items.length}</b>件（${MFI.source==='api'?'API':'CSV'}）</span>
       <span>新規 <b>${P.add.length}</b></span><span>更新 <b>${P.upd.length}</b></span><span class="muted">変更なし ${P.same.length}</span>
       ${P.unmapped.length?`<span class="minus">取引先が未対応 ${P.unmapped.length}件（取り込みません）</span>`:''}
+      ${P.outside.length?`<span class="minus">${fyShort(CUR_FY)}の外 ${P.outside.length}件（取り込みません。その期に切り替えて取り込んでください）</span>`:''}
     </div>
     ${P.dupWarn.length?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に、このシステムで作った請求がすでにある分が ${P.dupWarn.length}件あります
       （${esc([...new Set(P.dupWarn.map(d=>arCoName(d.rec.companyId)+' '+d.rec.bookMonth))].slice(0,6).join('、'))}）。二重計上にならないよう、古い方を 取消 にするか確認してください。</div>`:''}
@@ -4013,6 +4151,7 @@ function mfPreviewHtml(){
 }
 function mfApply(){
   if(!MFI || !MFI.items.length) return;
+  if(!periodGuard([], 'Money Forward の取り込み')) return;
   /* 新しく作る取引先を先に作り、対応表を本物の ID に置き換える */
   const newCo={};
   Object.keys(MFI.map).forEach(k=>{
@@ -4379,6 +4518,7 @@ function viewArCheck(){
    ========================================================================== */
 function viewArShort(){
   const p='arshort', fy=CUR_FY;
+  const PREV = CMP_ON? new Map(feeSummary(fy-1).map(r=>[r.companyId, r])) : null;
   const all=feeSummary(fy).filter(r=>r.n||r.open||r.carry||r.short)
     .sort((a,b)=>(b.open+b.short+b.carry)-(a.open+a.short+a.carry) || b.deducted-a.deducted);
   const q=(SEARCH[p]||'').trim().toLowerCase();
@@ -4389,7 +4529,7 @@ function viewArShort(){
     <div class="kpi"><div class="lbl">手数料の差引き（未処理）</div><div class="num minus">¥${moneyPlain(S('open'))}</div><div class="sub">${S('openN')}件 ・ 下の「対応」で片付ける</div></div>
     <div class="kpi"><div class="lbl">次回の請求に足す額</div><div class="num">¥${moneyPlain(S('carry'))}</div><div class="sub">Money Forward の請求書に入れたら「入れた」</div></div>
     <div class="kpi"><div class="lbl">入金の不足（期日超過）</div><div class="num minus">¥${moneyPlain(S('short'))}</div><div class="sub">${S('shortN')}件 ・ 督促へ</div></div>
-    <div class="kpi"><div class="lbl">差し引かれた手数料（${esc(fyLabel(fy))}）</div><div class="num">¥${moneyPlain(S('deducted'))}</div>
+    <div class="kpi"><div class="lbl">差し引かれた手数料（${esc(fyLabel(fy))}）</div><div class="num">¥${moneyPlain(S('deducted'))}</div>${PREV? cmpHtml(S('deducted'), [...PREV.values()].reduce((t,r)=>t+r.deducted,0), false) : ''}
       <div class="sub">${S('n')}回 ・ うち当社負担 ¥${moneyPlain(S('absorbed'))}</div></div>
   </div>`;
   const body=rows.map(r=>{
@@ -4403,8 +4543,8 @@ function viewArShort(){
     return `<tr>
       <td><a class="ar-name" onclick="openArLedger('${attr(r.companyId)}')">${esc(arCoName(r.companyId))}</a>
         <div class="muted" style="font-size:10.5px;">手数料 ${feeBurdenOf(r.companyId)}負担${c.feeBurden?'':'（既定）'}</div></td>
-      <td class="r num">${r.n? r.n+'回' : '<span class="zero">—</span>'}</td>
-      <td class="r num">${r.deducted? moneyPlain(r.deducted) : '<span class="zero">—</span>'}</td>
+      <td class="r num">${r.n? r.n+'回' : '<span class="zero">—</span>'}${PREV? `<div class="cmp flat"><span>前 ${(PREV.get(r.companyId)||{}).n||0}回</span></div>` : ''}</td>
+      <td class="r num">${r.deducted? moneyPlain(r.deducted) : '<span class="zero">—</span>'}${PREV? cmpHtml(r.deducted, (PREV.get(r.companyId)||{}).deducted||0, false) : ''}</td>
       <td class="r num">${r.open? `<b class="minus">${moneyPlain(r.open)}</b> <span class="muted">(${r.openN}件)</span>` : '<span class="zero">0</span>'}</td>
       <td class="r num">${r.carry? `<b>${moneyPlain(r.carry)}</b>` : '<span class="zero">0</span>'}</td>
       <td class="r num">${r.short? `<b class="minus">${moneyPlain(r.short)}</b> <span class="muted">(${r.shortN}件)</span>` : '<span class="zero">0</span>'}</td>
@@ -4434,7 +4574,7 @@ function openPayment(id, preset){
   const p = id? findById('payments',id) : null;
   PAY_CTX = { id: id||null,
     companyId: p? p.companyId : (preset?.companyId||''),
-    date: p? p.date : today(),
+    date: p? p.date : defaultDateIn(CUR_FY),
     amount: p? num(p.amount) : num(preset?.amount||0),
     fee: p? num(p.fee) : 0,
     method: p? p.method : '銀行振込',
@@ -4518,6 +4658,7 @@ function payAuto(){
 function paySave(){
   const c=PAY_CTX;
   if(!c.companyId||!num(c.amount)){ toast('取引先と入金額を入力してください。','err'); return; }
+  if(!periodGuard([c.date, c.id? (findById('payments',c.id)||{}).date : ''], '入金')) return;
   /* 充て先は 古い請求から自動。取引先・金額が変わっていなければ 今の充て先をそのまま使う */
   const old=c.id? findById('payments',c.id) : null;
   const same = old && String(old.companyId)===String(c.companyId) && num(old.amount)===num(c.amount);
@@ -4543,6 +4684,7 @@ function paySave(){
 }
 function payDelete(){
   if(!PAY_CTX.id) return;
+  if(!periodGuard([(findById('payments',PAY_CTX.id)||{}).date], '入金の削除')) return;
   if(deleteRecord('payments', PAY_CTX.id, '入金記録')){ closeModal(); renderPage(CURRENT_PAGE); }
 }
 
@@ -4667,6 +4809,7 @@ function viewBills(){
    ここ（画面）と backend（authz.ts billsNeedingFile）の二か所で見る。数は必ずサーバーに聞き直す。 */
 async function confirmBill(id){
   const b=findById('bills',id); if(!b) return;
+  if(!periodGuard([b.bookMonth], '支払請求の確定')) return;
   let n=0;
   try{ n=await attCountFresh('bills', id); }catch(e){ toast('ファイルの有無を確かめられませんでした（通信）。','err'); return; }
   if(!n){
@@ -4788,7 +4931,7 @@ function viewApBook(){
   </div>`;
 
   const G=bookGrid({ rows, months, first:'支払先', col:L.col, pop:'apCellPop', ledger:'openApLedger', ledgerTitle:'買掛元帳を開く',
-    badge:apStatusBadge, flow:['＋ 支払請求','− 支払'] });
+    badge:apStatusBadge, flow:['＋ 支払請求','− 支払'], prevOf:(id,pm)=>apMonthly(id,pm), good:{ billed:false, payment:null, closing:null } });
   const table = all.length
     ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${G.head}</thead><tbody>${G.body||`<tr><td colspan="${G.ncol}" class="empty">条件に合う支払先はありません。</td></tr>`}${G.foot}</tbody></table></div>`
     : `<div class="table-wrap"><div class="empty">まだ支払請求も支払もありません。<br>「定期の支払を作成」または「＋ 支払請求を登録」から始めてください。</div></div>`;
@@ -5157,7 +5300,7 @@ function openPayoutFor(billId){
 function openPayout(id, preset){
   if(!canEdit('payouts')){ toast('支払を記録する権限がありません。','err'); return; }
   const p=id? findById('payouts',id):null;
-  PO_CTX={ id:id||null, companyId:p?p.companyId:(preset?.companyId||''), date:p?p.date:today(),
+  PO_CTX={ id:id||null, companyId:p?p.companyId:(preset?.companyId||''), date:p?p.date:defaultDateIn(CUR_FY),
     amount:p?num(p.amount):num(preset?.amount||0), method:p?p.method:'銀行振込', note:p?p.note:'',
     allocations:p?(p.allocations||[]).map(a=>Object.assign({},a)):[] };
   attPendReset('po','payouts');
@@ -5226,12 +5369,13 @@ function poAuto(){
 function poSave(){
   const c=PO_CTX;
   if(!c.companyId||!num(c.amount)){ toast('支払先と金額を入力してください。','err'); return; }
+  if(!periodGuard([c.date, c.id? (findById('payouts',c.id)||{}).date : ''], '支払')) return;
   const res=commitRecord('payouts', { companyId:c.companyId, date:c.date, amount:num(c.amount), method:c.method,
     note:c.note, allocations:c.allocations, status:'確定' }, { existingId:c.id });
   closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast('支払を記録しました。','ok');
   if(attPendCount('po')) attPendFlush('po', res.record.id);
 }
-function poDelete(){ if(PO_CTX.id && deleteRecord('payouts',PO_CTX.id,'支払記録')){ closeModal(); renderPage(CURRENT_PAGE); } }
+function poDelete(){ if(PO_CTX.id && periodGuard([(findById('payouts',PO_CTX.id)||{}).date],'支払の削除') && deleteRecord('payouts',PO_CTX.id,'支払記録')){ closeModal(); renderPage(CURRENT_PAGE); } }
 
 /* ---------- 資金繰り: 入るお金 − 出るお金 ---------- */
 let CF_MODE='week';
@@ -5923,11 +6067,11 @@ function apPlanFor(ym){
 }
 let GENB_CTX=null;
 function openGenBills(){
-  const ym=thisMonth();
+  const ym=defaultYmIn(CUR_FY);
   openModal(`<h3>定期の支払をまとめて作成</h3>
     <div class="mdsub">費用表で「買掛」にした対象から、その月の支払請求（作成中）を会社ごとにまとめて作ります。金額は費用表のマス（無ければ月額）。</div>
     <div class="form-grid"><div class="full"><label>対象月（計上月）</label>
-      <input id="genbYm" type="month" value="${attr(ym)}" onchange="genBillsPreview()"></div></div>
+      <input id="genbYm" type="month" value="${attr(ym)}" min="${CUR_FY}-08" max="${CUR_FY+1}-07" onchange="genBillsPreview()"></div></div>
     <div id="genbBox" style="margin-top:12px;"></div>
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
       <button class="btn" onclick="genBillsGo()">この内容で作成</button></div>`,'lg');
@@ -5975,6 +6119,7 @@ function apCreateBills(ym, plans){
 }
 function genBillsGo(){
   if(!GENB_CTX||!GENB_CTX.plan.length){ toast('作成する対象がありません。','err'); return; }
+  if(!periodGuard([GENB_CTX.ym], '支払請求の計上月')) return;
   const picked=[...document.querySelectorAll('.genbck:checked')].map(c=>GENB_CTX.plan[Number(c.dataset.i)]);
   if(!picked.length){ toast('対象を選んでください。','err'); return; }
   const n=apCreateBills(GENB_CTX.ym, picked);
@@ -7691,6 +7836,7 @@ function netOfGross(gross, taxCat){
 /** マスに書き込む（予定・税込）。空欄・0 にすると行ごと消す（0円の予定を残さない）。
     ★ 買掛の対象も同じように打てる。ここは「予定」なので、支払請求（実際の請求）とは別もの。 */
 function setCostCell(costItemId, ym, amount){
+  if(recClosed([ym])){ toast(`${fyShort(fyOfDate(ym))} は締め済みです。`,'err'); return; }
   const it = findById('costItems', costItemId); if(!it) return;
   const v = num(amount);
   const r = costCell(costItemId, ym);
@@ -7796,6 +7942,7 @@ function costFill12Go(it, from, fy){
 /** 今年度なら今月から、過ぎた／先の年度なら年度の最初から */
 const costFromIdx = fy => fyOf(thisMonth())===Number(fy) ? fyIndexOf(thisMonth()) : 0;
 function costFill12(costItemId){
+  if(!periodGuard([], '費用表')) return;
   if(!canEdit('expenses')){ toast('入力の権限がありません。','err'); return; }
   const it=findById('costItems', costItemId); if(!it) return;
   const from=costFromIdx(CUR_FY);
@@ -7805,6 +7952,7 @@ function costFill12(costItemId){
   toast(n? n+'マスに入れました。' : '空いているマスはありませんでした。', n?'ok':'err');
 }
 function costFillAll(){
+  if(!periodGuard([], '費用表')) return;
   if(!canEdit('expenses')){ toast('入力の権限がありません。','err'); return; }
   const list=costItemsSorted().filter(it=>it.kind!=='variable');
   if(!list.length){ toast('定期の対象がありません。','err'); return; }
@@ -7813,6 +7961,22 @@ function costFillAll(){
   let n=0; list.forEach(it=>{ n+=costFill12Go(it, from, CUR_FY); });
   renderPage('expenses');
   toast(n? n+'マスに入れました。' : '空いているマスはありませんでした。', n?'ok':'err');
+}
+/** ★ 2026-09-17: 前期の費用表を 今の期の空いているマスへ写す（入っている数字は変えない） */
+function costCopyPrev(){
+  if(!periodGuard([], '費用表')) return;
+  if(!canEdit('expenses')){ toast('入力の権限がありません。','err'); return; }
+  const fy=CUR_FY, from=fyMonths(fy-1), to=fyMonths(fy);
+  const plan=[];
+  costItemsSorted().forEach(it=>from.forEach((ym,i)=>{
+    const v=costCellAmount(it.id, ym); if(!v) return;
+    if(!costItemActive(it, to[i]) || costCell(it.id, to[i])) return;
+    plan.push([it.id, to[i], v]);
+  }));
+  if(!plan.length){ toast(`写せるマスがありません（${fyShort(fy-1)}に予定が無いか、もう入っています）。`,'err'); return; }
+  if(!confirm(`${fyShort(fy-1)}の予定を ${fyShort(fy)}の空いているマス ${plan.length}か所 に写します。入っている数字はそのままです。`)) return;
+  plan.forEach(([id,ym,v])=>setCostCell(id, ym, v));
+  renderPage('expenses'); toast(`${plan.length}マスに入れました。`,'ok');
 }
 /** 費目のない経費（過去の個別入力・CSV取込）。隠さずに1行にまとめて出す。 */
 function costOtherByMonth(fy){
@@ -7836,10 +8000,14 @@ function costOtherByMonth(fy){
 function viewExpenses(){
   const fy=CUR_FY, months=fyMonths(fy);
   const { rows } = costRowsOf(fy);
-  const canE = canEdit('expenses');
+  const canE = canEdit('expenses') && !isClosedFy(fy);
   const cur = thisMonth();
   const curIdx = fyOf(cur)===fy ? fyIndexOf(cur) : -1;
   const tree = costTree(rows);
+  /* ★ 2026-09-17: 前期と比べる — 前期の費用表（同じ対象の予定） */
+  const PV = CMP_ON? (()=>{ const m=new Map(); costRowsOf(fy-1).rows.forEach(r=>m.set(String(r.it.id), r.cells.map(c=>c||0))); return m; })() : null;
+  const pvOfItem = id => (PV && PV.get(String(id))) || Array(12).fill(0);
+  const pvOfNode = node => { const a=Array(12).fill(0); (function w(n){ n.items.forEach(r=>pvOfItem(r.it.id).forEach((v,i)=>a[i]+=v)); n.kids.forEach(w); })(node); return a; };
 
   const sumOf = arr => arr.reduce((s,v)=>s+(v||0),0);
   const mcell = (v,i,extra) => `<td class="r num ${i===curIdx?'curcol':''} ${extra||''}">${v?moneyPlain(v):'<span class="zero">—</span>'}</td>`;
@@ -7859,7 +8027,7 @@ function viewExpenses(){
       <td style="font-size:11.5px;">${r.it.companyId? coLink(r.it.companyId,'ap') : '<span class="zero">—</span>'}</td>
       <td class="r num muted">${num(r.it.monthly)?moneyPlain(r.it.monthly):'<span class="zero">—</span>'}</td>
       ${cells}
-      <td class="r num"><b>${moneyPlain(tot)}</b></td>
+      <td class="r num"><b>${moneyPlain(tot)}</b>${PV? cmpHtml(tot, sumOf(pvOfItem(r.it.id)), false) : ''}</td>
       <td class="r">${canE&&r.kind==='fixed'?`<button class="btn secondary sm" title="この月から年度末まで、空いているマスを埋める" onclick="costFill12('${attr(r.it.id)}')">→12</button>`:''}</td></tr>`;
   };
 
@@ -7871,8 +8039,9 @@ function viewExpenses(){
       <td style="padding-left:${6+node.depth*14}px;">
         <span class="ctw">${open?'▼':'▶'}</span>${esc(node.label)}${node.code?` <span class="muted" style="font-weight:400;font-size:11px;">${esc(node.code)}</span>`:''}</td>
       <td></td><td></td>
-      ${sum.map((v,i)=>mcell(v,i)).join('')}
-      <td class="r num"><b>${moneyPlain(sumOf(sum))}</b></td><td></td></tr>`;
+      ${PV? (()=>{ const pa=pvOfNode(node); return sum.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}${(v||pa[i])? cmpHtml(v, pa[i], false) : ''}</td>`).join('')
+        + `<td class="r num"><b>${moneyPlain(sumOf(sum))}</b>${cmpHtml(sumOf(sum), sumOf(pa), false)}</td><td></td></tr>`; })()
+      : sum.map((v,i)=>mcell(v,i)).join('') + `<td class="r num"><b>${moneyPlain(sumOf(sum))}</b></td><td></td></tr>`}`;
     if(!open) return head;
     return head + node.kids.map(nodeRows).join('') + node.items.map(it=>itemRow(it, node.depth)).join('');
   };
@@ -7889,8 +8058,10 @@ function viewExpenses(){
       <tbody>
         ${tree.map(nodeRows).join('')}
         <tr class="totrow"><td><b>合計（税込）</b></td><td></td><td></td>
-          ${total.map((v,i)=>mcell(v,i)).join('')}
-          <td class="r num"><b>${moneyPlain(sumOf(total))}</b></td><td></td></tr>
+          ${PV? (()=>{ const pa=Array(12).fill(0); PV.forEach(a=>a.forEach((v,i)=>pa[i]+=v));
+              return total.map((v,i)=>`<td class="r num ${i===curIdx?'curcol':''}">${v?moneyPlain(v):'<span class="zero">—</span>'}${(v||pa[i])? cmpHtml(v, pa[i], false) : ''}</td>`).join('')
+                + `<td class="r num"><b>${moneyPlain(sumOf(total))}</b>${cmpHtml(sumOf(total), sumOf(pa), false)}</td><td></td>`; })()
+            : total.map((v,i)=>mcell(v,i)).join('') + `<td class="r num"><b>${moneyPlain(sumOf(total))}</b></td><td></td>`}</tr>
       </tbody></table></div>`
     : `<div class="warnbar">まだ対象がありません。「＋ 対象を追加」から、毎月かかるもの（家賃・通信・リース・給与…）を登録してください。</div>`;
 
@@ -7899,6 +8070,7 @@ function viewExpenses(){
     ${canE&&rows.some(r=>r.kind==='fixed')?`<button class="btn secondary" onclick="costFillAll()">定期をすべて→12</button>`:''}
     ${toolsMenu(`
       ${canCreate('bills')&&costItemsSorted().some(isApCost)?`<button class="btn secondary" onclick="openGenBills()">定期の支払請求を作成（月まとめ）</button><hr>`:''}
+      ${canE? `<button class="btn secondary" onclick="costCopyPrev()">${fyShort(fy-1)}の予定をコピー（空いているマスだけ）</button><hr>` : ''}
       <button class="btn secondary" onclick="exportCsvCost()">${IC.doc} CSV出力</button>
       <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
 
@@ -7937,6 +8109,7 @@ function costReflect(){
       <button class="btn" onclick="costReflectGo()">反映する</button></div>`);
 }
 function costReflectGo(){
+  if(!periodGuard([], '費用表')) return;
   const months=fyMonths(CUR_FY);
   const all=document.getElementById('rfAll').checked;
   const idxs = all? months.map((_,i)=>i) : [Number(document.getElementById('rfM').value)];
@@ -8777,18 +8950,18 @@ function viewDashboard(){
     body: guide+strip+`
     <div class="kpi-grid">
       <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上高（${taxLabel()}）</div>
-        <div class="num">${moneyPlain(rev)}</div>
-        <div class="sub">予算比 ${budRev? (actRevCmp/budRev*100).toFixed(0)+'%' : '—'} ／ 前年同期 ${pct(actRevCmp, prevRev)}</div></div>
+        <div class="num">${moneyPlain(rev)}</div>${cmpHtml(rev, S(prev.revenue,s,e), true)}
+        <div class="sub">予算比 ${budRev? (actRevCmp/budRev*100).toFixed(0)+'%' : '—'} ／ 前期同期 ${pct(actRevCmp, prevRev)}</div></div>
       <div class="kpi clickable" onclick="goto('yojitsu')"><div class="lbl">売上総利益</div>
-        <div class="num ${gross<0?'minus':''}">${moneyPlain(gross)}</div><div class="sub">粗利率 ${rate(gross,rev)}</div></div>
+        <div class="num ${gross<0?'minus':''}">${moneyPlain(gross)}</div>${cmpHtml(gross, S(prev.gross,s,e), true)}<div class="sub">粗利率 ${rate(gross,rev)}</div></div>
       <div class="kpi clickable" onclick="goto('compare')"><div class="lbl">経常利益（税引前・${taxLabel()}）</div>
-        <div class="num ${ord<0?'minus':'plus'}">${moneyPlain(ord)}</div>
-        <div class="sub">利益率 ${rate(ord,rev)} ／ 予算比 ${budOrd? (actOrdCmp/budOrd*100).toFixed(0)+'%' : '—'} ／ 前年 ${pct(actOrdCmp, prevOrd)}</div></div>
+        <div class="num ${ord<0?'minus':'plus'}">${moneyPlain(ord)}</div>${cmpHtml(ord, S(prev.ordinary,s,e), true)}
+        <div class="sub">利益率 ${rate(ord,rev)} ／ 予算比 ${budOrd? (actOrdCmp/budOrd*100).toFixed(0)+'%' : '—'} ／ 前期 ${pct(actOrdCmp, prevOrd)}</div></div>
       <div class="kpi clickable" onclick="goto('arbook')"><div class="lbl">売掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
-        <div class="num">${moneyPlain(bal.ar)}</div>
+        <div class="num">${moneyPlain(bal.ar)}</div>${CMP_ON? cmpHtml(bal.ar, dashBalances(fy-1,e).ar, false) : ''}
         <div class="sub ${bal.arOver?'minus':''}">うち期限超過 ${moneyPlain(bal.arOver)}</div></div>
       <div class="kpi clickable" onclick="goto('apbook')"><div class="lbl">買掛残高 <span class="muted">${bal.now?'今日':esc(bal.asOf)}</span></div>
-        <div class="num">${moneyPlain(bal.ap)}</div><div class="sub">${bal.now? '7日以内 '+moneyPlain(dueSoon.reduce((s2,b)=>s2+balanceOfBill(b),0)) : '月末時点'}</div></div>
+        <div class="num">${moneyPlain(bal.ap)}</div>${CMP_ON? cmpHtml(bal.ap, dashBalances(fy-1,e).ap, null) : ''}<div class="sub">${bal.now? '7日以内 '+moneyPlain(dueSoon.reduce((s2,b)=>s2+balanceOfBill(b),0)) : '月末時点'}</div></div>
     </div>
     ${staffTbl}
 
@@ -10260,9 +10433,7 @@ function viewSettings(){
         ${canEdit('yojitsu')?`<button class="btn secondary sm" onclick="cfSetStart()">変更</button>`:''}</div>
         <div class="fhelp">通帳の現在残高を入れると、資金繰り表の残高見込みが実際の数字になります。</div></div></div>
 
-    <div class="panel"><div class="panel-hd"><b>会計年度</b></div>
-      <div class="panel-bd"><div style="font-size:13px;">8月1日 〜 翌年7月31日（${fyLabel(CUR_FY)}）<br>
-        <span class="muted" style="font-size:12px;">四半期：Q1=8〜10月／Q2=11〜1月／Q3=2〜4月／Q4=5〜7月</span></div></div></div>
+    ${periodPanel()}
 
     ${selfInfoPanel()}
 
@@ -10275,6 +10446,48 @@ function viewSettings(){
         データ版数：<b class="num">${SERVER_REV}</b> ／ epoch：<code>${esc(SERVER_EPOCH)}</code><br>
         未同期の変更：<b>${pendingCount()}件</b><br>
         <button class="btn secondary sm" style="margin-top:8px;" onclick="localStorage.removeItem(STORAGE_KEY);location.reload()">キャッシュを消して再読み込み</button></div></div>` });
+}
+/** 設定 › 期: 第1期・締め */
+function periodPanel(){
+  const adm=isAdmin(), cur=fyOf(thisMonth());
+  const list=fyChoices().filter(f=>f<=cur).sort((a,b)=>b-a);
+  const log=((DB.settings&&DB.settings.closeLog)||[]).slice(-6).reverse();
+  return `<div class="panel"><div class="panel-hd"><b>会計期間（期）</b><span class="sub">8月1日 〜 翌年7月31日 ・ Q1=8〜10月／Q2=11〜1月／Q3=2〜4月／Q4=5〜7月</span></div>
+    <div class="panel-bd">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;">
+        第1期 ＝ <b class="num">${firstFy()}/8 〜 ${firstFy()+1}/7</b>（いま選んでいる期：<b>${fyLabel(CUR_FY)}</b>）
+        ${adm? `<button class="btn secondary sm" onclick="periodSetFirst()">第1期を変える</button>` : ''}</div>
+      <div class="table-wrap" style="margin-top:10px;"><table>
+        <thead><tr><th>期</th><th>期間</th><th>状態</th><th></th></tr></thead>
+        <tbody>${list.map(f=>`<tr><td><b>${fyShort(f)}</b>${f===cur?' <span class="badge b-blue">今期</span>':''}</td>
+          <td class="num">${fyStartDate(f)} 〜 ${fyEndDate(f)}</td>
+          <td>${isClosedFy(f)? '<span class="badge b-gray">🔒 締め済み（見るだけ）</span>' : '<span class="badge b-green">入力できる</span>'}</td>
+          <td class="r">${adm? (isClosedFy(f)? `<button class="btn secondary sm" onclick="periodClose(${f},false)">締めを外す</button>`
+            : (f<cur? `<button class="btn sm" onclick="periodClose(${f},true)">${fyShort(f)}を締める</button>` : '')) : ''}</td></tr>`).join('')}</tbody></table></div>
+      <div class="fhelp">締めた期は だれも入力・修正できません（管理者も。直すときは 締めを外す）。今期は締められません。</div>
+      ${log.length? `<div class="fhelp" style="margin-top:6px;">記録：${log.map(x=>`${esc(String(x.at).slice(0,10))} ${esc(String(x.by||'').split('@')[0])} ${fyShort(x.fy)}を${x.action==='close'?'締めた':'締めを外した'}`).join(' ／ ')}</div>` : ''}
+    </div></div>`;
+}
+function periodClose(fy, on){
+  if(!isAdmin()){ toast('管理者だけができます。','err'); return; }
+  if(on && fy>=fyOf(thisMonth())){ toast('今期は締められません。','err'); return; }
+  if(on && !confirm(`${fyLabel(fy)} を締めます。\n\n締めると、この期の請求・入金・支払請求・支払・費用表・予実の入力は だれも追加・修正・削除できなくなります。\nよろしいですか？`)) return;
+  if(!on && !confirm(`${fyLabel(fy)} の締めを外して、入力できるようにします。よろしいですか？`)) return;
+  DB.settings=DB.settings||{};
+  const set=new Set(closedFys()); on? set.add(Number(fy)) : set.delete(Number(fy));
+  DB.settings.closedFy=[...set].sort();
+  DB.settings.closeLog=(DB.settings.closeLog||[]).concat([{ fy:Number(fy), action:on?'close':'open', by:(SESSION&&SESSION.email)||'', at:new Date().toISOString() }]).slice(-50);
+  PENDING.changed.settings=DB.settings; schedulePush();
+  paintPeriodBar(); renderPage(CURRENT_PAGE);
+  toast(on? `${fyShort(fy)}を締めました。` : `${fyShort(fy)}の締めを外しました。`,'ok');
+}
+function periodSetFirst(){
+  const v=prompt('第1期は 何年の8月に始まりましたか？（西暦4桁）', String(firstFy()));
+  if(v==null) return;
+  const n=Number(String(v).trim());
+  if(!Number.isInteger(n) || n<1990 || n>fyOf(thisMonth())){ toast('西暦4桁で入れてください。','err'); return; }
+  DB.settings=DB.settings||{}; DB.settings.firstFy=n; PENDING.changed.settings=DB.settings; schedulePush();
+  paintPeriodBar(); renderPage(CURRENT_PAGE); toast(`第1期＝${n}/8〜 にしました（${fyShort(CUR_FY)}）。`,'ok');
 }
 function accForm(id){
   const a=(DB.accounts||[]).find(x=>String(x.id)===String(id)||x.code===id);

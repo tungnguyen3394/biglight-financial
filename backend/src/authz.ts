@@ -146,3 +146,62 @@ export function billsNeedingFile(state: any, changed: any): string[] {
   }
   return out
 }
+
+/* ───────── 締めた期は 変えられない ─────────
+   ★ 2026-09-17 利用者の指示: 管理者が「第N期を締める」と、その期の伝票は だれも追加・修正・削除できない。
+   ・どの期か: 請求＝計上月（無ければ請求日）、支払請求＝計上月（無ければ受領日）、入金・支払＝日付、
+     費用表のマス＝月、予算・見込・実績＝fy。
+   ・前も後も見る（締めた期へ動かす・締めた期から動かす、の両方を止める）。
+   ・例外: 充て先（allocations）・差額の処理（adjust）・更新日時 だけの変化は通す
+     （新しい期の請求が来たときに 古い入金の充て先が足されるため）。デモデータは通す（作り直し・全部消す）。
+   ・締めの一覧は settings.closedFy。settings は管理者しか変えられない（index.ts）。 */
+const PERIOD_OF: Record<string, (r: any) => number | null> = {
+  invoices: r => fyOfYm(String(r.bookMonth || r.issueDate || '')),
+  bills:    r => fyOfYm(String(r.bookMonth || r.recvDate || '')),
+  payments: r => fyOfYm(String(r.date || '')),
+  payouts:  r => fyOfYm(String(r.date || '')),
+  expenses: r => fyOfYm(String(r.bookMonth || r.date || '')),
+  costPlans: r => fyOfYm(String(r.ym || '')),
+  budgets:   r => (r.fy != null && r.fy !== '' ? Number(r.fy) : null),
+  forecasts: r => (r.fy != null && r.fy !== '' ? Number(r.fy) : null),
+  actuals:   r => (r.fy != null && r.fy !== '' ? Number(r.fy) : null),
+  actualAdjust: r => (r.fy != null && r.fy !== '' ? Number(r.fy) : null),
+}
+function fyOfYm(s: string): number | null {
+  const m = /^(\d{4})-(\d{2})/.exec(s)
+  if (!m) return null
+  const y = Number(m[1]), mo = Number(m[2])
+  return mo >= 8 ? y : y - 1
+}
+const FREE_KEYS = new Set(['allocations', 'adjust', 'updatedAt', 'updatedBy', '_dirty', 'staff', 'carry'])
+function onlyFreeChanged(a: any, b: any): boolean {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})])
+  for (const k of keys) {
+    if (FREE_KEYS.has(k)) continue
+    if (JSON.stringify(a?.[k] ?? null) !== JSON.stringify(b?.[k] ?? null)) return false
+  }
+  return true
+}
+export function checkClosedPeriods(state: any, changed: any, deleted: any) {
+  const closed: number[] = ((state?.settings?.closedFy) || []).map(Number)
+  if (!closed.length) return { ok: true, reason: '' }
+  const isClosed = (f: number | null) => f != null && closed.includes(Number(f))
+  for (const coll of Object.keys(PERIOD_OF)) {
+    const of = PERIOD_OF[coll]
+    const base: any[] = Array.isArray(state?.[coll]) ? state[coll] : []
+    const byId = new Map(base.map((r: any) => [String(r?.id), r]))
+    for (const id of (deleted?.[coll] || [])) {
+      const old: any = byId.get(String(id))
+      if (old && !old.demo && isClosed(of(old))) return { ok: false, reason: 'period-closed', detail: { coll, id, fy: of(old) } }
+    }
+    for (const rec of (Array.isArray(changed?.[coll]) ? changed[coll] : [])) {
+      if (!rec || rec.demo) continue
+      const old: any = byId.get(String(rec.id))
+      const touches = isClosed(of(rec)) || (old && isClosed(of(old)))
+      if (!touches) continue
+      if (old && onlyFreeChanged(old, rec)) continue
+      return { ok: false, reason: 'period-closed', detail: { coll, id: rec.id, fy: isClosed(of(rec)) ? of(rec) : of(old) } }
+    }
+  }
+  return { ok: true, reason: '' }
+}

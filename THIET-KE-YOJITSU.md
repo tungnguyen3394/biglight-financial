@@ -269,6 +269,17 @@ Vấn đề: khoảng 5–10/50 công ty trả thiếu hoặc tự trừ phí ch
 - 督促 **không** tính khoản lẻ (`isFeeResidual`) — xử lý ở màn 差額.
 - Dữ liệu cũ có `fee>0` được hiểu là 当社負担 (đã đóng).
 
+### 4.3d 期 (kỳ kế toán), khoá kỳ, so sánh kỳ trước — 2026-09-17
+
+- `settings.firstFy` (mặc định 2021) → `periodNo(fy)=fy-firstFy+1`; `fyLabel` = `第5期（2025/8〜2026/7）`. Thanh trên cùng: ◀ select ▶ + nút `前期と比べる`.
+- **periodGuard(dates, what)**: mọi chỗ lưu (入金・支払・請求 tay/CSV/MF・支払請求・旧経費・費用表・予実入力・定期支払・予算コピー) chỉ nhận ngày thuộc `CUR_FY` và kỳ chưa khoá. Sai → hộp thoại + nút "第N期に切り替える" (form giữ nguyên). Ngày mặc định = `defaultDateIn(CUR_FY)` (hôm nay nếu trong kỳ, kỳ cũ → 7/31, kỳ tương lai → 8/1). MF: hoá đơn ngoài kỳ bị bỏ qua (`plan.outside`).
+- **締め**: `settings.closedFy[]` + `closeLog` (chỉ Admin; không khoá kỳ hiện tại). Web: dải thông báo, ô nhập readonly. Server: `authz.checkClosedPeriods` trong `/state-delta` → 403 `period-closed`.
+  Kỳ của bản ghi: invoices/bills = bookMonth (fallback issueDate/recvDate), payments/payouts = date, costPlans = ym, budgets/forecasts/actuals = fy. Xét cả trước và sau khi sửa.
+  Cho qua: chỉ đổi `allocations/adjust/updatedAt/updatedBy/staff/carry` (FIFO của kỳ mới chạm vào入金 cũ), bản ghi `demo`. Đổi `settings` cùng lúc → xét theo settings mới.
+- **前期と比べる** (`CMP_ON`, localStorage `bl_yj_cmp`, mặc định tắt): `cmpHtml(cur, prev, good)` = dòng "前 X ▲+x%". good=true tăng xanh / false tăng đỏ / null không màu.
+  予実 (損益: theo ô đang hiện; tổng so luỹ kế tới lastIdx; 着地 so cả năm) · 勘定科目別 · 売掛金/買掛金 bookGrid (prevOf: cùng tháng/quý kỳ trước; AR billed/payment good, balance bad; AP billed bad) · 費用表 (so costPlans kỳ trước, tăng = đỏ) · ダッシュボード · 差額.
+- 費用表 › ツール › `第N期の予定をコピー` (chỉ ô trống). Tests: smoke (期), attachments.js (締め server).
+
 ### 4.4 OKR
 
 | Key | Trường chính |

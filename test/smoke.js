@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, setBookView:v=>{BOOK_VIEW=v}, feeBurdenOf, get DASH_RANGE(){return DASH_RANGE} };';
+code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, setBookView:v=>{BOOK_VIEW=v}, feeBurdenOf, periodNo, isClosedFy, defaultDateIn, cmpRate, setCmp:v=>{CMP_ON=v}, recClosed, get DASH_RANGE(){return DASH_RANGE} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -714,6 +714,45 @@ console.log('\n― 回収のツール・請求の手入力（複数行）・CSV�
   eq('CSV: 必要な列が無ければ理由を返す', !!ctx.arCsvToRows('a,b\n1,2\n').error, true);
   eq('手入力では まだ保存していない', _db.invoices.length, before);
   eq('並び順: 残高が大きい順', ctx.arSorter('bal')({bal:1,name:'a',staff:{key:'',name:''}},{bal:5,name:'b',staff:{key:'',name:''}})>0, true);
+}
+
+console.log('\n― 期（会計期間）・締め・前期と比べる（2026-09-17） ―');
+{
+  const X=ctx.__x;
+  const keepSet=_db.settings; _db.settings=Object.assign({}, keepSet||{});
+  eq('第1期＝2021年8月 → 2025/8〜は第5期', [X.periodNo(2025), X.periodNo(2021)], [5, 1]);
+  eq('期の名前', ctx.fyLabel(2025), '第5期（2025/8〜2026/7）');
+  _db.settings.firstFy=2020;
+  eq('第1期を変えると番号も変わる', X.periodNo(2025), 6);
+  delete _db.settings.firstFy;
+  const cur=ctx.fyOf(ctx.thisMonth());
+  eq('入力の初期値: 今期は今日、過去の期は期末、未来の期は期首', [X.defaultDateIn(cur), X.defaultDateIn(cur-1), X.defaultDateIn(cur+1)],
+    [ctx.today(), (cur)+'-07-31', (cur+1)+'-08-01']);
+  X.setFY(2025);
+  eq('期の中の日付は通る', ctx.periodGuard(['2025-08-01','2026-07-31','2026-01'],'テスト'), true);
+  el.innerHTML='';
+  eq('期の外の日付は止める', ctx.periodGuard(['2026-09-10'],'入金'), false);
+  eq('止めた理由と「第6期に切り替える」', [String(el.innerHTML).includes('第5期'), String(el.innerHTML).includes('第6期 に切り替える')], [true, true]);
+  _db.settings.closedFy=[2025];
+  eq('締めた期は 期の中でも止める', ctx.periodGuard(['2025-09-01'],'入金'), false);
+  eq('締めた期の判定', [X.isClosedFy(2025), X.isClosedFy(2024), X.recClosed(['2025-10-01']), X.recClosed(['2026-08-01'])], [true, false, true, false]);
+  el.innerHTML=''; X.setFY(2024);
+  ctx.periodGuard(['2025-09-01'],'入金');
+  eq('締めた期へは 切り替えのボタンを出さない', String(el.innerHTML).includes('に切り替える'), false);
+  _db.settings.closedFy=[];
+  X.setFY(2025);
+  eq('増減率', [X.cmpRate(110,100), X.cmpRate(90,100), X.cmpRate(5,0)], [10, -10, null]);
+  X.setCmp(true);
+  eq('前期と比べる: 増えて良い→緑、費用が増える→赤', [/cmp up/.test(ctx.cmpHtml(110,100,true)), /cmp down/.test(ctx.cmpHtml(110,100,false)), ctx.cmpHtml(110,100,true).includes('+10.0%')], [true, true, true]);
+  el.innerHTML=''; const hy=ctx.viewYojitsu();
+  eq('予実に 前期の比べ', hy.includes('class="cmp'), true);
+  el.innerHTML=''; const hb=ctx.viewArBook();
+  eq('売掛金に 前期の比べ', hb.includes('class="cmp'), true);
+  el.innerHTML=''; const he=ctx.viewExpenses();
+  eq('費用表の画面が出る（比べ on）', he.includes('費用表'), true);
+  X.setCmp(false);
+  eq('比べ off なら 出さない', ctx.viewYojitsu().includes('class="cmp'), false);
+  _db.settings=keepSet;
 }
 
 console.log('\n― 取引先モーダル（得意先／支払先・横3列） ―');

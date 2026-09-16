@@ -13,7 +13,7 @@ import cors from 'cors'
 import { pool, ensureTables, cfgGet, cfgSet } from './db'
 import { verifyBearer, loginWithToken, profileOf, canWriteAtAll } from './auth'
 import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from './merge'
-import { checkCollections, checkMoneyRules, permOf, billsNeedingFile } from './authz'
+import { checkCollections, checkMoneyRules, permOf, billsNeedingFile, checkClosedPeriods } from './authz'
 import { initFiles, filesRouter, attachmentCounts } from './files'
 import { loadStateCached } from './statecache'
 import { mfRouter } from './mfinvoice'
@@ -343,7 +343,10 @@ app.put('/state-delta', async (req, res) => {
     {
       const g2 = checkCollections(merged, role, email, changed, deleted)
       const g3 = g2.ok ? checkMoneyRules(merged, role, changed, deleted) : { ok: true, reason: '', detail: undefined }
-      const bad: any = !g2.ok ? g2 : (!g3.ok ? g3 : null)
+      /* 締めた期（2026-09-17）。settings を同じ送信で変える（締めを外す）ときは 変えたあとの一覧で見る */
+      const stNow = Object.prototype.hasOwnProperty.call(changed, 'settings') ? Object.assign({}, merged, { settings: changed.settings }) : merged
+      const g4 = (g2.ok && g3.ok) ? checkClosedPeriods(stNow, changed, deleted) : { ok: true, reason: '', detail: undefined }
+      const bad: any = !g2.ok ? g2 : (!g3.ok ? g3 : (!g4.ok ? g4 : null))
       if (bad) {
         syncLog(req, email, PERM_MODE === 'log' ? 'accepted' : 'blocked', 'authz-' + bad.reason, { mode: PERM_MODE, role, ...(bad.detail || {}) })
         if (PERM_MODE !== 'log') {
@@ -352,6 +355,8 @@ app.put('/state-delta', async (req, res) => {
             ? '確定済みの伝票は削除できません。「取消」をご利用ください。'
             : bad.reason === 'locked-doc-amount'
               ? '確定済み伝票の金額変更は管理者・マネージャーのみです。'
+              : bad.reason === 'period-closed'
+              ? '締め済みの期の伝票は 追加・修正・削除できません（設定 › 会計期間 で締めを外せます）。'
               : 'この操作の権限がありません（管理者にご確認ください）。'
           return res.status(403).json({ error: bad.reason, detail: bad.detail, message: msg })
         }

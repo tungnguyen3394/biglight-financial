@@ -74,7 +74,8 @@ export default {
               ['`締日` / `サイト`', 'Ngày chốt sổ / số tháng được trả chậm', 'VD: chốt cuối tháng, trả cuối tháng sau'],
               ['`税込` / `税抜`', 'Đã gồm thuế / chưa gồm thuế tiêu dùng', 'Nút đổi cách xem ở góc phải'],
               ['`残高`', 'Số dư', ''],
-              ['`年度` · `四半期` · `上期` `下期` · `通期`', 'Năm tài chính · quý · nửa đầu, nửa sau năm · cả năm', 'Năm tài chính: **1/8 → 31/7 năm sau**'],
+              ['`第N期` · `四半期` · `上期` `下期` · `通期`', 'Kỳ (năm tài chính) · quý · nửa đầu, nửa sau năm · cả năm', '**1/8 → 31/7 năm sau**. 第5期 = 2025/8〜2026/7'],
+              ['`前期` · `締め`', 'Kỳ trước · khoá kỳ', ''],
               ['`累計`', 'Luỹ kế', 'Cộng dồn từ đầu năm tài chính'],
               ['`督促`', 'Nhắc nợ', ''],
               ['`証憑` · `証憑なし`', 'File chứng từ gốc · chưa có file', 'Hoá đơn PDF, sao kê chuyển khoản, biên lai, hợp đồng'],
@@ -166,7 +167,8 @@ export default {
               { mark: 'menu', text: '**Menu**: bấm để chuyển màn hình. Số đỏ = số việc cần xử lý ở màn đó.', badge: 'left' },
               { mark: 'burger', text: 'Thu gọn / mở lại menu (khi cần chỗ rộng cho bảng).' },
               { mark: 'search', text: '**Tìm nhanh** công ty, hoá đơn, hoá đơn phải trả.' },
-              { mark: 'fy', text: '**Chọn năm tài chính** (`2025年度` = 1/8/2025 → 31/7/2026). Mọi bảng đổi theo.' },
+              { mark: 'fy', text: '**Chọn kỳ** (`第5期` = 1/8/2025 → 31/7/2026) bằng ◀ ▶ hoặc danh sách. Mọi bảng đổi theo; **chỉ nhập được ngày trong kỳ đang chọn**.' },
+              { mark: 'cmp', text: '`前期と比べる`: hiện số kỳ trước và % tăng giảm ở các bảng.' },
               { mark: 'guide', text: '`入力ガイド`: màn nào nhập gì — mở đúng mục của màn đang xem.' },
               { mark: 'bell', text: '**Chuông**: danh sách việc cần làm (quá hạn, nhắc nợ…).' },
               { mark: 'avatar', text: 'Tài khoản của bạn: cài đặt mail, `ログアウト`.' },
@@ -203,6 +205,62 @@ export default {
               { mark: 'table', text: 'Bảng từng màn hình: `順番` (thứ tự nên làm), **nhập gì**, **ảnh hưởng tới đâu**. Bấm tên màn hình để mở.' },
             ],
           }],
+        },
+      ],
+    },
+
+    /* ================================================================== */
+    {
+      title: '期 — kỳ kế toán',
+      summary: 'Chuyển kỳ · chỉ nhập trong kỳ · so sánh với kỳ trước · khoá kỳ (締め)',
+      pages: [
+        {
+          title: 'Chuyển kỳ và so sánh với kỳ trước',
+          lead: 'BIGLIGHT tính kỳ từ **1/8 đến 31/7 năm sau**. 2025/8〜2026/7 là **第5期**.',
+          screens: [{
+            shot: 'period_cmp', maxH: 104,
+            steps: [
+              { mark: 'bar', text: '◀ ▶ hoặc chọn trong danh sách để **đổi kỳ**. Kỳ đã khoá có 🔒. Mọi màn hình đổi theo kỳ này.' },
+              { mark: 'cmp', text: '`前期と比べる`: bật / tắt so sánh (máy nhớ lựa chọn).' },
+              { mark: 'cell', text: 'Dưới mỗi số: `前` = số của **cùng tháng kỳ trước**, và **% tăng giảm**.' },
+              { mark: 'tot', text: 'Cột tổng: so **luỹ kế đến cùng tháng** (kỳ đang chạy dở không bị so với cả năm kỳ trước).', badge: 'right' },
+            ],
+          }],
+          blocks: [
+            { p: 'Màu theo **ý nghĩa**: doanh thu, lợi nhuận tăng → **xanh** ▲; chi phí, số dư phải thu tăng → **đỏ**. Có ở `予実管理` (損益・勘定科目別), `売掛金` / `買掛金` (dòng tổng và 請求 / 入金), `費用表` (so với dự kiến kỳ trước), `ダッシュボード`, `差額`.' },
+            { p: 'Sang kỳ mới: số dư phải thu / phải trả **tự chuyển sang**. `費用表` › `ツール` › `第N期の予定をコピー` lấy dự kiến kỳ trước làm điểm bắt đầu; `予実管理` › `ツール` › `前年実績から予算を作成` cho ngân sách.' },
+          ],
+        },
+        {
+          title: 'Chỉ nhập được dữ liệu của kỳ đang chọn',
+          lead: 'Ví dụ đang xem **第5期** mà ghi tiền vào ngày 2026/9/10 (thuộc **第6期**) → hệ thống chặn.',
+          screens: [{
+            shot: 'period_guard', modal: true, maxH: 60,
+            steps: [
+              { mark: 'msg', text: 'Lý do: ngày nằm ngoài kỳ đang chọn, thuộc kỳ nào.' },
+              { mark: 'go', text: 'Bấm để **chuyển sang kỳ đúng** — form đang nhập vẫn giữ nguyên, bấm `保存` lại là xong.' },
+            ],
+          }],
+          blocks: [
+            { list: [
+              'Áp dụng cho: `入金`, `支払`, `請求` (nhập tay / CSV / Money Forward), `支払請求`, `費用表`, `予実管理` › `入力`.',
+              'Ngày mặc định trong form: hôm nay nếu thuộc kỳ đang chọn; nếu xem kỳ cũ thì là **31/7** (cuối kỳ).',
+              'Lấy hoá đơn từ Money Forward: hoá đơn ngoài kỳ **không được lấy** (có ghi số lượng) — chuyển kỳ rồi lấy lại.',
+            ] },
+          ],
+        },
+        {
+          title: 'Khoá kỳ (締め)',
+          lead: 'Khi đã chốt sổ với văn phòng kế toán, **Admin** khoá kỳ đó để không ai sửa nhầm.',
+          screens: [{
+            shot: 'period_close', modal: true, maxH: 100,
+            steps: [
+              { mark: 'closed', text: 'Kỳ đã khoá: 🔒 `締め済み（見るだけ）`. Mọi màn hình của kỳ này có dải thông báo và **không nhập / sửa / xoá được** — kể cả Admin.' },
+              { mark: 'btn', text: '`第N期を締める`: khoá kỳ (chỉ kỳ đã qua; không khoá được kỳ hiện tại).' },
+              { mark: 'first', text: '`第1期を変える`: nếu cách đánh số kỳ khác (mặc định 第1期 = 2021/8).' },
+            ],
+          }],
+          note: 'Cần sửa kỳ đã khoá → Admin bấm `締めを外す`, sửa xong khoá lại. Mọi lần khoá / mở đều được ghi lại. File chứng từ (📎) vẫn đính thêm được vào kỳ đã khoá.',
         },
       ],
     },
@@ -880,7 +938,8 @@ export default {
               'Xem `損益（予実対比）` và `見込実績表` → chuẩn bị họp.',
             ] },
             { check: 'Đầu năm tài chính (tháng 8)', items: [
-              'Đổi năm ở góc trên sang năm mới.',
+              'Chuyển ◀ ▶ sang kỳ mới (VD 第6期).',
+              'Sau khi chốt sổ kỳ cũ với văn phòng kế toán: Admin `設定` › `基本設定` › `第N期を締める`.',
               '`予実管理` › `入力` › `予算` → lập ngân sách (có thể `前年実績から予算を作成`).',
               '`費用` › `費用表` → kiểm tra các khoản chi, bấm `定期をすべて→12`.',
               '`取引先` → kiểm tra điều kiện thanh toán, người phụ trách.',
