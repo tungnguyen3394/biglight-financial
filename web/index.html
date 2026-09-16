@@ -8128,10 +8128,13 @@ const PAGE_GUIDE = {
 };
 function openGuide(secId){
   const secs=SECTIONS.filter(x=>x.tabs.some(t=>canSee(t.id)));
-  const sec=secs.find(x=>x.id===secId) || secs.find(x=>x.id==='sec-ar') || secs[0];
+  /* ★ 2026-09-16: 引数なしで開いたら、今いる画面の区を出す（予実管理で押したのに
+     回収のガイドが出ると、探しに行く手間が増えるため）。 */
+  const here=(SECTION_OF[CURRENT_PAGE]||{}).id;
+  const sec=secs.find(x=>x.id===secId) || secs.find(x=>x.id===here) || secs.find(x=>x.id==='sec-ar') || secs[0];
   if(!sec) return;
   openModal(`<h3>入力ガイド　<span style="font-size:13px;color:var(--muted);font-weight:400;">${esc(sec.label)}</span></h3>
-    ${guideDiagram()}${guidePromise()}
+    ${sec.id==='sec-yj'? guideYjDiagram() : guideDiagram()}${guidePromise()}
     <div class="sectabs" style="margin-top:12px;">
       ${secs.map(x=>`<button class="${x.id===sec.id?'on':''}" onclick="openGuide('${x.id}')">${esc(x.label)}</button>`).join('')}
     </div>
@@ -8148,7 +8151,7 @@ function guideDiagram(){
   const lbl=(x,y,t)=>`<text x="${x}" y="${y}" font-size="10.5" fill="var(--muted)">${t}</text>`;
   const pth=d=>`<path d="${d}" stroke="var(--muted)" stroke-width="1.3" fill="none" marker-end="url(#gdar)"/>`;
   return `<div style="overflow-x:auto;margin-bottom:10px;">
-  <svg viewBox="0 0 860 320" width="600" style="width:100%;max-width:600px;height:auto;">
+  <svg viewBox="0 0 860 320" width="600" style="display:block;margin:0 auto;width:100%;max-width:600px;height:auto;">
     <defs><marker id="gdar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
     <rect x="6" y="26" width="716" height="78" rx="10" fill="rgba(59,130,246,.08)"/>
@@ -8178,6 +8181,43 @@ function guideDiagram(){
     ${pth('M560 275 L524 275')}
     ${lbl(236,138,'売上（請求書から自動）')}
     ${lbl(556,316,'費用の実績はここを見て手入力（税抜）')}
+  </svg></div>`;
+}
+/** 予実管理の図 — 「いつ・何を見て・どこに打つと・どこに出るか」。
+    ★ 2026-09-16 利用者の指示: 入力の順番は 文章より 図のほうが分かる。
+      予実管理の区を開いたときは 全体図のかわりに この図を出す（高さは同じにして、
+      1366×768 でガイドがスクロールしないようにする）。 */
+function guideYjDiagram(){
+  const box=(x,y,w,t,sub)=>`<rect x="${x}" y="${y}" width="${w}" height="38" rx="7" fill="var(--card)" stroke="var(--border-strong)"/>
+    <text x="${x+w/2}" y="${y+(sub?17:24)}" text-anchor="middle" font-size="12.5" fill="var(--text)">${t}</text>`
+    +(sub?`<text x="${x+w/2}" y="${y+30}" text-anchor="middle" font-size="10" fill="var(--muted)">${sub}</text>`:'');
+  const pth=d=>`<path d="${d}" stroke="var(--muted)" stroke-width="1.3" fill="none" marker-end="url(#yjar)"/>`;
+  const lbl=(x,y,t,c)=>`<text x="${x}" y="${y}" font-size="10.5" fill="${c||'var(--muted)'}">${t}</text>`;
+  /* 上から順に「いつ」。①②③は毎年・毎月なぞる順で、④だけは手で打たない。 */
+  const rows=[
+    {y:54,  a:'① 年度のはじめ（8月）', as:'1回だけ・前年実績からコピー可', b:'入力 › 予算',           bs:'この年度の計画（税抜）'},
+    {y:110, a:'② 見通しが変わったら',   as:'毎月',                       b:'入力 › 見込',           bs:'着地見込（税抜）'},
+    {y:166, a:'③ 会計事務所の 試算表',  as:'毎月 届いたら',               b:'入力 › 実績 の 費用の行', bs:'売上原価・販管費・営業外（税抜）'},
+    {y:222, a:'④ 請求書（回収 › 売掛金）', as:'確定した分',               b:'実績 の 売上の行',      bs:'自動。灰色で直せません'},
+  ];
+  return `<div style="overflow-x:auto;margin-bottom:10px;">
+  <svg viewBox="0 0 860 330" width="600" style="display:block;margin:0 auto;width:100%;max-width:600px;height:auto;">
+    <defs><marker id="yjar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+    <rect x="258" y="18" width="330" height="264" rx="10" fill="rgba(16,185,129,.10)"/>
+    ${lbl(266,34,'予実管理 › 入力')}
+    <rect x="612" y="18" width="234" height="264" rx="10" fill="rgba(59,130,246,.08)"/>
+    ${lbl(620,34,'見るところ')}
+    ${lbl(16,34,'いつ・何を見て')}
+    ${rows.map(r=>box(14,r.y,224,r.a,r.as)+box(266,r.y,314,r.b,r.bs)
+      +pth(`M240 ${r.y+19} L262 ${r.y+19}`)+pth(`M582 ${r.y+19} L616 ${r.y+19}`)).join('')}
+    <rect x="620" y="54" width="218" height="206" rx="7" fill="var(--card)" stroke="var(--border-strong)"/>
+    <text x="729" y="100" text-anchor="middle" font-size="12.5" fill="var(--text)">損益（予実対比）</text>
+    <text x="729" y="145" text-anchor="middle" font-size="12.5" fill="var(--text)">勘定科目別</text>
+    <text x="729" y="190" text-anchor="middle" font-size="12.5" fill="var(--text)">着地見込</text>
+    <text x="729" y="232" text-anchor="middle" font-size="10" fill="var(--muted)">税込／税抜は右上で切り替え</text>
+    <rect x="14" y="292" width="832" height="34" rx="8" fill="rgba(239,68,68,.10)"/>
+    <text x="30" y="313" font-size="11.5" fill="var(--danger)">✕ 費用表（予定）と 支払請求（約束）は 実績に入りません — 会計の数字ではないからです</text>
   </svg></div>`;
 }
 /** どの区を見ても最初に目に入るところ。ここを間違えると全部ずれる。 */
@@ -8211,7 +8251,8 @@ const GUIDE_NOTE = {
     +'支払請求と支払は<b>残高と期日</b>のためのもので、予実の費用は動かしません。',
   'sec-co':'CRMに無い会社（仕入先・大家さんなど）はここで追加します。締日・支払サイト・支払日を入れると、期日が自動で決まります。',
   'sec-cost':'費用表は<b>予定</b>です（実績は 予実 › 入力 › 実績）。対象に<b>物件</b>を選ぶと、物件（建物）の画面に集まります。',
-  'sec-yj':'売上の実績は請求書から自動。<b>費用の実績は会計事務所の試算表を見て手で打ちます</b>（入力タブ › 実績・税抜）。',
+  /* 順番と入れる場所は上の図（guideYjDiagram）にあるので、ここは念押しの1行だけ。 */
+  'sec-yj':'上の図の①②③④の順です。費用表に打った金額は「予定」なので、実績は動きません。',
   'sec-sys':'確定した伝票は削除できません（取消のみ）。',
 };
 /* ============================================================================

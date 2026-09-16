@@ -206,6 +206,10 @@ Hoá đơn (tạo · 明細 · thuế · PDF · gửi · trạng thái) do **Mon
 - `bills` (支払請求) và `costPlans` (費用表) **không** vào 実績 nữa: chúng là *lời hứa/dự kiến*, không phải số kế toán.
   Nhờ vậy 予実 luôn khớp 試算表, không lệch vì quên tạo chứng từ.
 - Nhập ở 予実 › 入力 › 実績: hàng 収益 để **readonly** (lấy từ hoá đơn), hàng 売上原価/販管費/営業外 là ô nhập (税抜).
+- **Sơ đồ cách nhập** nằm trong 入力ガイド, mục 予実管理 (`guideYjDiagram()`): ①予算 (đầu năm) → ②見込 (hàng tháng)
+  → ③実績 費用 (từ 試算表, 税抜) → ④売上 tự động từ 請求書. Kèm thanh đỏ nhắc 費用表/支払請求 **không** vào 実績.
+  Nút ガイド trên topbar mở đúng mục của màn đang xem. Giữ SVG ≤ 600px rộng: 入力ガイド phải không cuộn ở 1366×768
+  (đã đo `#modal` clientHeight == scrollHeight cho cả 7 mục).
 - Xem 税込: 実績 費用 quy đổi bằng thuế suất của 勘定科目 (`grossRateOf` — lấy `taxCat` của `costItems` cùng科目, không có thì 10%, 営業外 0%).
 - `lastActualIdx` = tháng cuối có hoá đơn **hoặc** có `actuals`.
 - `backend/src/apiv1/finance.ts` là bản sao của đúng các công thức này (`test/apiv1.js` so từng con số).
