@@ -2974,18 +2974,83 @@ function bookAnchor(fy){
   const ym = tm>months[11]? months[11] : months[0];
   return { ym, now:false, m:Number(ym.slice(5)) };
 }
-/** 合計の下の2行 — その月の「増えた分（請求）」と「減った分（入金）」。
-    ★ 2026-09-16 利用者の指示: 残高（結果）だけでなく、残高を作る動きを月ごとに見せる。
-      月末残高 ＝ 前月残高（左のマス）＋ 請求 − 入金。数字は arMonthly がもともと出している billed・payment。
-      売上（予実）とは別もの（こちらは 全明細・税込）なので「売上」とは書かない。 */
-function bookFlowRows(rows, months, labels){
-  const tm=thisMonth();
-  const line=(key,label)=>`<tr class="ar-flow"><td class="ar-co">${label}</td>${months.map((ym,i)=>{
-      if(ym>tm) return '<td class="r ar-fut">—</td>';
-      const v=rows.reduce((t,r)=>t+r.m[i][key],0);
+/* ============================================================================
+   売掛金・買掛金の表（共通）— 列のまとめ方: 月／四半期／上期・下期／通期、動きの2行: 当期／累計
+   ----------------------------------------------------------------------------
+   ★ 2026-09-16 利用者の指示:「売掛金・支払に 累計、四半期・上期・下期 で見る」。
+   ・会社のマス＝その期間の最後の月の 月末残高（残高は もともと積み上がった数字なので 足さない）。
+     期間の途中に今月があれば、今月の残高（まだ来ていない月は使わない）。
+   ・合計の下の2行（請求・入金）＝ その期間の合計。「累計」を押すと 年度のはじめからの合計。
+     月末残高 ＝ 前の期間の残高 ＋ 請求 − 入金 が、どのまとめ方でも成り立つ。
+   ・数字は arMonthly の billed・payment・closing だけ。新しい計算はしない。
+   ・会社のマスを押すと、月のときは その月の内訳、まとめたときは 元帳（期間の内訳は元帳で見る）。
+   ・見方は その人のブラウザに覚える（売掛・買掛 共通）。
+   ========================================================================== */
+const BOOK_VIEW_KEY='bl_yj_bookview';
+let BOOK_VIEW={ per:'month', cum:false };
+try{ Object.assign(BOOK_VIEW, JSON.parse(localStorage.getItem(BOOK_VIEW_KEY)||'{}')||{}); }catch(e){}
+function setBookView(k, v){
+  BOOK_VIEW[k]=v;
+  try{ localStorage.setItem(BOOK_VIEW_KEY, JSON.stringify(BOOK_VIEW)); }catch(e){}
+  renderPage(CURRENT_PAGE);
+}
+const BOOK_PERS=[['month','月'],['q','四半期'],['half','上期・下期'],['year','通期']];
+/** 列の区切り（年度の中の 何番目の月から何番目まで） */
+function bookBuckets(per){
+  const L=FY_MONTH_LABELS;
+  if(per==='q')    return QUARTERS.map(q=>({ s:q.s, e:q.s+2, label:'Q'+q.k, sub:`${L[q.s]}〜${L[q.s+2]}` }));
+  if(per==='half') return [{ s:0, e:5, label:'上期', sub:`${L[0]}〜${L[5]}` }, { s:6, e:11, label:'下期', sub:`${L[6]}〜${L[11]}` }];
+  if(per==='year') return [{ s:0, e:11, label:'通期', sub:`${L[0]}〜${L[11]}` }];
+  return L.map((l,i)=>({ s:i, e:i, label:l, sub:'' }));
+}
+/** 表の上の切り替え */
+function bookViewBar(){
+  const per=BOOK_PERS.some(x=>x[0]===BOOK_VIEW.per)? BOOK_VIEW.per : 'month';
+  return `<div class="seg" title="列のまとめ方">${BOOK_PERS.map(([k,l])=>
+      `<button class="${per===k?'on':''}" onclick="setBookView('per','${k}')">${l}</button>`).join('')}</div>
+    <div class="seg" title="合計の下の2行を、その期間だけで見るか、年度のはじめからの累計で見るか">
+      <button class="${!BOOK_VIEW.cum?'on':''}" onclick="setBookView('cum',false)">当期</button><button class="${BOOK_VIEW.cum?'on':''}" onclick="setBookView('cum',true)">累計</button></div>`;
+}
+/** 表の説明（1行） */
+function bookNote(fy, what, flow){
+  const month=BOOK_VIEW.per==='month'||!BOOK_PERS.some(x=>x[0]===BOOK_VIEW.per), unit=month?'月':'期間';
+  return `${esc(fyLabel(fy))} ・ 各マス＝${unit}末の${what} ・ 合計の下＝${BOOK_VIEW.cum?'年度のはじめからの':'その'+unit+'の'}${flow} ・ マスを押すと${month?'内訳':'元帳'}`;
+}
+/** o: { rows, months, first, col, pop, ledger, ledgerTitle, badge, flow:[増,減] } → { head, body, foot, ncol } */
+function bookGrid(o){
+  const { rows, months } = o, tm=thisMonth(), cum=!!BOOK_VIEW.cum;
+  const per=BOOK_PERS.some(x=>x[0]===BOOK_VIEW.per)? BOOK_VIEW.per : 'month';
+  const B=bookBuckets(per);
+  const lastIdx = b => { for(let i=b.e;i>=b.s;i--) if(months[i]<=tm) return i; return -1; };
+  const isCur = b => months.slice(b.s,b.e+1).includes(tm);
+  const head=`<tr><th class="ar-co">${o.first}</th>${B.map(b=>{
+      const top = per==='month'
+        ? ((b.s===0||months[b.s].endsWith('-01'))? `<span class="ar-y">${months[b.s].slice(0,4)}</span>` : '')
+        : `<span class="ar-y">${esc(b.sub)}</span>`;
+      return `<th class="r ${isCur(b)?'ar-cur':''}" title="${months[b.s]}〜${months[b.e]}">${top}${esc(b.label)}</th>`; }).join('')}<th class="r ar-now">${o.col}</th></tr>`;
+  const cls = x => x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
+  const cell=(r,b)=>{
+    const k=lastIdx(b); if(k<0) return `<td class="r ar-c ar-fut">—</td>`;
+    const x=r.m[k];
+    const go = per==='month'? `${o.pop}(event,'${attr(r.id)}','${x.ym}')` : `${o.ledger}('${attr(r.id)}')`;
+    return `<td class="r num ar-c ${cls(x)}${isCur(b)?' ar-cur':''}" onclick="${go}">${arAmt(x.closing)}</td>`;
+  };
+  const body=rows.map(r=>`<tr>
+      <td class="ar-co"><a class="ar-name" onclick="${o.ledger}('${attr(r.id)}')" title="${o.ledgerTitle}">${esc(r.name)}</a>${o.badge(r.st)}</td>
+      ${B.map(b=>cell(r,b)).join('')}
+      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="${o.ledger}('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`).join('');
+  if(!rows.length) return { head, body:'', foot:'', ncol:B.length+2 };
+  const tot=`<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${B.map(b=>{
+      const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
+      return `<td class="r num">${arAmt(rows.reduce((t,r)=>t+r.m[k].closing,0))}</td>`; }).join('')}
+      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`;
+  /* 合計の下の2行 — 残高を作る「動き」。売上（予実）とは別もの（全明細・税込）なので「売上」とは書かない */
+  const flow=(key,label)=>`<tr class="ar-flow"><td class="ar-co">${label}${cum?'（累計）':''}</td>${B.map(b=>{
+      const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
+      let v=0; for(let i=(cum?0:b.s); i<=k; i++) rows.forEach(r=>{ v+=r.m[i][key]; });
       return `<td class="r num">${v? moneyPlain(v) : '<span class="zero">0</span>'}</td>`; }).join('')}
     <td class="r num ar-now"><span class="ar-y">年度計</span>${moneyPlain(rows.reduce((t,r)=>t+r.m.reduce((u,x)=>u+(x.future?0:x[key]),0),0))}</td></tr>`;
-  return line('billed',labels[0]) + line('payment',labels[1]);
+  return { head, body, foot: tot+flow('billed',o.flow[0])+flow('payment',o.flow[1]), ncol:B.length+2 };
 }
 /** 全社合計（KPI）。ym を省くと今月。 */
 function arTotals(ym){
@@ -3030,27 +3095,14 @@ function viewArBook(){
     ${searchBox(p,'取引先で検索')}
     <label class="ar-chk"><input type="checkbox" ${AR_FILT.open?'checked':''} onchange="arFilt('open',this.checked)"> 未回収のみ</label>
     <label class="ar-chk"><input type="checkbox" ${AR_FILT.over?'checked':''} onchange="arFilt('over',this.checked)"> 期限超過のみ</label>
-    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の売掛金残高 ・ 合計の下＝その月の請求と入金 ・ マスを押すと内訳</span>
+    ${bookViewBar()}
+    <span class="muted ar-note">${bookNote(fy,'売掛金残高','請求と入金')}</span>
   </div>`;
 
-  const head=`<tr><th class="ar-co">取引先</th>${months.map((ym,i)=>`<th class="r ${ym===tm?'ar-cur':''}" title="${ym}">${
-      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">${L.col}</th></tr>`;
-  const cell=(r,x)=>{
-    if(x.future) return `<td class="r ar-c ar-fut">—</td>`;
-    const cls = x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
-    return `<td class="r num ar-c ${cls}${x.ym===tm?' ar-cur':''}" onclick="arCellPop(event,'${attr(r.id)}','${x.ym}')">${arAmt(x.closing)}</td>`;
-  };
-  const body=rows.map(r=>`<tr>
-      <td class="ar-co"><a class="ar-name" onclick="openArLedger('${attr(r.id)}')" title="売掛元帳を開く">${esc(r.name)}</a>${arStatusBadge(r.st)}</td>
-      ${r.m.map(x=>cell(r,x)).join('')}
-      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="openArLedger('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`).join('');
-  const foot = rows.length? `<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${months.map((ym,i)=>{
-      if(ym>tm) return '<td class="r ar-fut">—</td>';
-      const s=rows.reduce((t,r)=>t+r.m[i].closing,0); return `<td class="r num">${arAmt(s)}</td>`; }).join('')}
-      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`
-      + bookFlowRows(rows, months, ['＋ 請求額','− 入金額']) : '';
+  const G=bookGrid({ rows, months, first:'取引先', col:L.col, pop:'arCellPop', ledger:'openArLedger', ledgerTitle:'売掛元帳を開く',
+    badge:arStatusBadge, flow:['＋ 請求額','− 入金額'] });
   const table = all.length
-    ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${head}</thead><tbody>${body||`<tr><td colspan="${months.length+2}" class="empty">条件に合う取引先はありません。</td></tr>`}${foot}</tbody></table></div>`
+    ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${G.head}</thead><tbody>${G.body||`<tr><td colspan="${G.ncol}" class="empty">条件に合う取引先はありません。</td></tr>`}${G.foot}</tbody></table></div>`
     : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「Money Forward から取り込む」で請求を取り込むか、入金を記録してください。</div></div>`;
 
   const mgr = myRole()==='Admin' || myRole()==='Manager';
@@ -4085,27 +4137,14 @@ function viewApBook(){
     ${searchBox(p,'支払先で検索')}
     <label class="ar-chk"><input type="checkbox" ${AP_FILT.open?'checked':''} onchange="apFilt('open',this.checked)"> 未払のみ</label>
     <label class="ar-chk"><input type="checkbox" ${AP_FILT.over?'checked':''} onchange="apFilt('over',this.checked)"> 期日超過のみ</label>
-    <span class="muted ar-note">${esc(fyLabel(fy))} ・ 各マス＝月末の買掛金残高 ・ 合計の下＝その月の支払請求と支払 ・ マスを押すと内訳</span>
+    ${bookViewBar()}
+    <span class="muted ar-note">${bookNote(fy,'買掛金残高','支払請求と支払')}</span>
   </div>`;
 
-  const head=`<tr><th class="ar-co">支払先</th>${months.map((ym,i)=>`<th class="r ${ym===tm?'ar-cur':''}" title="${ym}">${
-      (i===0||ym.endsWith('-01'))?`<span class="ar-y">${ym.slice(0,4)}</span>`:''}${FY_MONTH_LABELS[i]}</th>`).join('')}<th class="r ar-now">${L.col}</th></tr>`;
-  const cell=(r,x)=>{
-    if(x.future) return `<td class="r ar-c ar-fut">—</td>`;
-    const cls = x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
-    return `<td class="r num ar-c ${cls}${x.ym===tm?' ar-cur':''}" onclick="apCellPop(event,'${attr(r.id)}','${x.ym}')">${arAmt(x.closing)}</td>`;
-  };
-  const body=rows.map(r=>`<tr>
-      <td class="ar-co"><a class="ar-name" onclick="openApLedger('${attr(r.id)}')" title="買掛元帳を開く">${esc(r.name)}</a>${apStatusBadge(r.st)}</td>
-      ${r.m.map(x=>cell(r,x)).join('')}
-      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="openApLedger('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`).join('');
-  const foot = rows.length? `<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${months.map((ym,i)=>{
-      if(ym>tm) return '<td class="r ar-fut">—</td>';
-      const s=rows.reduce((t,r)=>t+r.m[i].closing,0); return `<td class="r num">${arAmt(s)}</td>`; }).join('')}
-      <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`
-      + bookFlowRows(rows, months, ['＋ 支払請求','− 支払']) : '';
+  const G=bookGrid({ rows, months, first:'支払先', col:L.col, pop:'apCellPop', ledger:'openApLedger', ledgerTitle:'買掛元帳を開く',
+    badge:apStatusBadge, flow:['＋ 支払請求','− 支払'] });
   const table = all.length
-    ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${head}</thead><tbody>${body||`<tr><td colspan="${months.length+2}" class="empty">条件に合う支払先はありません。</td></tr>`}${foot}</tbody></table></div>`
+    ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${G.head}</thead><tbody>${G.body||`<tr><td colspan="${G.ncol}" class="empty">条件に合う支払先はありません。</td></tr>`}${G.foot}</tbody></table></div>`
     : `<div class="table-wrap"><div class="empty">まだ支払請求も支払もありません。<br>「定期の支払を作成」または「＋ 支払請求を登録」から始めてください。</div></div>`;
 
   const tools=`${canCreate('payouts')?`<button class="btn" onclick="openPayout()">＋ 支払を記録</button>`:''}

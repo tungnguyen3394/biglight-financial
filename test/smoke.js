@@ -12,7 +12,7 @@ if (st < 0 || en < st) { console.error('script ブロックが見つかりませ
 let code = html.slice(st + 8, en);
 code = code.replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');   // 自動起動は外す
 // const/let は vm のグローバルに載らないので橋を架ける
-code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, get DASH_RANGE(){return DASH_RANGE} };';
+code += '\n;globalThis.__x={ ENTITIES, DEFAULT_ACCOUNTS, isApCost, PAY_MODES, LED_LATE_WARN, SECTIONS, PAGE_GUIDE, PROPERTY_KINDS, get CUR_FY(){return CUR_FY}, get CURRENT_PAGE(){return CURRENT_PAGE}, ATT_PAGE, canCreate, canEdit, canDelete, mailCtx:()=>MAIL_CTX, moneyPlain, mailFill, DB:()=>DB, setAttCounts:v=>{ATT_COUNTS=v},\n  accountRoots, accountChildren, accountByCode, accountById, accountIsLeaf, accountPathLabel, accountCodesUnder, accountKindOf, accTreeReady, setDB:v=>{DB=v}, setFY:v=>{CUR_FY=v}, setSession:v=>{SESSION=v}, PAGE_REDIRECT, arNormName, setUsers:v=>{_USERS=v}, setBookView:v=>{BOOK_VIEW=v}, get DASH_RANGE(){return DASH_RANGE} };';
 
 const noop = () => {};
 const el = { innerHTML:'', style:{}, classList:{add:noop,remove:noop,toggle:noop,contains:()=>false},
@@ -565,6 +565,28 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
     eq('売掛金の表（今の年度）: 今までどおり 今月・現在残高', ['今月請求額','今月入金額','現在残高'].every(x=>hc.includes(x)), true);
     ctx.__x.setFY(2024); }
   eq('売掛金の表: 請求番号・数量・単価・PDF は出さない', ['請求番号','数量','単価','PDF'].some(x=>h.includes(x)), false);
+  /* ★ 2026-09-16: 四半期・上期下期・通期 と 累計 */
+  { const ms=ctx.fyMonths(2024); let yb=0, yp=0;
+    ctx.arCompanyIds().forEach(id=>ctx.arMonthly(id,ms).forEach(x=>{ if(!x.future){ yb+=x.billed; yp+=x.payment; } }));
+    const flowNums=(h,i)=>{ const r=[...h.matchAll(/<tr class="ar-flow">([\s\S]*?)<\/tr>/g)].map(m=>m[1])[i];
+      return [...r.matchAll(/<td class="r num">([\d,]+|<span class="zero">0<\/span>)<\/td>/g)].map(m=>m[1].includes('zero')?0:Number(m[1].replace(/,/g,''))); };
+    const totNums=h=>{ const r=h.match(/<tr class="totrow">([\s\S]*?)<\/tr>/)[1];
+      return [...r.matchAll(/<td class="r num">([−\d,]+)<\/td>/g)].map(m=>Number(m[1].replace(/,/g,'').replace('−','-'))); };
+    const hm=h, cnt=x=>(x.match(/ar-c[ "]/g)||[]).length, sum=a=>a.reduce((t,v)=>t+v,0);
+    ctx.__x.setBookView({ per:'q', cum:false }); const hq=ctx.viewArBook();
+    eq('四半期: 8社×4列、見出しは Q1〜Q4', [cnt(hq), ['Q1','Q2','Q3','Q4'].every(x=>hq.includes(x+'</th>'))], [8*4, true]);
+    eq('四半期: 期末の残高 ＝ 月表示の 10月・1月・4月・7月 の残高', totNums(hq), [2,5,8,11].map(i=>totNums(hm)[i]));
+    eq('四半期（当期）: 4つの請求・入金を足すと 年度計', [sum(flowNums(hq,0)), sum(flowNums(hq,1))], [yb, yp]);
+    ctx.__x.setBookView({ per:'q', cum:true }); const hqc=ctx.viewArBook();
+    const cb=flowNums(hqc,0);
+    eq('四半期（累計）: 最後の列 ＝ 年度計、減らない、見出しに（累計）', [cb[cb.length-1], cb.every((v,i)=>!i||v>=cb[i-1]), hqc.includes('＋ 請求額（累計）')], [yb, true, true]);
+    ctx.__x.setBookView({ per:'half', cum:false }); const hh=ctx.viewArBook();
+    eq('上期・下期: 8社×2列、請求の合計 ＝ 年度計', [cnt(hh), hh.includes('上期</th>')&&hh.includes('下期</th>'), sum(flowNums(hh,0))], [8*2, true, yb]);
+    ctx.__x.setBookView({ per:'year', cum:false }); const hy=ctx.viewArBook();
+    eq('通期: 8社×1列、残高 ＝ 7月末', [cnt(hy), totNums(hy)[0]], [8, totNums(hm)[11]]);
+    eq('まとめた表のマスは 元帳を開く（月の内訳ではない）', [/ar-c[^"]*" onclick="openArLedger/.test(hy), /ar-c[^"]*" onclick="arCellPop/.test(hy)], [true, false]);
+    eq('買掛金も 四半期で出る', (()=>{ ctx.__x.setBookView({ per:'q', cum:true }); const x=ctx.viewApBook(); return x.includes('上期・下期')&&x.includes('支払請求と支払'); })(), true);
+    ctx.__x.setBookView({ per:'month', cum:false }); }
   el.innerHTML=''; ctx.openArLedger('K3'); const lh=String(el.innerHTML);
   eq('売掛元帳: 年月・前月残高・請求額・入金額・月末残高', ['年月','前月残高','請求額','入金額','月末残高','2025/04'].every(x=>lh.includes(x)), true);
   eq('メニューの先頭は 売掛金、古いリンクは 売掛金 に案内', [ctx.__x.SECTIONS.find(x=>x.id==='sec-ar').tabs[0].id, ctx.__x.PAGE_REDIRECT.invoices, ctx.__x.PAGE_REDIRECT.aging, ctx.__x.PAGE_REDIRECT.arco], ['arbook','arbook','arbook','arbook']);

@@ -188,6 +188,9 @@ Hoá đơn (tạo · 明細 · thuế · PDF · gửi · trạng thái) do **Mon
   còn 売上 = chỉ 収益科目・税抜 — hai số lệch nhau hợp lệ, đặt cạnh nhau sẽ bị hiểu là sai. 売上 theo tháng xem ở 予実管理/ダッシュボード.
   KPI và cột bên phải theo `bookAnchor(fy)`: năm hiện tại → hôm nay (現在残高); năm cũ → tháng cuối năm (`7月末残高`); năm sau → tháng đầu.
   CSV thêm cột `YYYY-MM 請求額 / 入金額` ở cuối (cột cũ giữ nguyên tên và thứ tự).
+  Chọn cách gom cột: `月 / 四半期 / 上期・下期 / 通期` + `当期 / 累計` (`bookGrid()`, nhớ trong `localStorage: bl_yj_bookview`).
+  Ô công ty = số dư cuối kỳ (tháng cuối kỳ, chưa tới thì lấy tháng hiện tại) — số dư KHÔNG cộng dồn. 2 dòng chuyển động = tổng trong kỳ,
+  bấm 累計 = cộng từ đầu năm. Khi gom kỳ, bấm ô mở 元帳 (không mở chi tiết tháng). CSV vẫn xuất theo tháng.
 - Menu: 回収 = 売掛金 · 入金 · 督促. 請求管理 / 年齢表 / 取引先別 **gỡ khỏi menu** (code còn, `PAGE_REDIRECT` dẫn về 売掛金).
 
 ### 4.3 予実
