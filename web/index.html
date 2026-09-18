@@ -5063,7 +5063,9 @@ function drawPaymentModal(){
     ${bal? `<div class="infobar" style="margin-top:12px;">この取引先の売掛金残高（税込・今月末時点）：<b class="num">¥${arAmt(bal.closing)}</b>
       ${bal.overdue>0?` ・ <span class="minus">うち期限超過 ¥${moneyPlain(bal.overdue)}</span>`:''}${c.id?' （この入金を含む）':''}</div>` : ''}
     <div class="modal-actions ${c.id?'split':''}">
-      ${c.id?`<button class="btn danger" onclick="payDelete()">削除</button>`:''}
+      ${c.id? ((findById('payments',c.id)||{}).status==='取消'
+          ? '<span class="badge b-gray" style="align-self:center;">取消済み（売掛金には入っていません）</span>'
+          : `<button class="btn danger" onclick="payCancel()" title="記録は「取消」として残り、売掛金の残高が元に戻ります">取消にする</button>`) : ''}
       <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
       <button class="btn" onclick="paySave()">保存</button></div></div>`,'lg');
 }
@@ -5137,6 +5139,24 @@ function paySave(){
   const res=commitRecord('payments', rec, { existingId:c.id });
   closeModal(); renderPage(CURRENT_PAGE); renderNav(); toast(msg, msg.includes('⚠')?'err':'ok');
   if(attPendCount('pay')) attPendFlush('pay', res.record.id);
+}
+/** 入金を取消にする（消さない）。売掛金・充て先・差額の処理から外れ、記録は残る。 */
+function payCancelRecord(id){
+  const old=findById('payments', id); if(!old) return false;
+  if(old.status==='取消'){ toast('この入金はすでに取消です。','err'); return false; }
+  if(!canEdit('receipts')){ toast('入金を直す権限がありません。','err'); return false; }
+  if(!periodGuard([old.date], '入金の取消')) return false;
+  if(!confirm(`この入金（${old.date||'日付なし'}・${moneyPlain(received(old))}円）を取消にします。
+売掛金の残高が元に戻り、記録は「取消」として残ります（消えません）。よろしいですか？`)) return false;
+  commitRecord('payments', { status:'取消', allocations:[], adjust:[], feeShort:0,
+    cancelledAt:new Date().toISOString(), cancelledBy:(SESSION&&SESSION.email)||'' }, { existingId:old.id });
+  return true;
+}
+function payCancel(){
+  if(!PAY_CTX.id) return;
+  if(!payCancelRecord(PAY_CTX.id)) return;
+  closeModal(); renderPage(CURRENT_PAGE); renderNav();
+  toast('入金を取消にしました。正しい金額で もう一度「入金を記録」してください。','ok');
 }
 function payDelete(){
   if(!PAY_CTX.id) return;

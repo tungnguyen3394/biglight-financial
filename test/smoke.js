@@ -631,6 +631,22 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   /* 売掛残高は どこで見ても 回収（売掛金）の式（前月残高＋請求−入金） */
   eq('取引先の売掛残 ＝ 回収の表の今月末残高', ctx.arBalanceOf('C1'), ctx.arMonthly('C1',[ctx.thisMonth()])[0].closing);
   eq('売掛残高の合計 ＝ 会社ごとの今月末残高の合計', ctx.arTotal(), ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[ctx.thisMonth()])[0].closing,0));
+  /* 間違えた入金は「取消」で直す（削除はサーバーが断る） */
+  {
+    const d=ctx.__x.DB(); const nInv=d.invoices.length, nPay=d.payments.length;
+    d.invoices.push({ id:'PCI', companyId:'C1', status:'確定', total:50000, bookMonth:ctx.thisMonth(), issueDate:ctx.thisMonth()+'-01', dueDate:ctx.thisMonth()+'-28' });
+    d.payments.push({ id:'PCX', companyId:'C1', date:ctx.thisMonth()+'-05', amount:330000, status:'確定', allocations:[{ invoiceId:'PCI', amount:50000 }], feeShort:0 });
+    const fyKeep2=ctx.__x.CUR_FY; ctx.__x.setFY(ctx.fyOf(ctx.thisMonth()));   // 期の中でだけ取消できる
+    const before=ctx.arBalanceOf('C1');
+    eq('入金が請求より多いと 残高はマイナス（入れ間違いの印）', before<0, true);
+    eq('取消にできる', ctx.payCancelRecord('PCX'), true);
+    const p=d.payments.find(x=>x.id==='PCX');
+    eq('記録は消えず 取消・充て先なし・誰がいつ が残る', [p.status, p.allocations.length, !!p.cancelledAt, p.cancelledBy], ['取消',0,true,'test@biglight.jp']);
+    eq('取消にしたら 売掛金の残高が元に戻る', ctx.arBalanceOf('C1'), before+330000);
+    eq('二度目は断る', ctx.payCancelRecord('PCX'), false);
+    ctx.__x.setFY(fyKeep2);
+    d.invoices.length=nInv; d.payments.length=nPay;
+  }
   /* 同期の結果（数字）の見せ方。0 は出さない・入れ子（run）もほどく */
   eq('同期の結果を1行にする', ctx.mfStatsText({ billings:{ 新規:3, 更新:0, 取引先未対応:2 }, reconcile:{ 消込:1 } }),
     'billings：新規 3・取引先未対応 2 ／ reconcile：消込 1');
