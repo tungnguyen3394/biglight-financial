@@ -2746,7 +2746,7 @@ function openDetail(entKey, id){
   openModal(`<h3>${esc(row.name||row.no||E.label)} ${sourceTag(row)}</h3>
     <div class="mdsub">${esc(E.label)}</div>${html}
     <div class="modal-actions">
-      ${entKey==='invoices'&&row.mfId?`<button class="btn secondary" onclick="mfOpenPdf('${row.id}')">Money Forward の請求書PDF</button>`:''}
+      ${entKey==='invoices'&&row.mfId?`<button class="btn secondary" onclick="mfOpenPdf('${row.id}')">Money Forward の請求書PDF</button>${mfWebUrlOf(row)?` <a class="btn secondary" href="${attr(mfWebUrlOf(row))}" target="_blank" rel="noopener">Money Forward で開く ↗</a>`:''}`:''}
       ${entKey==='invoices'?`<button class="btn secondary" onclick="printInvoice('${row.id}')">${IC.print} 請求書を印刷</button>`:''}
       ${canEdit(page)?`<button class="btn secondary" onclick="closeModal();openForm('${entKey}','${row.id}')">編集</button>`:''}
       <button class="btn" onclick="closeModal()">閉じる</button></div>`,
@@ -3622,7 +3622,7 @@ function arCellPop(ev, companyId, ym){
       <tr class="sum"><td>月末残高</td><td class="r num ${r.overdue>0?'minus':''}">¥${arAmt(r.closing)}</td></tr>
       ${r.overdue>0?`<tr><td class="minus">うち期限超過</td><td class="r num minus">¥${moneyPlain(r.overdue)}</td></tr>`:''}
     </table>
-    ${list(bills,'請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.issueDate||b.doc.bookMonth||'')} ${srcTag(b.doc)} ${invTaxBadge(b.doc)}${b.doc.no?` <span class="muted">${esc(b.doc.no)}</span>`:''}</span>
+    ${list(bills,'請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.issueDate||b.doc.bookMonth||'')} ${srcTag(b.doc)} ${invTaxBadge(b.doc)}${b.doc.no?` <span class="muted">${esc(b.doc.no)}</span>`:''} ${mfWebLink(b.doc,'MF')}</span>
       <span class="num">${attBtn('invoices', b.doc.id, b.doc)} ${moneyPlain(b.amount)}${(b.doc.source!=='mf'&&!(b.doc.items||[]).length&&canEdit('invoices'))?` <a onclick="arPopClose();openArBillForm('${attr(b.doc.id)}')">修正</a>`:''}</span></div>`)}
     ${list(pays,'入金', x=>`<div class="ar-pop-i"><span>${esc(x.date)}${x.doc.method?` <span class="muted">${esc(x.doc.method)}</span>`:''}</span>
       <span class="num">${attBtn('payments', x.doc.id, x.doc)} ${moneyPlain(x.amount)}${canEdit('receipts')?` <a onclick="arPopClose();openPayment('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
@@ -4494,6 +4494,19 @@ async function mfKeyClear(){
   }catch(e){ toast(String(e.message||e),'err'); }
 }
 /** MF の請求書 PDF を新しいタブで開く。サーバーが MF から取って返す（ブラウザは MF に直接行かない）。 */
+/** ★ 2026-09-19 利用者の指示: 請求ごとに「MF の請求書を開く」リンク（MF クラウド請求書 の画面へ）。
+    取り込んだときの mfWebUrl、無ければ MF の id から作る。CSV で入れた分（id が csv:…）は MF の id が分からないので出さない。 */
+const MF_INVOICE_WEB = 'https://invoice.moneyforward.com/billings/';
+function mfWebUrlOf(inv){
+  if(!inv) return '';
+  if(inv.mfWebUrl) return inv.mfWebUrl;
+  const id=String(inv.mfId||''); if(!id || /^csv/.test(id)) return '';
+  return MF_INVOICE_WEB+encodeURIComponent(id);
+}
+function mfWebLink(inv, label){
+  const u=mfWebUrlOf(inv); if(!u) return '';
+  return `<a class="pillbtn" href="${attr(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Money Forward クラウド請求書 で この請求書を開く">${label||'MFで開く'} ↗</a>`;
+}
 async function mfOpenPdf(invId){
   const inv=findById('invoices', invId);
   if(!inv||!inv.mfId){ toast('この請求は Money Forward から取り込んだものではありません。','err'); return; }
@@ -4633,7 +4646,7 @@ function viewArConfirm(){
   const cols=[
     {key:'ck', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'?'':`<input type="checkbox" class="arcfck" value="${attr(r.id)}" onclick="event.stopPropagation()">`},
     {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
-    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}${r.mfId?` <a class="pillbtn" onclick="event.stopPropagation();mfOpenPdf('${attr(r.id)}')">PDF</a>`:''}`},
+    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}${r.mfId?` <a class="pillbtn" onclick="event.stopPropagation();mfOpenPdf('${attr(r.id)}')">PDF</a> ${mfWebLink(r)}`:''}`},
     {key:'companyId', label:'取引先', raw:r=>arCoName(r.companyId), val:r=>r.companyId? esc(arCoName(r.companyId))
       : `<a class="pillbtn pill-new" onclick="event.stopPropagation();mfSetCompany('${attr(r.id)}')">取引先を選ぶ</a>`},
     {key:'issueDate', label:'請求日', date:true, val:r=>esc(r.issueDate||'')},
@@ -8380,7 +8393,7 @@ function ledHistoryHtml(c, side, fy){
       return `<tr onclick="openDetail('${side==='ap'?'bills':'invoices'}','${d.id}')" style="cursor:pointer;">
         <td>${esc(e.date)}</td>
         <td><span class="badge b-blue">${esc(S.docLabel)}</span></td>
-        <td>${attBtn(side==='ap'?'bills':'invoices', d.id)} <b>${esc(d.no||'')}</b>${d.bookMonth?`<div class="muted" style="font-size:10.5px;">計上 ${esc(d.bookMonth)}</div>`:''}</td>
+        <td>${attBtn(side==='ap'?'bills':'invoices', d.id)} <b>${esc(d.no||'')}</b>${side==='ap'?'':' '+mfWebLink(d,'MF')}${d.bookMonth?`<div class="muted" style="font-size:10.5px;">計上 ${esc(d.bookMonth)}</div>`:''}</td>
         <td class="r num"><b>${moneyPlain(e.amount)}</b></td>
         <td class="r"><span class="zero">—</span></td>
         <td class="r num">${moneyPlain(e.bal)}</td>

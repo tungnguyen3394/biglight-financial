@@ -191,6 +191,14 @@ const dateOnly = (v: any) => String(v || '').slice(0, 10)
 const money = (v: any) => { const n = Number(String(v ?? '').replace(/[^\d.-]/g, '')); return isFinite(n) ? Math.round(n) : 0 }
 
 /** MF の Billing → このシステムで使う形（金額は数値・日付は YYYY-MM-DD） */
+/** MF クラウド請求書 の画面で その請求書を開く URL。
+    返りに画面の URL があればそれを、無ければ id から作る（MF_INVOICE_WEB_BASE で変えられる）。 */
+export const MF_INVOICE_WEB_BASE = (process.env.MF_INVOICE_WEB_BASE || 'https://invoice.moneyforward.com/billings/').replace(/\/?$/, '/')
+export function billingWebUrl(b: any) {
+  const u = String(b?.html_url ?? b?.web_url ?? b?.show_url ?? b?.url ?? '')
+  if (/^https:\/\/[a-z0-9.-]*moneyforward\.com\//i.test(u) && !/\/api\//.test(u)) return u
+  return b?.id ? MF_INVOICE_WEB_BASE + encodeURIComponent(String(b.id)) : ''
+}
 export function normalizeBilling(raw: any) {
   /* v2 系の返り { id, attributes:{…} } でも v3 の平らな形でも同じに読む */
   const b: any = raw && raw.attributes && typeof raw.attributes === 'object' ? { id: raw.id, ...raw.attributes } : (raw || {})
@@ -212,6 +220,7 @@ export function normalizeBilling(raw: any) {
     emailStatus: String(b?.email_status ?? ''),
     postingStatus: String(b?.posting_status ?? ''),
     pdfUrl: String(b?.pdf_url ?? ''),
+    webUrl: billingWebUrl(b),
     isLocked: !!b?.is_locked,
     isDownloaded: !!b?.is_downloaded,
     mfStatus: String(b?.status ?? (b?.is_locked ? 'ロック中' : '')),
@@ -332,19 +341,35 @@ export function normalizeTransaction(t: any) {
     rawKeys: Object.keys(raw), raw: { id: raw.id, content: raw.content ?? raw.description, value: rawAmt },
   }
 }
-/** 期間内の入金明細。★ 公式の絞り込みパラメータ名が確認できていないので、ページだけ送り、期間・口座・向きは こちらで選ぶ（読むだけ） */
+/** 期間を「月ごと」に切る（2026-08-15〜2026-10-03 → 08-15〜08-31 / 09-01〜09-30 / 10-01〜10-03） */
+export function monthChunks(from: string, to: string): [string, string][] {
+  const out: [string, string][] = []
+  let cur = from
+  for (let n = 0; cur <= to && n < 60; n++) {
+    const y = Number(cur.slice(0, 4)), m = Number(cur.slice(5, 7))
+    const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+    out.push([cur, last < to ? last : to])
+    cur = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10)
+  }
+  return out
+}
+/** 期間内の入金明細（読むだけ）。
+    ★ 2026-09-19: MF 会計が start_date / end_date を必須にした（無いと HTTP 400 missing_required_query_parameter）。
+      期間が長いと断られることがあるので 1か月ずつ聞く。口座・向き（入金だけ）は こちらでも選び直す。 */
 export async function fetchTransactions(from: string, to: string, subAccountId: string, d: MfDeps, opts: { all?: boolean } = {}) {
   const c = mfConfig(d.env)
   const token = await accessToken(d)
   const out: any[] = []
   const seen = new Set<string>()
-  for (let page = 1; page <= 200; page++) {
-    const q = new URLSearchParams({ page: String(page) })
-    const j = await getJson(`${c.acctBase}/transactions?${q}`, token, d, '入出金明細')
-    const list = listOf(j, 'transactions', 'items')
-    for (const t of list) { const n = normalizeTransaction(t); if (!n.extId || seen.has(n.extId)) continue; seen.add(n.extId); out.push(n) }
-    if (!list.length) break
-    if (!mfHasNextPage(j, page)) break
+  for (const [s0, e0] of monthChunks(from, to)) {
+    for (let page = 1; page <= 200; page++) {
+      const q = new URLSearchParams({ start_date: s0, end_date: e0, page: String(page) })
+      const j = await getJson(`${c.acctBase}/transactions?${q}`, token, d, '入出金明細')
+      const list = listOf(j, 'transactions', 'items')
+      for (const t of list) { const n = normalizeTransaction(t); if (!n.extId || seen.has(n.extId)) continue; seen.add(n.extId); out.push(n) }
+      if (!list.length) break
+      if (!mfHasNextPage(j, page)) break
+    }
   }
   if (opts.all) return out
   return out.filter(t => t.date && t.date >= from && t.date <= to && t.side === 'INCOME' && t.amount > 0
@@ -379,7 +404,9 @@ export function parseTrialBalance(j: any): { code: string; name: string; amount:
 }
 export async function fetchTrialBalance(month: string, d: MfDeps, kind: 'pl' | 'bs' = 'bs') {
   const c = mfConfig(d.env)
-  const q = new URLSearchParams({ from: month + '-01', to: month + '-31' })
+  /* ★ 2026-09-19: 会計 API は 期間を start_date / end_date で受け取る（入出金明細で 400 が出て判明）。月末は その月の本当の末日 */
+  const [y, m] = month.split('-').map(Number)
+  const q = new URLSearchParams({ start_date: month + '-01', end_date: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) })
   const j = await getJson(`${c.acctBase}/reports/trial_balance_${kind}?${q}`, await accessToken(d), d, '試算表')
   return parseTrialBalance(j)
 }

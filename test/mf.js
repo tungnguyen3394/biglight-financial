@@ -162,9 +162,17 @@ function makeDeps(opts = {}) {
     const txns = await MF.fetchTransactions('2026-09-01', '2026-09-14', 'sub1', t.deps);
     eq('入金だけ・形をそろえて返す', txns.map(x => [x.extId, x.date, x.amount, x.payerName]), [['tx1', '2026-09-10', 110000, 'ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ']]);
     const q = new URL(t.calls.find(c => c.url.includes('/transactions')).url).searchParams;
-    eq('公式の絞り込み名が未確認なので page だけ送る（期間・口座・向きは こちらで選ぶ）', [q.get('page'), q.get('connected_sub_account_id'), q.get('side'), q.get('start_date')], ['1', null, null, null]);
+    eq('MF 会計が必須にした start_date / end_date を送る', [q.get('page'), q.get('start_date'), q.get('end_date')], ['1', '2026-09-01', '2026-09-14']);
+    t.calls.length = 0;
+    await MF.fetchTransactions('2026-08-15', '2026-10-03', '', t.deps);
+    eq('長い期間は 1か月ずつ聞く', t.calls.filter(c => c.url.includes('/transactions')).map(c => { const p = new URL(c.url).searchParams; return p.get('start_date') + '〜' + p.get('end_date') }),
+      ['2026-08-15〜2026-08-31', '2026-09-01〜2026-09-30', '2026-10-01〜2026-10-03']);
+    eq('請求書を MF の画面で開く場所', [MF.billingWebUrl({ id: 'b9' }), MF.billingWebUrl({ id: 'b9', url: 'https://invoice.moneyforward.com/api/v3/billings/b9' })],
+      ['https://invoice.moneyforward.com/billings/b9', 'https://invoice.moneyforward.com/billings/b9']);
     const tb = await MF.fetchTrialBalance('2026-09', t.deps);
     eq('試算表は 科目と残高', tb, [{ code: '1130', name: '売掛金', amount: 264000 }]);
+    const tq = new URL(t.calls.filter(c => c.url.includes('/reports/trial_balance')).pop().url).searchParams;
+    eq('試算表も start_date / end_date（9月は30日まで）', [tq.get('start_date'), tq.get('end_date')], ['2026-09-01', '2026-09-30']);
   }
 
   console.log('\n― 画面からの口（権限） ―');

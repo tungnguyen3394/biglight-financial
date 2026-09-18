@@ -147,6 +147,7 @@ export type Billing = {
   mfStatus?: string; paymentStatus?: string; emailStatus?: string; postingStatus?: string
   isLocked?: boolean; isDownloaded?: boolean; updatedAt?: string
   pdfUrl?: string
+  webUrl?: string
 }
 /** 下書き＝まだ出していない請求。売掛金にしてはいけない。 */
 export function isDraft(b: Billing) {
@@ -284,7 +285,7 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
     out.invoices.push({
       id: newId('INV'), ...c.rec, items: [], status: '確定', locked: true,
       source: 'mf', mfId: String(b.mfId), mfPartnerId: b.partnerId || '', mfUpdatedAt: b.updatedAt || '',
-      mfStatus: b.mfStatus || '', mfPdfUrl: b.pdfUrl || '', note: b.title || '', mfDiff: null,
+      mfStatus: b.mfStatus || '', mfPdfUrl: b.pdfUrl || '', mfWebUrl: b.webUrl || '', note: b.title || '', mfDiff: null,
       dupOf: c.dupOf && c.dupOf.length ? c.dupOf : undefined,
       confirmStatus: c.auto ? '確定' : '未確認', confirmedAt: c.auto ? now : '', confirmedBy: c.auto ? actor : '',
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
@@ -296,7 +297,7 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
     const cur = out.invoices[i]
     const fields: any = {}
     for (const k of u.changed) fields[k] = { before: cur[k] ?? null, after: (u.rec as any)[k] ?? null }
-    const next: any = { ...cur, ...u.rec, mfUpdatedAt: u.b.updatedAt || '', mfStatus: u.b.mfStatus || '', mfPdfUrl: u.b.pdfUrl || cur.mfPdfUrl || '', mfDiff: null,
+    const next: any = { ...cur, ...u.rec, mfUpdatedAt: u.b.updatedAt || '', mfStatus: u.b.mfStatus || '', mfPdfUrl: u.b.pdfUrl || cur.mfPdfUrl || '', mfWebUrl: u.b.webUrl || cur.mfWebUrl || '', mfDiff: null,
       mfChanges: [...(Array.isArray(cur.mfChanges) ? cur.mfChanges : []), { at: now, by: actor, fields }].slice(-10),
       mfChangedAt: now, mfChangeSeen: false, mfChangeWarn: '', updatedAt: now, updatedBy: actor }
     /* 金額が下がって、もう充てた入金の方が多くなった → 知らせる（入金の充当は人が直す） */
@@ -307,6 +308,7 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
   for (const x of plan.same) {
     const i = byId.get(String(x.ex.id)); if (i == null) continue
     if (x.b.pdfUrl && !out.invoices[i].mfPdfUrl) out.invoices[i] = { ...out.invoices[i], mfPdfUrl: x.b.pdfUrl }
+    if (x.b.webUrl && !out.invoices[i].mfWebUrl) out.invoices[i] = { ...out.invoices[i], mfWebUrl: x.b.webUrl }
   }
   for (const d of plan.diff) {
     const i = byId.get(String(d.ex.id)); if (i == null) continue
