@@ -1448,6 +1448,10 @@ function saveCache(){
   }catch(e){ /* 容量超過: キャッシュ無しでも動く */ }
 }
 function headers(){ return { 'Content-Type':'application/json', 'Authorization':'Bearer '+GTOKEN, 'x-client-contract':String(CLIENT_CONTRACT) }; }
+/** 401 は「ログインが切れた」だけ。画面ごとに赤い箱を出さず、ログインに戻す。 */
+function bailIf401(r){
+  if(r && r.status===401){ logout('ログインの有効期限が切れました。もう一度ログインしてください。'); throw new Error('401'); }
+}
 
 async function pullState(){
   const r = await fetch(API_BASE+'/state', { headers: headers() });
@@ -3996,12 +4000,14 @@ function arCsvRows(text){
 /* ---------- サーバーの取り込み口 ---------- */
 async function mfCall(path, body){
   const r = await fetch(API_BASE+path, { method:'POST', headers:headers(), body:JSON.stringify(body||{}) });
+  bailIf401(r);
   const d = await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(d.message || d.error || ('HTTP '+r.status));
   return d;
 }
 async function mfGet(path){
   const r = await fetch(API_BASE+path, { headers:headers() });
+  bailIf401(r);
   const d = await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(d.message || d.error || ('HTTP '+r.status));
   return d;
@@ -10258,6 +10264,7 @@ async function loadUsers(){
   let d;
   try{
     const r=await fetch(API_BASE+'/users',{headers:headers()});
+    bailIf401(r);
     if(!r.ok){
       const j=await r.json().catch(()=>({}));
       /* 取れなかった理由をそのまま出す。「何も出ない」がいちばん困る（2026-09-13） */
