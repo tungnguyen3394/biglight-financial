@@ -323,6 +323,7 @@ export function mfRouter(d: RouterDeps) {
       accounting: c.accounting, redirectUri: c.redirectUri,
       bankAccountId: (await d.cfgGet('mf_bank_account').catch(() => null)) || '',
       lastSyncAt: last.at || '', lastResult: last.result || '', lastError: last.error || '', lastStats: last.stats || null,
+      connectLast: JSON.parse((await d.cfgGet('mf_connect_last').catch(() => null)) || 'null'),
     })
   })
 
@@ -340,17 +341,30 @@ export function mfRouter(d: RouterDeps) {
   /* MF から戻ってくる所。ログインの代わりに state（10分・1回きり）で本人確認する */
   r.get('/mf/callback', async (req, res) => {
     const c = mfConfig(d.env)
+    /* ★ 2026-09-18: 失敗しても理由がどこにも残らず調べられなかったので、最後の戻りを残す。
+       残すのは 時刻・成否・消毒済みの理由 だけ（code も token も残さない）。 */
+    const trace = async (ok: boolean, why: string, by = '') => {
+      try { await d.cfgSet('mf_connect_last', JSON.stringify({ at: new Date((d.now || Date.now)()).toISOString(), ok, why: scrub(why), by })) } catch { /* 記録できなくても接続は妨げない */ }
+    }
     const back = (k: string, msg = '') => res.redirect(302, `${c.appUrl}/?mf=${k}${msg ? '&msg=' + encodeURIComponent(msg) : ''}#arbook`)
     try {
       const raw = await d.cfgGet('mf_oauth_state')
       const st = raw ? JSON.parse(raw) : null
       await d.cfgSet('mf_oauth_state', '')
-      if (!st || !req.query.state || String(req.query.state) !== st.state || (d.now || Date.now)() > Number(st.exp)) return back('error', '接続の手続きが古いか、正しくありません。もう一度お試しください。')
-      if (req.query.error) return back('error', String(req.query.error))
+      if (req.query.error) { const e = String(req.query.error) + (req.query.error_description ? '：' + String(req.query.error_description) : '')
+        await trace(false, 'Money Forward が断りました（' + e + '）', st?.by || ''); return back('error', e) }
+      if (!st || !req.query.state || String(req.query.state) !== st.state || (d.now || Date.now)() > Number(st.exp)) {
+        const why = !st ? '接続の手続きが始まっていません（「接続する」を押す前に戻ってきました）'
+          : (d.now || Date.now)() > Number(st.exp) ? '接続の手続きが古くなっています（10分を過ぎました）'
+          : '接続の手続きが合いません（別の手続きが割り込んだか、URL を2回開きました）'
+        await trace(false, why, st?.by || '')
+        return back('error', why + '。もう一度お試しください。')
+      }
       await exchangeCode(String(req.query.code || ''), st.by, d)
       await d.audit?.(st.by, 'mf-connect', {})
+      await trace(true, '接続しました', st.by)
       return back('connected')
-    } catch (e: any) { return back('error', scrub(e?.message || e)) }
+    } catch (e: any) { const m = scrub(e?.message || e); await trace(false, m); return back('error', m) }
   })
 
   r.post('/mf/disconnect', async (req, res) => {

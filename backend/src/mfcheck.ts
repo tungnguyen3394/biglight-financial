@@ -65,11 +65,16 @@ async function main() {
 
   if (!tok || !tok.access_token) {
     line('接続', '★ まだ接続していません')
+    const cl0 = JSON.parse((await cfgGet('mf_connect_last')) || 'null')
+    if (cl0) line('最後の戻り', `${cl0.at} ${cl0.ok ? '成功' : '失敗'}：${cl0.why}`)
+    else line('最後の戻り', '（一度も戻ってきていません＝ブラウザで「許可」がまだ、または URL を開いていません）')
     console.log('\n→ 画面（設定 › API・AI連携）で「接続する」を押す。')
     console.log('  画面のボタンが使えないときは:  docker compose exec api node dist/mfcheck.js --connect\n')
     process.exit(1)
   }
   line('接続', 'あり')
+  const cl = JSON.parse((await cfgGet('mf_connect_last')) || 'null')
+  if (cl) line('最後の戻り', `${cl.at} ${cl.ok ? '成功' : '失敗'}：${cl.why}`)
   line('接続した人', tok.connected_by || '（不明）')
   line('接続した日時', tok.connected_at || '（不明）')
   line('アクセストークン', peek(tok.access_token))

@@ -183,14 +183,17 @@ function makeDeps(opts = {}) {
     const st = new URL(c.j.url).searchParams.get('state');
     eq('管理者は接続URLをもらう', !!st, true);
     eq('state が違えば接続しない', (await call('GET', '/mf/callback?code=good&state=wrong')).loc.includes('mf=error'), true);
+    eq('失敗した理由が残る（調べられる）', (await call('GET', '/mf/status')).j.connectLast?.ok, false);
+    eq('残るのは理由だけ（code は残さない）', JSON.stringify((await call('GET', '/mf/status')).j.connectLast).includes('good'), false);
     eq('state は1回きり（違う state で使い切ったあとは本物でも通らない）', (await call('GET', `/mf/callback?code=good&state=${st}`)).loc.includes('mf=error'), true);
+    eq('MF が断ったら その言葉をそのまま返す', (await call('GET', '/mf/callback?error=access_denied&state=x')).loc.includes('access_denied'), true);
     const c2 = await call('POST', '/mf/connect'); const st2 = new URL(c2.j.url).searchParams.get('state');
     const ok = await call('GET', `/mf/callback?code=good&state=${st2}`);
     eq('正しい state なら接続して 売掛金 に戻る', ok.loc, 'https://finance.example.jp/?mf=connected#arbook');
     eq('接続したら connected', (await call('GET', '/mf/status')).j.connected, true);
     eq('期間がおかしければ 400', (await call('POST', '/mf/billings', { from: '2026-09-01', to: '2026-08-01' })).status, 400);
     const b = await call('POST', '/mf/billings', { from: '2026-08-01', to: '2026-09-14' });
-    eq('管理者は一覧を取れる（DBには書かない）', [b.status, b.j.count, Object.keys(t.store).sort()], [200, 3, ['mf_oauth_state', 'mf_token']]);
+    eq('管理者は一覧を取れる（DBには書かない）', [b.status, b.j.count, Object.keys(t.store).sort()], [200, 3, ['mf_connect_last', 'mf_oauth_state', 'mf_token']]);
     who.current = { email: 'mgr@biglight.jp', role: 'Manager' };
     eq('マネージャーも取れる', (await call('POST', '/mf/billings', { from: '2026-08-01', to: '2026-09-14' })).status, 200);
     eq('マネージャーは切断できない', (await call('POST', '/mf/disconnect')).status, 403);

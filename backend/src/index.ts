@@ -780,10 +780,11 @@ async function start() {
       if (process.env.CRM_API_BASE && process.env.CRM_EXPORT_KEY) runCrmSync('api', 'cron')
     }
     /* ★ 2026-09-18: 毎朝 06:00 に Money Forward から 請求書・入金 を取り、自動消込までやる。
-       鍵が無い／未接続のときは静かに何もしない（エラーで起動を汚さない）。 */
-    if (now.getHours() === 6 && now.getMinutes() === 0 && MF.mfConfigured()) {
-      cfgGet('mf_token').then(t => {
-        if (!t) return
+       鍵が無い／未接続のときは静かに何もしない（エラーで起動を汚さない）。
+       ★ 鍵は .env だけでなく 画面から入れた分（server_config.mf_client）も見る。 */
+    if (now.getHours() === 6 && now.getMinutes() === 0) {
+      Promise.all([MF.mfCreds(mfDeps), cfgGet('mf_token')]).then(([k, t]) => {
+        if (!k.clientId || !k.clientSecret || !t) return
         mfSync('run', {}, { email: 'cron@biglight.jp', role: 'Admin' })
           .then((r: any) => console.log('[MF] 朝の同期:', JSON.stringify(r.stats)))
           .catch((e: any) => console.error('[MF] 朝の同期に失敗:', e?.message))

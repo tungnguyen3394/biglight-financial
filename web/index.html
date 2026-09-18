@@ -4196,6 +4196,8 @@ async function mfPanelLoad(){
         : (st.connected? `<span class="badge b-green">接続中</span> ${esc(String(st.connectedBy||'').split('@')[0])} ・ ${line}
             ${isAdmin()?` <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}${isAdmin()&&st.credSource==='db'?` ・ <a onclick="mfKeyClear()" style="cursor:pointer;color:var(--danger);">鍵を消す</a>`:''}`
           : `<span class="badge b-amber">未接続</span> ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}`)}
+      ${!st.connected && st.connectLast? `<div class="fhelp" style="margin-top:4px;">最後の戻り：${esc(st.connectLast.at||'')} ${st.connectLast.ok?'成功':'失敗'}${st.connectLast.why? ' ／ '+esc(st.connectLast.why):''}</div>`:''}
+      ${!st.connected && st.configured && !st.connectLast? '<div class="fhelp" style="margin-top:4px;">まだ一度も Money Forward から戻ってきていません（ブラウザで「許可」がまだです）。</div>':''}
       ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
       <div class="fhelp">毎朝 6:00 に「請求 → 入金 → 自動消込」を自動で行います。手順は docs/MONEYFORWARD.md。<br>
         戻り先URL：${esc(st.redirectUri||'')} ／ スコープ：${esc(st.scopes||'')}</div>
