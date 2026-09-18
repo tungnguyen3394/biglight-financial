@@ -68,6 +68,17 @@ docker compose up -d --force-recreate api >/dev/null
 sleep 4
 
 echo "→ 確かめます（トークンは出しません）"
+# 自己診断（dist/mfcheck.js）は push から2分ほどで届きます。無ければ少し待つ。
+for i in 1 2 3 4 5 6; do
+  if docker compose exec -T api test -f dist/mfcheck.js 2>/dev/null; then break; fi
+  if [ "$i" = "6" ]; then
+    echo "  新しい版（dist/mfcheck.js）がまだ届いていません。"
+    echo "  自動デプロイ（2分ごと）を待って、あとで次を実行してください:"
+    echo "    docker compose exec api node dist/mfcheck.js"
+    exit 0
+  fi
+  echo "  新しい版を待っています… ($i/6)"; sleep 30
+done
 docker compose exec -T api node dist/mfcheck.js || true
 
 cat <<'MSG'
