@@ -112,11 +112,14 @@ async function main() {
     const draft = items.filter(MFS.isDraft).length
     line('うち下書き（取り込まない）', `${draft} 件`)
     line('金額の合計（税込）', `${yen(items.reduce((s, x) => s + Number(x.total || 0), 0))} 円`)
+    console.log('\n  （MF が返した項目名・先頭1件）')
+    console.log('   ' + ((items[0] as any).rawKeys || []).join(', '))
     console.log('\n  （先頭3件・MF から返ってきた項目）')
     for (const x of items.slice(0, 3)) {
       console.log(`   ・id=${x.mfId} 番号=${x.number || '（なし）'} 取引先=${x.partnerName}（id=${x.partnerId || '—'}）`)
       console.log(`     請求日=${x.billingDate} 計上日=${x.salesDate || '—'} 期日=${x.dueDate || '—'}`)
       console.log(`     税抜=${yen(x.subtotal)} 税=${yen(x.tax)} 税込=${yen(x.total)} 入金状況=${x.paymentStatus || '—'} 状態=${x.mfStatus || '—'} 更新=${x.updatedAt || '—'}`)
+      console.log(`     PDF=${x.pdfUrl ? 'あり' : '★ 無し（pdf_url が返っていません）'}`)
     }
   }
 

@@ -174,8 +174,12 @@ const dateOnly = (v: any) => String(v || '').slice(0, 10)
 const money = (v: any) => { const n = Number(String(v ?? '').replace(/[^\d.-]/g, '')); return isFinite(n) ? Math.round(n) : 0 }
 
 /** MF の Billing → このシステムで使う形（金額は数値・日付は YYYY-MM-DD） */
-export function normalizeBilling(b: any) {
+export function normalizeBilling(raw: any) {
+  /* v2 系の返り { id, attributes:{…} } でも v3 の平らな形でも同じに読む */
+  const b: any = raw && raw.attributes && typeof raw.attributes === 'object' ? { id: raw.id, ...raw.attributes } : (raw || {})
+  const sub = b.subtotal_price ?? b.subtotal
   return {
+    rawKeys: Object.keys(b),
     mfId: String(b?.id ?? ''),
     number: String(b?.billing_number ?? ''),
     partnerId: String(b?.partner_id ?? ''),
@@ -184,12 +188,13 @@ export function normalizeBilling(b: any) {
     billingDate: dateOnly(b?.billing_date),
     salesDate: dateOnly(b?.sales_date),
     dueDate: dateOnly(b?.due_date),
-    subtotal: b?.subtotal_price == null ? null : money(b?.subtotal_price),
+    subtotal: sub == null || sub === '' ? null : money(sub),
     tax: money(b?.excise_price),
     total: money(b?.total_price),
     paymentStatus: String(b?.payment_status ?? ''),
     emailStatus: String(b?.email_status ?? ''),
     postingStatus: String(b?.posting_status ?? ''),
+    pdfUrl: String(b?.pdf_url ?? ''),
     isLocked: !!b?.is_locked,
     isDownloaded: !!b?.is_downloaded,
     mfStatus: String(b?.status ?? (b?.is_locked ? 'ロック中' : '')),
@@ -257,6 +262,23 @@ export async function fetchBillings(from: string, to: string, d: MfDeps, opts: {
   return out
 }
 
+/** 請求書の PDF を MF から取る。行き先は MF のホストだけに限る（他所へ飛ばされない） */
+export async function fetchBillingPdf(pdfUrl: string, d: MfDeps): Promise<{ status: number; body: Buffer; type: string }> {
+  const c = mfConfig(d.env)
+  let u: URL
+  try { u = new URL(String(pdfUrl || '')) } catch { throw new Error('この請求には PDF の場所が残っていません。もう一度「請求を取り込む」を流すと補われます。') }
+  const okHost = new Set(['invoice.moneyforward.com', new URL(c.apiBase).host])
+  if (u.protocol !== 'https:' || !okHost.has(u.host)) throw new Error('PDF の場所が Money Forward ではありません。開きません。')
+  const token = await accessToken(d)
+  const r: any = await d.fetch(u.toString(), { headers: { authorization: 'Bearer ' + token, accept: 'application/pdf' } })
+  if (!r.ok) {
+    const j: any = await (r.json ? r.json().catch(() => ({})) : {})
+    throw new Error(scrub(mfHttpMessage(r.status, j, '請求書の PDF')))
+  }
+  const ab = await r.arrayBuffer()
+  return { status: r.status, body: Buffer.from(ab), type: String((r.headers && r.headers.get && r.headers.get('content-type')) || 'application/pdf') }
+}
+
 /* ---------- MF 会計（入出金明細・試算表）----------
    繋がらない場合は画面の CSV 取り込みで同じことができます。エラーはそのまま画面に出します。 */
 export async function fetchConnectedAccounts(d: MfDeps) {
@@ -308,6 +330,8 @@ type RouterDeps = MfDeps & {
   audit?: (email: string, action: string, detail: any) => Promise<void> | void
   /** 取り込みの本体（index.ts が state を触る部分を渡す） */
   sync?: (kind: string, args: any, me: { email: string; role: string }) => Promise<any>
+  /** いまの state（PDF の場所を請求から引くため） */
+  state?: () => Promise<any>
 }
 
 const isDate = (s: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))
@@ -420,6 +444,24 @@ export function mfRouter(d: RouterDeps) {
     await d.cfgSet('mf_client', ''); await d.cfgSet('mf_token', '')
     await d.audit?.(me.email, 'mf-credentials-cleared', {})
     res.json({ ok: true })
+  })
+
+  /* --- 請求書の PDF（読むだけ・サーバー経由。ブラウザに MF のトークンは渡さない） --- */
+  r.get('/mf/billings/:mfId/pdf', async (req, res) => {
+    const me = await d.verify(req, res); if (!me) return
+    if (!d.state) return res.status(503).json({ error: 'not-available' })
+    const st = await d.state()
+    const inv = (Array.isArray(st?.invoices) ? st.invoices : []).find((i: any) => String(i.mfId || '') === String(req.params.mfId))
+    if (!inv) return res.status(404).json({ error: 'not-found', message: 'この請求は Money Forward から取り込んだものではありません。' })
+    if (!inv.mfPdfUrl) return res.status(404).json({ error: 'no-pdf', message: 'この請求には PDF の場所が残っていません。「請求を取り込む」をもう一度流すと補われます。' })
+    try {
+      const p = await fetchBillingPdf(String(inv.mfPdfUrl), d)
+      await d.audit?.(me.email, 'mf-pdf', { mfId: String(req.params.mfId) })
+      res.setHeader('content-type', p.type.startsWith('application/pdf') ? 'application/pdf' : p.type)
+      res.setHeader('content-disposition', 'inline; filename="' + encodeURIComponent((inv.no || inv.mfId) + '.pdf') + '"')
+      res.setHeader('cache-control', 'private, no-store')
+      res.status(200).send(p.body)
+    } catch (e: any) { res.status(502).json({ error: 'mf-failed', message: scrub(e?.message || e) }) }
   })
 
   /* --- 請求書: 取得（読むだけ） --- */

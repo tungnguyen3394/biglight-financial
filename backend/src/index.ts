@@ -666,7 +666,7 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
   }
 }
 
-app.use(mfRouter({ ...mfDeps, verify: requireActive, audit: mfAudit, sync: mfSync }))
+app.use(mfRouter({ ...mfDeps, verify: requireActive, audit: mfAudit, sync: mfSync, state: loadState }))
 
 /** 経理へ渡す「消込一覧」CSV（MF 会計で仕訳を入れるのは人） */
 app.get('/mf/settlement.csv', async (req, res) => {

@@ -2690,6 +2690,7 @@ function openDetail(entKey, id){
   openModal(`<h3>${esc(row.name||row.no||E.label)} ${sourceTag(row)}</h3>
     <div class="mdsub">${esc(E.label)}</div>${html}
     <div class="modal-actions">
+      ${entKey==='invoices'&&row.mfId?`<button class="btn secondary" onclick="mfOpenPdf('${row.id}')">Money Forward の請求書PDF</button>`:''}
       ${entKey==='invoices'?`<button class="btn secondary" onclick="printInvoice('${row.id}')">${IC.print} 請求書を印刷</button>`:''}
       ${canEdit(page)?`<button class="btn secondary" onclick="closeModal();openForm('${entKey}','${row.id}')">編集</button>`:''}
       <button class="btn" onclick="closeModal()">閉じる</button></div>`,
@@ -4267,6 +4268,21 @@ async function mfKeyClear(){
     toast('消しました。','ok'); renderPage(CURRENT_PAGE);
   }catch(e){ toast(String(e.message||e),'err'); }
 }
+/** MF の請求書 PDF を新しいタブで開く。サーバーが MF から取って返す（ブラウザは MF に直接行かない）。 */
+async function mfOpenPdf(invId){
+  const inv=findById('invoices', invId);
+  if(!inv||!inv.mfId){ toast('この請求は Money Forward から取り込んだものではありません。','err'); return; }
+  const w=window.open('', '_blank');   // 先に開いておく（あとから開くとポップアップ扱いで止められる）
+  if(w) w.document.write('<p style="font-family:sans-serif;padding:20px;">Money Forward から請求書を取っています…</p>');
+  try{
+    const r=await fetch(API_BASE+'/mf/billings/'+encodeURIComponent(inv.mfId)+'/pdf',{ headers:headers() });
+    bailIf401(r);
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.message||('HTTP '+r.status)); }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    if(w) w.location=url; else window.open(url,'_blank');
+  }catch(e){ if(w) w.close(); toast(String(e.message||e),'err'); }
+}
 /** 同期の結果（数字）を1行にする。0 は出さない（読むところを減らすため）。 */
 function mfStatsText(st){
   if(!st || typeof st!=='object') return '';
@@ -4357,7 +4373,7 @@ function viewArConfirm(){
   const cols=[
     {key:'ck', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'?'':`<input type="checkbox" class="arcfck" value="${attr(r.id)}" onclick="event.stopPropagation()">`},
     {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
-    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}`},
+    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}${r.mfId?` <a class="pillbtn" onclick="event.stopPropagation();mfOpenPdf('${attr(r.id)}')">PDF</a>`:''}`},
     {key:'companyId', label:'取引先', raw:r=>arCoName(r.companyId), val:r=>r.companyId? esc(arCoName(r.companyId))
       : `<a class="pillbtn pill-new" onclick="event.stopPropagation();mfSetCompany('${attr(r.id)}')">取引先を選ぶ</a>`},
     {key:'issueDate', label:'請求日', date:true, val:r=>esc(r.issueDate||'')},

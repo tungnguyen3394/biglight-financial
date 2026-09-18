@@ -48,11 +48,15 @@ function makeDeps(opts = {}) {
     if (u.pathname.includes('/reports/trial_balance')) {
       return { ok: true, status: 200, json: async () => ({ data: [{ account_code: '1130', account_name: '売掛金', closing_balance: '264000' }] }) };
     }
+    if (u.pathname.endsWith('.pdf')) {
+      return { ok: true, status: 200, headers: { get: () => 'application/pdf' }, arrayBuffer: async () => Buffer.from('%PDF-1.4 fake ' + u.pathname), json: async () => ({}) };
+    }
     if (u.pathname.endsWith('/billings')) {
       const page = Number(u.searchParams.get('page'));
       const mk = i => ({ id: 'b' + i, billing_number: 'N-' + i, partner_id: 'p1', partner_name: '株式会社テスト', title: 't',
         billing_date: '2026-08-31', sales_date: '2026-08-31', due_date: '2026-09-30',
-        subtotal_price: '100000.0', excise_price: '10000.0', total_price: '110000.0', updated_at: '2026-09-01T00:00:00+09:00' });
+        subtotal_price: '100000.0', excise_price: '10000.0', total_price: '110000.0', updated_at: '2026-09-01T00:00:00+09:00',
+        pdf_url: 'https://invoice.moneyforward.com/api/v3/billings/b' + i + '.pdf' });
       return { ok: true, status: 200, json: async () => ({ data: page === 1 ? [mk(1), mk(2)] : [mk(3)], pagination: { total_count: 3, total_pages: 2, per_page: 2, current_page: page } }) };
     }
     return { ok: false, status: 404, json: async () => ({}) };
@@ -223,6 +227,43 @@ function makeDeps(opts = {}) {
     const srv = await new Promise(r => { const s = app.listen(0, () => r(s)) });
     const r = await fetch(`http://127.0.0.1:${srv.address().port}/mf/connect`, { method: 'POST' });
     eq('未設定のまま接続しようとすると 503', r.status, 503);
+    srv.close();
+  }
+
+  console.log('\n― 返りの形が違っても読める・PDF はサーバー経由で開く ―');
+  {
+    const flat = MF.normalizeBilling({ id: 'f1', total_price: '1100', subtotal: '1000', pdf_url: 'https://invoice.moneyforward.com/x.pdf' });
+    eq('v3 の平らな形: 税抜は subtotal でも拾う', [flat.total, flat.subtotal, flat.pdfUrl], [1100, 1000, 'https://invoice.moneyforward.com/x.pdf']);
+    const wrapped = MF.normalizeBilling({ id: 'w1', attributes: { total_price: '2200', subtotal_price: '2000', partner_name: 'A社', billing_date: '2026-09-01' } });
+    eq('attributes に包まれた形でも同じに読む', [wrapped.mfId, wrapped.total, wrapped.subtotal, wrapped.partnerName, wrapped.billingDate], ['w1', 2200, 2000, 'A社', '2026-09-01']);
+    eq('返ってきた項目名を残す（自己点検で見せる）', wrapped.rawKeys.includes('total_price') && wrapped.rawKeys.includes('id'), true);
+    eq('税抜が無ければ null（あとで規則で補う）', MF.normalizeBilling({ id: 'n1', total_price: '330' }).subtotal, null);
+  }
+  {
+    const t = makeDeps();
+    const who = { current: { email: 'v@biglight.jp', role: 'Viewer' } };
+    const state = { invoices: [
+      { id: 'INV1', no: 'N-1', mfId: 'b1', mfPdfUrl: 'https://invoice.moneyforward.com/api/v3/billings/b1.pdf' },
+      { id: 'INV2', no: 'N-2', mfId: 'b2', mfPdfUrl: 'https://evil.example.com/steal.pdf' },
+      { id: 'INV3', no: 'N-3', mfId: 'b3' },
+    ] };
+    const app = express(); app.use(express.json());
+    app.use(MF.mfRouter({ ...t.deps, verify: async (req, res) => { if (!who.current) { res.status(401).json({ error: 'unauthorized' }); return null } return who.current }, state: async () => state }));
+    const srv = await new Promise(r => { const s2 = app.listen(0, () => r(s2)) });
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    /* 接続しておく */
+    t.store.mf_token = JSON.stringify({ access_token: 'AT-pdf', refresh_token: 'RT', expires_at: 9_000_000 });
+    const r1 = await fetch(base + '/mf/billings/b1/pdf');
+    eq('PDF が返る（読むだけ）', [r1.status, r1.headers.get('content-type')], [200, 'application/pdf']);
+    eq('中身は MF から取ったもの', (await r1.text()).startsWith('%PDF-1.4 fake /api/v3/billings/b1.pdf'), true);
+    const pdfCall = t.calls.find(c => c.url.endsWith('/b1.pdf'));
+    eq('MF へは Bearer で取りに行く', pdfCall.init.headers.authorization, 'Bearer AT-pdf');
+    eq('MF 以外の場所には行かない', (await fetch(base + '/mf/billings/b2/pdf')).status, 502);
+    eq('偽の場所へ fetch していない', t.calls.some(c => c.url.includes('evil.example.com')), false);
+    eq('PDF の場所が無い請求は 404', (await fetch(base + '/mf/billings/b3/pdf')).status, 404);
+    eq('MF から来ていない請求は 404', (await fetch(base + '/mf/billings/zzz/pdf')).status, 404);
+    who.current = null;
+    eq('ログインしていなければ 401', (await fetch(base + '/mf/billings/b1/pdf')).status, 401);
     srv.close();
   }
 

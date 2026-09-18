@@ -42,6 +42,16 @@ console.log('\n― 請求書の取り込み ―');
   eq('請求ルールが無ければ自動で確定', r1.state.invoices.map(i => i.confirmStatus), ['確定', '確定']);
   /* 冪等: 同じものをもう一度流しても増えない・変わらない */
   const before = JSON.stringify(r1.state.invoices.map(i => ({ ...i, updatedAt: 0 })));
+  /* PDF の場所: 取り込み時に残す。無かった古い分は「変更なし」でも補う（金額には触らない） */
+  {
+    const p1 = S.applyBillings(st, [bill({ mfId: 'pdf1', pdfUrl: 'https://invoice.moneyforward.com/api/v3/billings/pdf1.pdf' })]);
+    const inv1 = p1.state.invoices.find(i => i.mfId === 'pdf1');
+    eq('取り込んだ請求に PDF の場所が残る', inv1.mfPdfUrl, 'https://invoice.moneyforward.com/api/v3/billings/pdf1.pdf');
+    const old = { ...p1.state, invoices: p1.state.invoices.map(i => i.mfId === 'pdf1' ? { ...i, mfPdfUrl: '' } : i) };
+    const p2 = S.applyBillings(old, [bill({ mfId: 'pdf1', pdfUrl: 'https://invoice.moneyforward.com/api/v3/billings/pdf1.pdf' })]);
+    const inv2 = p2.state.invoices.find(i => i.mfId === 'pdf1');
+    eq('古い取り込み分にも PDF の場所を補う（変更なし扱いのまま）', [p2.stats['変更なし'], p2.stats['更新'], inv2.mfPdfUrl.endsWith('pdf1.pdf'), inv2.total], [1, 0, true, inv1.total]);
+  }
   const r2 = S.applyBillings(r1.state, [bill({}), bill({ mfId: 'm2', number: 'B-1', partnerId: '', partnerName: 'テスト物流株式会社', total: 220000, subtotal: 200000 })]);
   eq('2回流しても件数は同じ', r2.state.invoices.length, 2);
   eq('2回流しても中身は変わらない', JSON.stringify(r2.state.invoices.map(i => ({ ...i, updatedAt: 0 }))), before);

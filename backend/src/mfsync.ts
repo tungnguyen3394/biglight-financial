@@ -69,6 +69,7 @@ export type Billing = {
   subtotal?: number | null; tax?: number | null; total?: number
   mfStatus?: string; paymentStatus?: string; emailStatus?: string; postingStatus?: string
   isLocked?: boolean; isDownloaded?: boolean; updatedAt?: string
+  pdfUrl?: string
 }
 /** 下書き＝まだ出していない請求。売掛金にしてはいけない。 */
 export function isDraft(b: Billing) {
@@ -169,14 +170,19 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
     out.invoices.push({
       id: newId('INV'), ...c.rec, items: [], status: '確定', locked: true,
       source: 'mf', mfId: String(b.mfId), mfPartnerId: b.partnerId || '', mfUpdatedAt: b.updatedAt || '',
-      mfStatus: b.mfStatus || '', note: b.title || '', mfDiff: null,
+      mfStatus: b.mfStatus || '', mfPdfUrl: b.pdfUrl || '', note: b.title || '', mfDiff: null,
       confirmStatus: c.auto ? '確定' : '未確認', confirmedAt: c.auto ? now : '', confirmedBy: c.auto ? actor : '',
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     })
   }
   for (const u of plan.update) {
     const i = byId.get(String(u.ex.id)); if (i == null) continue
-    out.invoices[i] = { ...out.invoices[i], ...u.rec, mfUpdatedAt: u.b.updatedAt || '', mfStatus: u.b.mfStatus || '', mfDiff: null, updatedAt: now, updatedBy: actor }
+    out.invoices[i] = { ...out.invoices[i], ...u.rec, mfUpdatedAt: u.b.updatedAt || '', mfStatus: u.b.mfStatus || '', mfPdfUrl: u.b.pdfUrl || out.invoices[i].mfPdfUrl || '', mfDiff: null, updatedAt: now, updatedBy: actor }
+  }
+  /* 変更なしでも PDF の場所が無い古い取り込み分には補う（金額には触らない） */
+  for (const x of plan.same) {
+    const i = byId.get(String(x.ex.id)); if (i == null) continue
+    if (x.b.pdfUrl && !out.invoices[i].mfPdfUrl) out.invoices[i] = { ...out.invoices[i], mfPdfUrl: x.b.pdfUrl }
   }
   for (const d of plan.diff) {
     const i = byId.get(String(d.ex.id)); if (i == null) continue
