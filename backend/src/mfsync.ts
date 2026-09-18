@@ -60,7 +60,10 @@ export function currentFy(now = Date.now()): number {
 export function importFromYm(state: any, now = Date.now()): string {
   const s = String(state?.settings?.mfImportFrom || '')
   if (/^\d{4}-\d{2}$/.test(s)) return s
-  return currentFy(now) + '-' + String(FY_START_MONTH).padStart(2, '0')
+  /* ★ 2026-09-19 夜 利用者の指示: 「MF 会計 から 全部の期・全部の会社 を取る」。請求と入金を両方取るので 前の期でも数字は合う。
+     既定は 第1期の初め（settings.firstFy・無ければ 2021）。settings.mfImportFrom で狭められる。 */
+  const first = Number(state?.settings?.firstFy)
+  return (Number.isInteger(first) && first > 1990 ? first : 2021) + '-' + String(FY_START_MONTH).padStart(2, '0')
 }
 export const isBeforeImport = (state: any, ym: any) => { const y = ymOf(ym); return !!y && y < importFromYm(state) }
 
@@ -955,13 +958,27 @@ export function cleanupBeforeImport(state: any, opts: { since?: string; actor?: 
      ・MF で仕訳を直したら（金額・日付）: 充当が無ければ そのまま直す、有れば 直したうえで 警告
      ・前の期・締めた期 は入れない */
 export type JPay = { extId: string; journalId?: string; number?: string; date: string; amount: number; fee?: number
-  partnerCode?: string; partnerName?: string; remark?: string; updatedAt?: string; against?: string }
+  partnerCode?: string; partnerName?: string; subAccount?: string; remark?: string; updatedAt?: string; against?: string }
+/** 相手科目から 入金の種類。預金・現金 → 銀行振込、それ以外（売上高・雑損失…）→ 相殺・値引 など */
+export const methodOfAgainst = (against: any) => /預金|現金|口座/.test(String(against || '')) ? '銀行振込' : (String(against || '') ? '相殺・値引（' + String(against).slice(0, 12) + '）' : '銀行振込')
 
-export function matchCompanyByTrade(state: any, p: { partnerCode?: string; partnerName?: string }) {
+/** 仕訳 → 会社。MF 会計 では 取引先 欄が空のことが多く、会社は 補助科目（sub_account_name）か 摘要 に書いてある
+    （2026-09-19 本番の元帳で確認: 取引先=空、補助科目=会社、摘要=「売掛金回収 株式会社◯◯ 4月分」）。
+    順: 取引先コード → 取引先名／補助科目名 が1社に一致 → 摘要 の中に会社名が含まれる（いちばん長く一致した1社） */
+export function matchCompanyByTrade(state: any, p: { partnerCode?: string; partnerName?: string; subAccount?: string; remark?: string }) {
   const cos = liveCos(state)
   if (p.partnerCode) { const c = cos.find((x: any) => String(x.mfTradeCode || '') === String(p.partnerCode)); if (c) return { companyId: String(c.id), how: 'code' as const } }
-  const n = normName(p.partnerName)
-  if (n) { const hits = cos.filter((x: any) => companyNames(x).includes(n)); if (hits.length === 1) return { companyId: String(hits[0].id), how: 'name' as const } }
+  for (const nm of [p.partnerName, p.subAccount]) {
+    const n = normName(nm); if (!n) continue
+    const hits = cos.filter((x: any) => companyNames(x).includes(n))
+    if (hits.length === 1) return { companyId: String(hits[0].id), how: 'name' as const }
+  }
+  const r = normName(p.remark)
+  if (r.length >= 3) {
+    let best: any = null, bestLen = 0
+    for (const c of cos) for (const nm of companyNames(c)) if (nm.length >= 3 && r.includes(nm) && nm.length > bestLen) { best = c; bestLen = nm.length }
+    if (best) return { companyId: String(best.id), how: 'remark' as const }
+  }
   return { companyId: '', how: 'none' as const }
 }
 export function planJournals(state: any, items: JPay[]) {
@@ -999,11 +1016,11 @@ export function applyJournals(state: any, items: JPay[], opts: { actor?: string 
   const now = new Date().toISOString(), actor = opts.actor || 'mf-sync', stamp = { updatedAt: now, updatedBy: actor }
   const out: any = { ...state, payments: arr(state, 'payments').slice() }
   const byId = new Map<string, number>(out.payments.map((p: any, i: number) => [String(p.id), i] as [string, number]))
-  const base = (j: JPay) => ({ mfJournalId: j.journalId || '', mfJournalNo: j.number || '', mfTradeCode: j.partnerCode || '', mfTradeName: j.partnerName || '',
+  const base = (j: JPay) => ({ mfJournalId: j.journalId || '', mfJournalNo: j.number || '', mfTradeCode: j.partnerCode || '', mfTradeName: j.partnerName || j.subAccount || '',
     mfAgainst: j.against || '', mfUpdatedAt: j.updatedAt || '', source: 'mfj', extId: String(j.extId) })
   for (const c of plan.create) out.payments.push({
     id: newId('PAY'), companyId: c.companyId || '', date: dateOnly(c.j.date), amount: num(c.j.amount), fee: num(c.j.fee || 0),
-    method: '銀行振込', note: c.j.remark || '', allocations: [], status: '確定', payerName: c.j.partnerName || '', matchType: '',
+    method: methodOfAgainst(c.j.against), note: c.j.remark || '', allocations: [], status: '確定', payerName: c.j.partnerName || c.j.subAccount || '', matchType: '',
     ...base(c.j), createdAt: now, createdBy: actor, ...stamp,
   })
   for (const a of plan.adopt) { const i = byId.get(String(a.ex.id)); if (i == null) continue

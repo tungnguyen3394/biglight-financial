@@ -3589,8 +3589,7 @@ function viewArBook(){
    判定は サーバー（mfsync.importFromYm / cleanupBeforeImport）と同じ考え方。 */
 function mfImportFromYm(){
   const s=DB.settings&&DB.settings.mfImportFrom; if(/^\d{4}-\d{2}$/.test(String(s||''))) return s;
-  const t=thisMonth(), y=Number(t.slice(0,4)), m=Number(t.slice(5,7));
-  return (m>=8? y : y-1)+'-08';
+  return firstFy()+'-08';   // 2026-09-19 夜: 全部の期を取る（backend/src/mfsync.ts importFromYm と同じ）
 }
 function mfImportAlert(){
   const from=mfImportFromYm();
@@ -4222,7 +4221,7 @@ function mfReadFile(file){
 let MFI = null;   // { kind, status, from, to, month, csv, csvName, plan, map, busy }
 const MF_KINDS = {
   billings:       { title:'請求を取り込む（Money Forward 請求書）', path:'/mf/sync/billings',
-                    sub:'請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。下書きは入りません。前の期（計上月が この期の8月より前）の請求は、期間に入れても 入りません。',
+                    sub:'請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。下書きは入りません。第1期より前のものは入りません（全部の期を取ります）。',
                     csvHelp:'MF 請求書の一覧から出力した CSV（見出しで列を判断します）' },
   /* ★ 2026-09-19 利用者の指示: MF 会計 が唯一の正。入金は 経理（または AI）が MF 会計 で 取引先つきに仕訳したもの（売掛金の貸方）を写す。
        銀行の生の明細は「仮」（取引先はこちらで推測）。毎朝の自動同期は 仕訳 を使う。 */

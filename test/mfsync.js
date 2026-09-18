@@ -212,7 +212,7 @@ console.log('\n― 前の期は 絶対に入れない・CSV と API の同じ請
   eq('行き先には「前の期だけ」と出る', S.partnerReport(r.state, items).find(x => x.partnerName === '前の期だけの会社').result, 'old');
   const tx = S.applyTransactions(st, [{ extId: 't1', date: '2026-07-31', amount: 1000, payerName: 'x' }, { extId: 't2', date: '2026-08-01', amount: 1000, payerName: 'y' }]);
   eq('前の期の入金も入らない', [tx.stats['新規'], tx.stats['前の期で見送り']], [1, 1]);
-  eq('既定は 今日の期の8月から', /^\d{4}-08$/.test(S.importFromYm({})), true);
+  eq('既定は 第1期の8月から（全部の期を取る）', [S.importFromYm({}), S.importFromYm({ settings: { firstFy: 2023 } })], ['2021-08', '2023-08']);
 }
 {
   /* CSV で入れた請求を API が持ってきた → 2つにしない */
@@ -263,6 +263,15 @@ console.log('\n― MF 会計 の仕訳 → 入金（2026-09-19: MF が正）―'
   eq('仕訳が入金になる（取引先つき・手数料つき）。取引先なしは 未対応 のまま入る。前の期は入らない',
     [p.length, p[0].companyId, p[0].amount, p[0].fee, p[0].source, p[1].companyId, r.stats['前の期で見送り']], [2, 'C1', 110000, 660, 'mfj', '', 1]);
   eq('取引先コードを会社に覚える', r.state.companies.find(c => c.id === 'C1').mfTradeCode, 'T-1');
+  /* MF 会計 では 取引先 が空のことが多い → 補助科目・摘要 から会社を当てる（2026-09-19 本番の元帳で確認） */
+  const s2 = baseState(); s2.settings.mfImportFrom = '2026-08';
+  const r2 = S.applyJournals(s2, [
+    J({ extId: 'j:S1:0', partnerCode: '', partnerName: '', subAccount: 'テスト物流', remark: '売掛金回収　4月分' }),
+    J({ extId: 'j:S2:0', partnerCode: '', partnerName: '', subAccount: '', remark: '売掛金回収　株式会社サンプル精機　5月分' }),
+    J({ extId: 'j:S3:0', partnerCode: '', partnerName: '', subAccount: '', remark: '売掛金回収　知らない会社　5月分' }),
+    J({ extId: 'j:S4:0', partnerName: '株式会社高山', subAccount: '', remark: '', against: '売上高' }) ]);
+  eq('補助科目 → 会社、摘要の中の会社名 → 会社、どちらも無ければ 未対応', r2.state.payments.map(p => p.companyId), ['C2', 'C3', '', 'C1']);
+  eq('相手科目が 預金 でなければ 相殺・値引 として入る', [r2.state.payments[3].method.startsWith('相殺'), r2.state.payments[0].method], [true, '銀行振込']);
   eq('もう一度流しても増えない', S.applyJournals(r.state, [J({})]).state.payments.length, 2);
   const up = S.applyJournals(r.state, [J({ amount: 120000 })]);
   eq('MF で仕訳を直したら こちらも直す', [up.state.payments[0].amount, up.stats['更新']], [120000, 1]);

@@ -636,7 +636,7 @@ export async function arAccountId(d: MfDeps): Promise<string> {
   return acc ? acc.id : ''
 }
 export type JournalPay = { extId: string; journalId: string; number: string; date: string; amount: number; fee: number
-  partnerCode: string; partnerName: string; remark: string; updatedAt: string; isRealized: boolean; against: string }
+  partnerCode: string; partnerName: string; subAccount: string; remark: string; updatedAt: string; isRealized: boolean; against: string }
 /** 仕訳1件 → 入金（売掛金 の 貸方 1行 = 入金 1件）。同じ仕訳の 借方 に 手数料 があれば fee に。 */
 export function journalToPays(j: any): JournalPay[] {
   const out: JournalPay[] = []
@@ -650,7 +650,7 @@ export function journalToPays(j: any): JournalPay[] {
     out.push({
       extId: 'j:' + String(j.id) + ':' + idx, journalId: String(j.id), number: String(j.number ?? ''), date: dateOnly(j.transaction_date),
       amount: v, fee: out.length ? 0 : fee, partnerCode: String(cr.trade_partner_code ?? ''), partnerName: String(cr.trade_partner_name ?? ''),
-      remark: String(b.remark ?? j.memo ?? ''), updatedAt: String(j.update_time ?? ''), isRealized: j.is_realized !== false, against,
+      subAccount: String(cr.sub_account_name ?? ''), remark: String(b.remark || j.memo || ''), updatedAt: String(j.update_time ?? ''), isRealized: j.is_realized !== false, against,
     })
   })
   return out

@@ -45,7 +45,7 @@ function makeDeps(opts = {}) {
     if (u.pathname.endsWith('/journals')) {
       if (u.search.includes('account_id=') && u.search.includes('%252B')) return { ok: false, status: 400, json: async () => ({ errors: [{ code: 'invalid_query_parameter_value', message: 'Target: account_id' }] }) };
       const mk = (id, date, v, fee, name, code) => ({ id, number: 7, transaction_date: date, update_time: '2026-09-19T01:00:00Z', is_realized: true, branches: [
-        { remark: '振込', debitor: { account_name: '普通預金', value: v - fee }, creditor: { account_name: '売掛金', value: v, trade_partner_code: code, trade_partner_name: name } },
+        { remark: '振込', debitor: { account_name: '普通預金', value: v - fee }, creditor: { account_name: '売掛金', value: v, trade_partner_code: code, trade_partner_name: name, sub_account_name: name ? '' : 'ライクスタカギ' } },
         ...(fee ? [{ remark: '', debitor: { account_name: '支払手数料', value: fee }, creditor: null }] : []) ] });
       return { ok: true, status: 200, json: async () => ({ journals: [mk('J1', '2026-09-10', 110000, 660, '株式会社高山', 'T-1'), mk('J2', '2026-09-11', 5000, 0, '', ''),
         { id: 'J3', transaction_date: '2026-09-12', branches: [{ debitor: { account_name: '売掛金', value: 100 }, creditor: { account_name: '売上高', value: 100 } }] }],
@@ -183,7 +183,7 @@ function makeDeps(opts = {}) {
       ['https://invoice.moneyforward.com/billings/b9', 'https://invoice.moneyforward.com/billings/b9']);
     const jp = await MF.fetchJournalPays('2026-09-01', '2026-09-30', t.deps);
     eq('仕訳の 売掛金（貸方）だけが入金になる（手数料つき・売上の仕訳は入らない）',
-      jp.map(x => [x.extId, x.date, x.amount, x.fee, x.partnerName, x.partnerCode]), [['j:J1:0', '2026-09-10', 110000, 660, '株式会社高山', 'T-1'], ['j:J2:0', '2026-09-11', 5000, 0, '', '']]);
+      jp.map(x => [x.extId, x.date, x.amount, x.fee, x.partnerName, x.partnerCode, x.subAccount, x.remark]), [['j:J1:0', '2026-09-10', 110000, 660, '株式会社高山', 'T-1', '', '振込'], ['j:J2:0', '2026-09-11', 5000, 0, '', '', 'ライクスタカギ', '振込']]);
     const jq = new URL(t.calls.filter(c => c.url.includes('/journals')).pop().url).searchParams;
     eq('仕訳は 売掛金 の科目IDで絞り（MF の ID は二重にエンコードしない）、期間つき', [jq.get('account_id'), jq.get('start_date'), jq.get('end_date')], ['OwMh+3QQ==', '2026-09-01', '2026-09-30']);
     const tb = await MF.fetchTrialBalance('2026-09', t.deps);
