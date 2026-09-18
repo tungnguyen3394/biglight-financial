@@ -4186,6 +4186,8 @@ async function mfPanelLoad(){
   const mgr = myRole()==='Admin'||myRole()==='Manager';
   MF_PANEL_ST = st;
   const sch = st.schedule || { enabled:true, hour:6 };
+  const statsTxt = mfStatsText(st.lastStats);
+  const unmapped = mfUnmappedCount(st.lastStats);
   const line = st.lastSyncAt? `最後の同期 ${esc(String(st.lastSyncAt).slice(0,16).replace('T',' '))}${st.lastResult==='error'?' <span class="minus">失敗</span>':''}` : 'まだ同期していません';
   const keyLine = st.configured
     ? `<span class="badge b-green">鍵あり</span> ClientID ${esc(st.clientIdPeek||'')} ・ Secret ${st.clientSecretLen||0}文字 ・ ${esc(st.tokenAuth==='post'?'CLIENT_SECRET_POST':'CLIENT_SECRET_BASIC')}
@@ -4207,6 +4209,10 @@ async function mfPanelLoad(){
       ${!st.connected && st.connectLast? `<div class="fhelp" style="margin-top:4px;">最後の戻り：${esc(st.connectLast.at||'')} ${st.connectLast.ok?'成功':'失敗'}${st.connectLast.why? ' ／ '+esc(st.connectLast.why):''}</div>`:''}
       ${!st.connected && st.configured && !st.connectLast? '<div class="fhelp" style="margin-top:4px;">まだ一度も Money Forward から戻ってきていません（ブラウザで「許可」がまだです）。</div>':''}
       ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
+      ${statsTxt? `<div class="fhelp" style="margin-top:4px;">最後の同期の中身：${esc(statsTxt)}</div>`:''}
+      ${unmapped? `<div class="alertbar" style="margin-top:8px;">${IC.warn} <b>取引先未対応 ${unmapped}件</b>：MF の取引先が この システムの取引先と結びついていないため、その請求は取り込んでいません。
+        一度だけ対応づければ、次からは自動で当たります。
+        ${mgr?`<button class="btn sm" style="margin-left:auto;" onclick="openMfImport('billings')">対応づける</button>`:''}</div>`:''}
       <div class="fhelp">${sch.enabled
           ? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）に「請求 → 入金 → 自動消込」を自動で行います。`
           : '<b>自動同期は止まっています。</b>「今すぐ同期」を押したときだけ取り込みます。'}
@@ -4260,6 +4266,24 @@ async function mfKeyClear(){
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.message||('HTTP '+r.status)); }
     toast('消しました。','ok'); renderPage(CURRENT_PAGE);
   }catch(e){ toast(String(e.message||e),'err'); }
+}
+/** 同期の結果（数字）を1行にする。0 は出さない（読むところを減らすため）。 */
+function mfStatsText(st){
+  if(!st || typeof st!=='object') return '';
+  const out=[];
+  Object.entries(st).forEach(([k,v])=>{
+    if(v && typeof v==='object'){
+      if(v['エラー']){ out.push(k+'：'+v['エラー']); return; }
+      const sub=Object.entries(v).filter(([,n])=>typeof n==='number'&&n).map(([a,n])=>a+' '+n).join('・');
+      if(sub) out.push(k+'：'+sub);
+    } else if(typeof v==='number' && v) out.push(k+' '+v);
+  });
+  return out.join(' ／ ');
+}
+/** 取り込めなかった件数（MF の取引先が この システムの取引先と結びついていない） */
+function mfUnmappedCount(st){
+  if(!st || typeof st!=='object') return 0;
+  return Number((st['取引先未対応']) || (st.billings && st.billings['取引先未対応']) || 0);
 }
 /** 画面に出したときの状態を覚えておく（設定の小窓が初期値に使う） */
 let MF_PANEL_ST=null;

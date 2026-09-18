@@ -605,6 +605,13 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   _db.invoices[0].confirmStatus='未確認'; _db.invoices[0].source='mf';
   _db.invoices[1].confirmStatus='確定';
   _db.invoices[2].mfDiff={ at:'2026-09-18T00:00:00Z', fields:{ total:{ finance:100000, mf:120000 } } };
+  /* 同期の結果（数字）の見せ方。0 は出さない・入れ子（run）もほどく */
+  eq('同期の結果を1行にする', ctx.mfStatsText({ billings:{ 新規:3, 更新:0, 取引先未対応:2 }, reconcile:{ 消込:1 } }),
+    'billings：新規 3・取引先未対応 2 ／ reconcile：消込 1');
+  eq('入出金が取れないときは理由を出す', ctx.mfStatsText({ transactions:{ エラー:'会計に繋がりません' } }), 'transactions：会計に繋がりません');
+  eq('結果が無ければ何も出さない', [ctx.mfStatsText(null), ctx.mfStatsText({ billings:{ 新規:0 } })], ['','']);
+  eq('取り込めなかった件数を拾う（入れ子でも平でも）',
+    [ctx.mfUnmappedCount({ billings:{ 取引先未対応:5 } }), ctx.mfUnmappedCount({ 取引先未対応:2 }), ctx.mfUnmappedCount(null)], [5,2,0]);
   const mfC=ctx.mfCheckCounts();
   eq('確認待ち・MF差異を数える', [mfC['未確認']>=1, mfC['MF差異']>=1, mfC['確定']>=1], [true,true,true]);
   const cfH=ctx.viewArConfirm();
