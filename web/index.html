@@ -4179,13 +4179,22 @@ async function mfPanelLoad(){
   if(!b || b.id!=='mfPanel') return;
   const mgr = myRole()==='Admin'||myRole()==='Manager';
   const line = st.lastSyncAt? `最後の同期 ${esc(String(st.lastSyncAt).slice(0,16).replace('T',' '))}${st.lastResult==='error'?' <span class="minus">失敗</span>':''}` : 'まだ同期していません';
+  const keyLine = st.configured
+    ? `<span class="badge b-green">鍵あり</span> ClientID ${esc(st.clientIdPeek||'')} ・ Secret ${st.clientSecretLen||0}文字 ・ ${esc(st.tokenAuth==='post'?'CLIENT_SECRET_POST':'CLIENT_SECRET_BASIC')}
+        <span class="muted">（${st.credSource==='env'? 'サーバーの .env から' : '画面から入れた分'}）</span>`
+    : '<span class="badge b-amber">鍵なし</span> <span class="muted">MF アプリポータルの ClientID / ClientSecret を貼り付けてください</span>';
   b.innerHTML=`<div class="panel"><div class="panel-hd"><b>Money Forward 連携</b>
       <span class="sub">請求書と入出金明細を「読むだけ」。仕訳は経理が MF 会計で入れます</span>
       ${mgr?`<button class="btn sm" style="margin-left:auto;" onclick="mfSyncNow()">今すぐ同期</button>`:''}</div>
     <div class="panel-bd" style="font-size:13px;line-height:1.9;">
-      ${!st.configured? '<span class="muted">API は未設定です（.env に MF_CLIENT_ID / MF_CLIENT_SECRET）。設定しなくても、各画面の「取り込む」から CSV で運用できます。</span>'
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:6px;">
+        ${keyLine}
+        ${isAdmin()&&st.credSource!=='env'?`<button class="btn secondary sm" onclick="mfKeyForm()">${st.configured?'鍵を変える':'鍵を入れる'}</button>`:''}
+        ${isAdmin()&&st.credSource==='env'?'<span class="fhelp">.env に入っているため、画面からは変えられません（サーバーで vps/enable-mf.sh）。</span>':''}
+      </div>
+      ${!st.configured? '<span class="muted">鍵を入れると接続できます。入れなくても、各画面の「取り込む」から CSV で運用できます。</span>'
         : (st.connected? `<span class="badge b-green">接続中</span> ${esc(String(st.connectedBy||'').split('@')[0])} ・ ${line}
-            ${isAdmin()?` <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}`
+            ${isAdmin()?` <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}${isAdmin()&&st.credSource==='db'?` ・ <a onclick="mfKeyClear()" style="cursor:pointer;color:var(--danger);">鍵を消す</a>`:''}`
           : `<span class="badge b-amber">未接続</span> ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}`)}
       ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
       <div class="fhelp">毎朝 6:00 に「請求 → 入金 → 自動消込」を自動で行います。手順は docs/MONEYFORWARD.md。<br>
@@ -4196,6 +4205,47 @@ async function mfPanelLoad(){
         <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button>
         <button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button></div>`:''}
     </div></div>`;
+}
+/** 鍵（ClientID / ClientSecret）を画面から入れる。サーバーに預けるだけで、二度と表示しません。 */
+function mfKeyForm(){
+  if(!isAdmin()){ toast('鍵を入れられるのは管理者だけです。','err'); return; }
+  openModal(`<h3>Money Forward の鍵を入れる</h3>
+    <div class="mdsub">MF アプリポータル › アプリ（BIGLIGHT Finance）の ClientID / ClientSecret を貼り付けてください。
+      サーバーに預けるだけで、画面にも二度と出しません（次からは「鍵あり」と先頭4文字だけ表示）。</div>
+    <div class="form-grid">
+      <div class="full"><label>ClientID</label><input id="mfKid" autocomplete="off" spellcheck="false" placeholder="例: 661240…"></div>
+      <div class="full"><label>ClientSecret</label><input id="mfKsec" type="password" autocomplete="new-password" spellcheck="false" placeholder="貼り付け（表示されません）">
+        <div class="fhelp">MF では作成時に1回だけ表示されます。分からなくなったら MF 側で再発行してください。</div></div>
+      <div><label>クライアント認証方式</label><select id="mfKauth">
+        <option value="basic" selected>CLIENT_SECRET_BASIC（推奨・既定）</option>
+        <option value="post">CLIENT_SECRET_POST</option></select></div>
+    </div>
+    <div class="infobar" style="margin-top:10px;">アプリ側の設定も この2つと合っている必要があります：<br>
+      リダイレクト URI <b>${esc(location.origin)}/api/mf/callback</b> ／ スコープ <b>mfc/invoice/data.read</b></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="mfKeySave()">保存して次へ</button></div>`,'lg');
+  setTimeout(()=>{ const el=document.getElementById('mfKid'); if(el) el.focus(); },50);
+}
+async function mfKeySave(){
+  const id=(document.getElementById('mfKid').value||'').trim();
+  const sec=(document.getElementById('mfKsec').value||'').trim();
+  const auth=document.getElementById('mfKauth').value;
+  if(!id||!sec){ toast('ClientID と ClientSecret の両方を貼り付けてください。','err'); return; }
+  try{
+    const d=await mfCall('/mf/credentials', { clientId:id, clientSecret:sec, tokenAuth:auth });
+    closeModal();
+    toast(d.changedApp? '鍵を入れ替えました。前の接続は切れているので、もう一度「接続する」を押してください。' : '鍵を保存しました。「接続する」を押してください。','ok');
+    if(confirm('このまま Money Forward に接続しますか？')) return mfConnect();
+    renderPage(CURRENT_PAGE);
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+async function mfKeyClear(){
+  if(!confirm('鍵と接続を消します。よろしいですか？（CSV での取り込みは続けられます）')) return;
+  try{
+    const r=await fetch(API_BASE+'/mf/credentials',{ method:'DELETE', headers:headers() });
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.message||('HTTP '+r.status)); }
+    toast('消しました。','ok'); renderPage(CURRENT_PAGE);
+  }catch(e){ toast(String(e.message||e),'err'); }
 }
 async function mfSyncNow(){
   toast('Money Forward と同期しています…','ok');

@@ -213,6 +213,60 @@ function makeDeps(opts = {}) {
     srv.close();
   }
 
+  console.log('\n― 鍵を画面から入れる（SSH を触らずに繋げる）―');
+  { /* .env に鍵が無い状態。画面から入れて、それで接続できるか */
+    const t = makeDeps({ env: { MF_PUBLIC_URL: 'https://finance.example.jp' } });
+    const who = { current: { email: 'boss@biglight.jp', role: 'Admin' } };
+    const app = express(); app.use(express.json());
+    app.use(MF.mfRouter({ ...t.deps, verify: async () => who.current, sync: async (kind, args, me) => ({ kind, args, by: me.email }) }));
+    const srv = await new Promise(r => { const s2 = app.listen(0, () => r(s2)) });
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const call = async (m, u, body) => { const r = await fetch(base + u, { method: m, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' }); return { status: r.status, j: await r.json().catch(() => ({})) } };
+
+    eq('鍵が無ければ configured=false', (await call('GET', '/mf/status')).j.configured, false);
+    eq('鍵が無ければ 接続を始められない（503）', (await call('POST', '/mf/connect')).status, 503);
+    eq('ClientID だけでは受け付けない', (await call('POST', '/mf/credentials', { clientId: 'cid-from-ui' })).status, 400);
+    eq('空白が混ざっていたら断る', (await call('POST', '/mf/credentials', { clientId: 'cid ui', clientSecret: 'sec' })).status, 400);
+    eq('管理者は鍵を入れられる', (await call('POST', '/mf/credentials', { clientId: 'cid-from-ui', clientSecret: 'secret-from-ui-1234', tokenAuth: 'basic' })).j.ok, true);
+
+    const st = (await call('GET', '/mf/status')).j;
+    eq('入れたら configured=true・出どころは画面', [st.configured, st.credSource], [true, 'db']);
+    eq('先頭4文字と長さだけ返す', [st.clientIdPeek, st.clientSecretLen], ['cid-…（11文字）', 19]);
+    eq('秘密そのものは返さない', JSON.stringify(st).includes('secret-from-ui-1234'), false);
+
+    const c = await call('POST', '/mf/connect');
+    eq('画面の鍵で認可URLを作る', new URL(c.j.url).searchParams.get('client_id'), 'cid-from-ui');
+    const stt = new URL(c.j.url).searchParams.get('state');
+    const cb = await fetch(`${base}/mf/callback?code=good&state=${stt}`, { redirect: 'manual' });
+    eq('画面の鍵でトークンも取れる', cb.status, 302);
+    eq('Basic は画面の鍵で作る', Buffer.from(String(t.calls.find(x => x.url.startsWith(MF.MF_TOKEN_URL)).init.headers.authorization).replace('Basic ', ''), 'base64').toString(), 'cid-from-ui:secret-from-ui-1234');
+    eq('接続できた', (await call('GET', '/mf/status')).j.connected, true);
+
+    /* 鍵を入れ替えたら 前の接続は切る（別アプリのトークンを使い回さない） */
+    const sw = await call('POST', '/mf/credentials', { clientId: 'cid-other', clientSecret: 'secret-other-5678' });
+    eq('別のアプリに変えたら 接続は切れる', [sw.j.changedApp, (await call('GET', '/mf/status')).j.connected], [true, false]);
+    /* 権限 */
+    who.current = { email: 'mgr@biglight.jp', role: 'Manager' };
+    eq('マネージャーは鍵を入れられない', (await call('POST', '/mf/credentials', { clientId: 'x', clientSecret: 'y' })).status, 403);
+    eq('マネージャーは鍵を消せない', (await call('DELETE', '/mf/credentials')).status, 403);
+    who.current = { email: 'boss@biglight.jp', role: 'Admin' };
+    eq('管理者は鍵を消せる', (await call('DELETE', '/mf/credentials')).j.ok, true);
+    eq('消したら configured=false・接続も無し', [(await call('GET', '/mf/status')).j.configured, (await call('GET', '/mf/status')).j.connected], [false, false]);
+    srv.close();
+  }
+  { /* .env に鍵があるときは 画面から変えさせない（サーバーの設定が正） */
+    const t = makeDeps();
+    const app = express(); app.use(express.json());
+    app.use(MF.mfRouter({ ...t.deps, verify: async () => ({ email: 'a@biglight.jp', role: 'Admin' }) }));
+    const srv = await new Promise(r => { const s2 = app.listen(0, () => r(s2)) });
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const r1 = await fetch(base + '/mf/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clientId: 'x', clientSecret: 'yyyyyyyy' }) });
+    eq('.env の鍵があるときは画面から変えない（409）', r1.status, 409);
+    const st = await (await fetch(base + '/mf/status')).json();
+    eq('.env の鍵は出どころ env', [st.configured, st.credSource, st.clientIdPeek], [true, 'env', 'cid…（3文字）']);
+    srv.close();
+  }
+
   console.log(`\n結果: ${pass} 件成功 / ${fail} 件失敗`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('  NG  ' + e.stack); process.exit(1); });

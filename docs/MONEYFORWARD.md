@@ -51,7 +51,20 @@
 アプリ登録（MF アプリポータル）で必要なのは この2つだけです:
 リダイレクト URI `https://finance.biglight.jp/api/mf/callback` ／ スコープ `mfc/invoice/data.read`。
 
-### 2.2 サーバーに鍵を入れる（VPS で1回）
+### 2.2 鍵を入れる（どちらか一方）
+
+**① 画面から貼るだけ（おすすめ・SSH 不要）**
+
+設定 › API・AI連携 › Money Forward 連携 › **［鍵を入れる］**（管理者のみ）
+→ ClientID と ClientSecret を貼り付け → 保存 → そのまま［接続する］。
+
+- 入れた鍵はサーバーの DB（`server_config.mf_client`）に入ります。**画面・API の返り・ログ・Git には二度と出ません**
+  （状態表示は「鍵あり・先頭4文字・文字数」だけ）。
+- 鍵を別のアプリのものに入れ替えると、前の接続（トークン）は自動で切れます（別アプリのトークンを使い回さないため）。
+- 消すときは同じ場所の「鍵を消す」。
+- **`.env` に鍵が入っている場合は `.env` が優先**され、画面からは変更できません（サーバーの設定を正とするため）。
+
+**② サーバーの `.env` に入れる（VPS で1回）
 
 ClientSecret を**どこにも貼らずに**入れるためのスクリプトを用意しています。VPS で:
 
@@ -60,7 +73,7 @@ cd "$(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.co
   && bash vps/enable-mf.sh
 ```
 
-ClientID は表示入力、**ClientSecret は伏字入力**。`.env` に書いて（600 権限・バックアップ付き）api コンテナを作り直し、
+（`.env` を使う運用のとき）ClientID は表示入力、**ClientSecret は伏字入力**。`.env` に書いて（600 権限・バックアップ付き）api コンテナを作り直し、
 最後に自己診断まで流します。やめるときは `bash vps/enable-mf.sh off`。
 
 > `env_file` はコンテナを**作るとき**にしか読まれません。`restart` では反映されないので、スクリプトは

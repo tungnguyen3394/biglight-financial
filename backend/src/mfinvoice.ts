@@ -66,18 +66,54 @@ export const mfConfigured = (env: Record<string, string | undefined> = process.e
   const c = mfConfig(env); return !!(c.clientId && c.clientSecret)
 }
 
-export function authorizeUrl(state: string, env?: Record<string, string | undefined>) {
+/* ---------- 鍵（ClientID / ClientSecret）の置き場所 ----------
+   ★ 2026-09-18 利用者の要望: SSH を触らず、画面に貼るだけで繋げられるようにする。
+     ① .env（MF_CLIENT_ID / MF_CLIENT_SECRET）… あればこちらが優先（今までの運用）
+     ② 画面から入れた分 … サーバーの DB（server_config の mf_client）に入る
+     どちらも「サーバーの中だけ」。画面・API の返り・ログには 先頭4文字と長さしか出しません。 */
+export type MfCreds = { clientId: string; clientSecret: string; tokenAuth: 'basic' | 'post'; source: 'env' | 'db' | 'none' }
+export async function mfCreds(d: MfDeps): Promise<MfCreds> {
+  const c = mfConfig(d.env)
+  if (c.clientId && c.clientSecret) return { clientId: c.clientId, clientSecret: c.clientSecret, tokenAuth: c.tokenAuth as any, source: 'env' }
+  try {
+    const raw = await d.cfgGet('mf_client')
+    const j = raw ? JSON.parse(raw) : null
+    if (j && j.clientId && j.clientSecret) {
+      return { clientId: String(j.clientId), clientSecret: String(j.clientSecret),
+        tokenAuth: String(j.tokenAuth || 'basic').toLowerCase() === 'post' ? 'post' : 'basic', source: 'db' }
+    }
+  } catch { /* 壊れていたら 無いものとして扱う */ }
+  return { clientId: '', clientSecret: '', tokenAuth: c.tokenAuth as any, source: 'none' }
+}
+/** 画面から入れる。前の鍵と違えば 接続（トークン）も切る。 */
+export async function saveMfCreds(d: MfDeps, clientId: string, clientSecret: string, tokenAuth: string) {
+  const id = String(clientId || '').trim(), sec = String(clientSecret || '').trim()
+  if (!id || !sec) throw new Error('ClientID と ClientSecret の両方が要ります。')
+  if (/\s/.test(id) || /\s/.test(sec)) throw new Error('鍵に空白が入っています。前後の空白やコピー漏れをご確認ください。')
+  const before = await mfCreds(d)
+  await d.cfgSet('mf_client', JSON.stringify({
+    clientId: id, clientSecret: sec,
+    tokenAuth: String(tokenAuth || 'basic').toLowerCase() === 'post' ? 'post' : 'basic',
+    savedAt: new Date((d.now || Date.now)()).toISOString(),
+  }))
+  if (before.clientId && before.clientId !== id) await d.cfgSet('mf_token', '')   // 別のアプリのトークンは使わない
+  return { changedApp: !!before.clientId && before.clientId !== id }
+}
+export const peek4 = (s: any) => { const t = String(s || ''); return t ? `${t.slice(0, 4)}…（${t.length}文字）` : '' }
+
+export function authorizeUrl(state: string, env?: Record<string, string | undefined>, clientId?: string) {
   const c = mfConfig(env)
-  const q = new URLSearchParams({ response_type: 'code', client_id: c.clientId, redirect_uri: c.redirectUri, scope: c.scope, state })
+  const q = new URLSearchParams({ response_type: 'code', client_id: clientId || c.clientId, redirect_uri: c.redirectUri, scope: c.scope, state })
   return MF_AUTHORIZE_URL + '?' + q.toString()
 }
 
 async function tokenRequest(params: Record<string, string>, d: MfDeps) {
-  const c = mfConfig(d.env)
+  const k = await mfCreds(d)
+  if (!k.clientId || !k.clientSecret) throw new Error('Money Forward の鍵（ClientID / ClientSecret）がまだ入っていません。設定 › API・AI連携 で入れてください。')
   const body = new URLSearchParams(params)
   const headers: Record<string, string> = { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }
-  if (c.tokenAuth === 'basic') headers.authorization = 'Basic ' + Buffer.from(c.clientId + ':' + c.clientSecret).toString('base64')
-  else { body.set('client_id', c.clientId); body.set('client_secret', c.clientSecret) }
+  if (k.tokenAuth === 'basic') headers.authorization = 'Basic ' + Buffer.from(k.clientId + ':' + k.clientSecret).toString('base64')
+  else { body.set('client_id', k.clientId); body.set('client_secret', k.clientSecret) }
   const r = await d.fetch(MF_TOKEN_URL, { method: 'POST', headers, body: body.toString() })
   const j: any = await r.json().catch(() => ({}))
   if (!r.ok || !j.access_token) throw new Error(scrub(`Money Forward のトークン取得に失敗しました（HTTP ${r.status}${mfErrorText(j) ? ' ' + mfErrorText(j) : ''}）`))
@@ -275,11 +311,14 @@ export function mfRouter(d: RouterDeps) {
   r.get('/mf/status', async (req, res) => {
     const me = await d.verify(req, res); if (!me) return
     const c = mfConfig(d.env)
+    const k = await mfCreds(d)
     const raw = await d.cfgGet('mf_token').catch(() => null)
     const tok = raw ? JSON.parse(raw) : null
     const last = JSON.parse((await d.cfgGet('mf_last').catch(() => null)) || '{}')
     res.json({
-      configured: mfConfigured(d.env), connected: !!(tok && tok.access_token),
+      configured: !!(k.clientId && k.clientSecret), credSource: k.source, clientIdPeek: peek4(k.clientId),
+      clientSecretLen: k.clientSecret.length, tokenAuth: k.tokenAuth,
+      connected: !!(tok && tok.access_token),
       connectedBy: tok?.connected_by || '', connectedAt: tok?.connected_at || '', scopes: tok?.scope || c.scope,
       accounting: c.accounting, redirectUri: c.redirectUri,
       bankAccountId: (await d.cfgGet('mf_bank_account').catch(() => null)) || '',
@@ -291,10 +330,11 @@ export function mfRouter(d: RouterDeps) {
   r.post('/mf/connect', async (req, res) => {
     const me = await d.verify(req, res); if (!me) return
     if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only', message: '接続できるのは管理者だけです。' })
-    if (!mfConfigured(d.env)) return res.status(503).json({ error: 'not-configured', message: 'MF_CLIENT_ID / MF_CLIENT_SECRET が設定されていません。' })
+    const k = await mfCreds(d)
+    if (!k.clientId || !k.clientSecret) return res.status(503).json({ error: 'not-configured', message: 'Money Forward の鍵（ClientID / ClientSecret）がまだ入っていません。「鍵を入れる」から貼り付けてください。' })
     const state = crypto.randomBytes(24).toString('hex')
     await d.cfgSet('mf_oauth_state', JSON.stringify({ state, by: me.email, exp: (d.now || Date.now)() + 10 * 60_000 }))
-    res.json({ url: authorizeUrl(state, d.env) })
+    res.json({ url: authorizeUrl(state, d.env, k.clientId) })
   })
 
   /* MF から戻ってくる所。ログインの代わりに state（10分・1回きり）で本人確認する */
@@ -318,6 +358,26 @@ export function mfRouter(d: RouterDeps) {
     if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only' })
     await d.cfgSet('mf_token', '')
     await d.audit?.(me.email, 'mf-disconnect', {})
+    res.json({ ok: true })
+  })
+
+  /* --- 鍵の入れ替え（管理者だけ・中身は返さない） --- */
+  r.post('/mf/credentials', async (req, res) => {
+    const me = await d.verify(req, res); if (!me) return
+    if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only', message: '鍵を入れられるのは管理者だけです。' })
+    if (mfConfigured(d.env)) return res.status(409).json({ error: 'env-wins',
+      message: 'サーバーの .env に鍵が入っているため、画面からは変えられません（.env が優先です）。' })
+    try {
+      const out = await saveMfCreds(d, req.body?.clientId, req.body?.clientSecret, req.body?.tokenAuth)
+      await d.audit?.(me.email, 'mf-credentials-set', { clientId: peek4(String(req.body?.clientId || '')), tokenAuth: req.body?.tokenAuth || 'basic', reconnect: out.changedApp })
+      res.json({ ok: true, ...out })
+    } catch (e: any) { res.status(400).json({ error: 'bad-credentials', message: scrub(e?.message || e) }) }
+  })
+  r.delete('/mf/credentials', async (req, res) => {
+    const me = await d.verify(req, res); if (!me) return
+    if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only' })
+    await d.cfgSet('mf_client', ''); await d.cfgSet('mf_token', '')
+    await d.audit?.(me.email, 'mf-credentials-cleared', {})
     res.json({ ok: true })
   })
 

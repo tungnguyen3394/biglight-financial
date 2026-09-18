@@ -29,16 +29,18 @@ async function main() {
   const c = MF.mfConfig()
   let ng = 0
 
-  console.log('\n■ 1. 設定（.env）')
-  line('アプリの鍵', MF.mfConfigured() ? 'あり' : '★ 無い（MF_CLIENT_ID / MF_CLIENT_SECRET を .env に）')
-  line('ClientID（先頭だけ）', peek(c.clientId))
-  line('ClientSecret', c.clientSecret ? `設定あり（${c.clientSecret.length}文字・内容は出しません）` : '★ 無い')
-  line('クライアント認証方式', c.tokenAuth === 'basic' ? 'CLIENT_SECRET_BASIC' : 'CLIENT_SECRET_POST')
+  const k = await MF.mfCreds(deps)
+  console.log('\n■ 1. 設定（鍵）')
+  line('アプリの鍵', k.clientId && k.clientSecret ? 'あり' : '★ 無い（画面「鍵を入れる」か .env）')
+  line('鍵の出どころ', k.source === 'env' ? '.env（サーバー）' : (k.source === 'db' ? '画面から入れた分' : '—'))
+  line('ClientID（先頭だけ）', peek(k.clientId))
+  line('ClientSecret', k.clientSecret ? `設定あり（${k.clientSecret.length}文字・内容は出しません）` : '★ 無い')
+  line('クライアント認証方式', k.tokenAuth === 'basic' ? 'CLIENT_SECRET_BASIC' : 'CLIENT_SECRET_POST')
   line('戻り先（Redirect URI）', c.redirectUri)
   line('要求するスコープ', c.scope)
   line('請求書 API', c.apiBase)
   line('会計 API', c.accounting ? c.acctBase : '使わない（MF_ACCOUNTING_ENABLED=false）')
-  if (!MF.mfConfigured()) { console.log('\n→ 鍵が無いので ここまで。bash vps/enable-mf.sh で入れてください。\n'); process.exit(1) }
+  if (!k.clientId || !k.clientSecret) { console.log('\n→ 鍵が無いので ここまで。画面（設定 › API・AI連携）の「鍵を入れる」か bash vps/enable-mf.sh で入れてください。\n'); process.exit(1) }
   if (c.scope.includes('write')) { console.log('\n★ 書き込みスコープが入っています。読むだけの約束に反します。'); ng++ }
 
   console.log('\n■ 2. 接続（OAuth）')
