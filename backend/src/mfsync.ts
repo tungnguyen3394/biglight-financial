@@ -845,28 +845,73 @@ export function partnerReport(state: any, items: Billing[], map?: Record<string,
   return [...g.values()].sort((a, b) => String(a.partnerName).localeCompare(String(b.partnerName), 'ja'))
 }
 
-/* ---------- 前の期の取り込みを片づける（2026-09-19 利用者の指示）----------
-   09-19 朝の自動同期で 第5期 の MF 請求が 第6期 に入ってしまった分を消す。
-   消すのは次の条件を すべて満たすものだけ（人が入れたもの・入金を充てたものは 絶対に消さない）:
-     請求: MF から来た（mfId が csv: ではない・source 'mf'）／ 計上月が 取り込んでよい期より前 ／ since 以降に作られた ／ 充てた入金が無い
-     入金: MF・CSV から来た（extId あり）／ 入金日が 前 ／ since 以降 ／ 充当なし
-     取引先: MF から自動で作った（source 'mf'）で、上を消したら 何も残らない会社
-     待ち行列: 前の期の請求を落とし、空になったら消す */
-export function cleanupBeforeImport(state: any, opts: { since: string; actor?: string }) {
+/* ---------- 取り込みの片づけ（2026-09-19 利用者の指示）----------
+   ① 前の期: 第6期（2026/8/1〜2027/7/31）の 売上計上日 のものだけを認める。
+      MF・CSV から取り込んだ請求で 計上月が 取り込んでよい期より前 → 消す（いつ取り込んだかは問わない。since を渡せば その日以降だけ）
+      入金も同じ（MF・CSV 由来＝extId あり で、入金日が 前）
+   ② 重複: 取り込んだ請求で「同じ取引先・同じ計上月・同じ金額・同じ請求番号（片方が番号なし なら番号は見ない）」が
+      2つ以上 → 1つだけ残す（入金を充てたもの ＞ MF の本当の id ＞ 先に入ったもの）
+      入金も「同じ日・同じ金額・同じ振込名義」で CSV と API の両方から入っていたら CSV の方を消す
+   ★ 絶対に消さない: 人が手で入れたもの（mfId / extId なし）・入金を充てたもの・締めた期
+   ★ 取引先: MF から自動で作った会社で、上を消したら 何も残らない → 消す
+   消した行は 操作履歴（audit_log）に 丸ごと残る（戻せる）。 */
+export function cleanupBeforeImport(state: any, opts: { since?: string; actor?: string } = {}) {
   const since = String(opts.since || '')
   const from = importFromYm(state)
   const allocated = new Set<string>()
   for (const p of arr(state, 'payments')) if (p.status !== '取消') for (const a of (p.allocations || [])) if (num(a.amount)) allocated.add(String(a.invoiceId))
-  const newer = (r: any) => String(r.createdAt || '') >= since
-  const invKill = arr(state, 'invoices').filter((i: any) => i.mfId && !/^csv/.test(String(i.mfId)) && i.source === 'mf'
-    && isBeforeImport(state, i.bookMonth) && newer(i))
-  const invKeep = invKill.filter((i: any) => allocated.has(String(i.id)))
-  const invDel = new Set(invKill.filter((i: any) => !allocated.has(String(i.id))).map((i: any) => String(i.id)))
-  const payDel = new Set(arr(state, 'payments').filter((p: any) => p.extId && !(p.allocations || []).length
-    && isBeforeImport(state, ymOf(p.date)) && newer(p)).map((p: any) => String(p.id)))
-  const invoices = arr(state, 'invoices').filter((i: any) => !invDel.has(String(i.id)))
-  const payments = arr(state, 'payments').filter((p: any) => !payDel.has(String(p.id)))
-  /* 残った行が1つでも その会社を指していれば 会社は消さない */
+  const newer = (r: any) => !since || String(r.createdAt || '') >= since
+  const imported = (i: any) => !!i.mfId && (i.source === 'mf' || i.source === 'csv' || /^csv/.test(String(i.mfId)))
+  const live = (i: any) => i.status !== '取消' && !isClosedYm(state, i.bookMonth)
+  const invs = arr(state, 'invoices')
+
+  /* ① 前の期 */
+  const oldInv = invs.filter((i: any) => imported(i) && live(i) && isBeforeImport(state, i.bookMonth) && newer(i))
+  const kill = new Map<string, string>()      // id → 理由
+  const keptPaid: any[] = []
+  for (const i of oldInv) { if (allocated.has(String(i.id))) keptPaid.push(i); else kill.set(String(i.id), '前の期') }
+
+  /* ② 重複（前の期で消すもの以外で） */
+  const groups = new Map<string, any[]>()
+  for (const i of invs) {
+    if (!imported(i) || !live(i) || kill.has(String(i.id)) || isBeforeImport(state, i.bookMonth)) continue   // 前の期は ① だけで扱う
+    const k = [i.companyId || '', ymOf(i.bookMonth), num(i.total)].join('|')
+    const g = groups.get(k) || []; g.push(i); groups.set(k, g)
+  }
+  const rank = (i: any) => (allocated.has(String(i.id)) ? 0 : 10) + (/^csv/.test(String(i.mfId)) ? 5 : 0)
+  let dupN = 0
+  for (const g of groups.values()) {
+    if (g.length < 2) continue
+    /* 番号で分ける。番号の無いもの（CSV）は どの番号のものとも同じとみなす */
+    const byNo = new Map<string, any[]>()
+    for (const i of g) { const no = String(i.no || '').trim(); const l = byNo.get(no) || []; l.push(i); byNo.set(no, l) }
+    const numbered = [...byNo.entries()].filter(([no]) => no)
+    const blank = byNo.get('') || []
+    const sets: any[][] = numbered.map(([, l]) => l.slice())
+    if (blank.length) { if (sets.length) sets[0].push(...blank); else sets.push(blank) }
+    for (const set of sets) {
+      if (set.length < 2) continue
+      set.sort((a, b) => rank(a) - rank(b) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+      for (const i of set.slice(1)) { if (allocated.has(String(i.id))) continue; kill.set(String(i.id), '重複（' + (set[0].no || set[0].mfId) + ' と同じ）'); dupN++ }
+    }
+  }
+
+  /* 入金: 前の期 ＋ CSV と API の二重 */
+  const pays = arr(state, 'payments')
+  const payKill = new Map<string, string>()
+  for (const p of pays) if (p.extId && p.status !== '取消' && !(p.allocations || []).length && isBeforeImport(state, ymOf(p.date)) && newer(p)) payKill.set(String(p.id), '前の期')
+  const fp = new Map<string, any[]>()
+  for (const p of pays) {
+    if (!p.extId || p.status === '取消' || payKill.has(String(p.id)) || !normPayer(p.payerName)) continue
+    const k = payFingerprint(p.date, p.amount, p.payerName); const l = fp.get(k) || []; l.push(p); fp.set(k, l)
+  }
+  for (const l of fp.values()) {
+    const api = l.filter((p: any) => !/^csv/.test(String(p.extId))), csv = l.filter((p: any) => /^csv/.test(String(p.extId)) && !(p.allocations || []).length)
+    for (const p of csv.slice(0, Math.min(api.length, csv.length))) payKill.set(String(p.id), '重複（MF 会計 と CSV）')
+  }
+
+  const invoices = invs.filter((i: any) => !kill.has(String(i.id)))
+  const payments = pays.filter((p: any) => !payKill.has(String(p.id)))
   const used = new Set<string>()
   for (const k of Object.keys(state)) {
     if (k === 'companies' || !Array.isArray(state[k])) continue
@@ -878,13 +923,16 @@ export function cleanupBeforeImport(state: any, opts: { since: string; actor?: s
     const items = (q.items || []).filter((b: Billing) => !isBeforeImport(state, billingYm(b)))
     return { ...q, items, n: items.length, total: items.reduce((s: number, b: Billing) => s + num(b.total), 0) }
   }).filter((q: any) => q.items.length || q.status === 'skipped')
-  const byDay: Record<string, number> = {}
-  for (const i of invKill) { const d = String(i.createdAt || '').slice(0, 10); byDay[d] = (byDay[d] || 0) + 1 }
-  const sample = invKill.slice(0, 200).map((i: any) => ({ id: i.id, companyId: i.companyId, bookMonth: i.bookMonth, total: num(i.total), no: i.no || '', createdAt: i.createdAt || '', kept: allocated.has(String(i.id)) }))
+  const sample = invs.filter((i: any) => kill.has(String(i.id))).concat(keptPaid).slice(0, 400)
+    .sort((a: any, b: any) => String(a.companyId).localeCompare(String(b.companyId)) || String(a.bookMonth).localeCompare(String(b.bookMonth)))
+    .map((i: any) => ({ id: i.id, companyId: i.companyId, bookMonth: i.bookMonth, total: num(i.total), no: i.no || '', createdAt: i.createdAt || '',
+      why: kill.get(String(i.id)) || '前の期（入金を充ててあるので残す）', kept: !kill.has(String(i.id)) }))
+  const killed = invs.filter((i: any) => kill.has(String(i.id)))
   return {
     state: { ...state, invoices, payments, companies: arr(state, 'companies').filter((c: any) => !coDel.has(String(c.id))), mfPartnerQueue: queue },
-    stats: { 取り込んでよい期の初め: from, 請求を消す: invDel.size, 請求の合計: invKill.filter((i: any) => invDel.has(String(i.id))).reduce((s: number, i: any) => s + num(i.total), 0),
-      入金が充ててあり残す: invKeep.length, 入金を消す: payDel.size, 取引先を消す: coDel.size },
-    byDay, sample, companies: [...coDel].map(id => String((arr(state, 'companies').find((c: any) => String(c.id) === id) || {}).name || id)),
+    stats: { 取り込んでよい期の初め: from, 前の期の請求を消す: killed.length - dupN, 重複の請求を消す: dupN,
+      消す請求の合計: killed.reduce((s: number, i: any) => s + num(i.total), 0),
+      入金が充ててあり残す: keptPaid.length, 入金を消す: payKill.size, 取引先を消す: coDel.size },
+    sample, companies: [...coDel].map(id => String((arr(state, 'companies').find((c: any) => String(c.id) === id) || {}).name || id)),
   }
 }

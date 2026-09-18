@@ -3582,7 +3582,26 @@ function viewArBook(){
       ${mgr? ' ・ <a onclick="openMfImport(\'billings\')" style="cursor:pointer;">Money Forward から取り込み直す</a>' : ''}</div>`;
   }
   return pageShell({ title:'回収（売掛金）', count:all.length, shown:rows.length,
-    tools, body: why+kpis+filters+table });
+    tools, body: mfImportAlert()+why+kpis+filters+table });
+}
+/* ★ 2026-09-19 利用者の指示: 前の期の請求は この期に入れない。重複も許さない。
+   取り込んだ請求に 前の期のもの・重複 が残っていたら、売掛金の上で知らせる（消すのは 取引先の確認 › 取り込みの点検）。
+   判定は サーバー（mfsync.importFromYm / cleanupBeforeImport）と同じ考え方。 */
+function mfImportFromYm(){
+  const s=DB.settings&&DB.settings.mfImportFrom; if(/^\d{4}-\d{2}$/.test(String(s||''))) return s;
+  const t=thisMonth(), y=Number(t.slice(0,4)), m=Number(t.slice(5,7));
+  return (m>=8? y : y-1)+'-08';
+}
+function mfImportAlert(){
+  const from=mfImportFromYm();
+  const imp=(DB.invoices||[]).filter(i=>i.mfId && i.status!=='取消' && (i.source==='mf'||i.source==='csv'||/^csv/.test(String(i.mfId))));
+  const old=imp.filter(i=>String(i.bookMonth||'')<from).length;
+  const seen={}; let dup=0;
+  imp.filter(i=>String(i.bookMonth||'')>=from).forEach(i=>{ const k=[i.companyId,i.bookMonth,num(i.total),String(i.no||'')].join('|'); if(seen[k]) dup++; else seen[k]=1; });
+  if(!old && !dup) return '';
+  return `<div class="alertbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${IC.warn}
+    <span>取り込んだ請求に ${old?`<b>前の期（${esc(from)} より前）の請求 ${old}件</b>`:''}${old&&dup?' と ':''}${dup?`<b>重複の疑い ${dup}件</b>`:''} があります。売掛残が正しくありません。</span>
+    ${isAdmin()?`<button class="btn sm" style="margin-left:auto;" onclick="goto('coreview');setTimeout(openCleanupOld,200)">点検して片づける</button>`:'<span class="muted">管理者に「取り込みの点検」を依頼してください。</span>'}</div>`;
 }
 function arFilt(k, v){ AR_FILT[k] = (k==='open'||k==='over')? !!v : String(v||''); TOOLS_KEEP=(k!=='chip'); renderPage('arbook'); }
 function arFiltClear(k){ AR_FILT[k] = (k==='open'||k==='over')? false : ''; renderPage('arbook'); }
@@ -9062,7 +9081,7 @@ function viewCoReview(){
 
   setTimeout(crPartnersLoad, 0);
   return pageShell({ title:'取引先の確認', count:queue.length+auto.length,
-    tools: (isAdmin()? `<button class="btn secondary" onclick="openCleanupOld()">前の期の取り込みを片づける</button>` : '')
+    tools: (isAdmin()? `<button class="btn secondary" onclick="openCleanupOld()">取り込みの点検（前の期・重複）</button>` : '')
       + (mgr? `<button class="btn secondary" onclick="openMfImport('billings')">請求を取り込む</button>` : ''),
     body: s4 + s1 + s2 + s3 + `<section class="cr-sec" id="crPartners">${crPartnersHtml()}</section>` });
 }
@@ -9105,23 +9124,25 @@ function crPartnersHtml(){
    サーバー（mfsync.cleanupBeforeImport）が「前の期・MF から来た・指定日以降に取り込んだ・入金を充てていない」ものだけ消す。
    まず 何が消えるかを見せてから。消した行は 操作履歴 に丸ごと残る（戻せる）。 */
 let CLN=null;
-function openCleanupOld(){ CLN={ since:'2026-09-18', res:null, busy:false }; clnDraw(); clnFetch(); }
+function openCleanupOld(){ CLN={ since:'', res:null, busy:false }; clnDraw(); clnFetch(); }
 function clnDraw(){
   const r=CLN.res, st=r&&r.stats||{};
-  openModal(`<h3>前の期の取り込みを片づける</h3>
-    <div class="mdsub">Money Forward から入ってしまった <b>前の期（${esc(st['取り込んでよい期の初め']||'')} より前）</b> の請求・入金と、そのために自動で作った取引先を消します。
-      手で入れたもの・入金を充てたもの・この日より前から有ったものは <b>消しません</b>。消した行は 操作履歴 に残ります。</div>
-    <div class="mf-row">この日以降に取り込んだ分 <input type="date" value="${attr(CLN.since)}" onchange="CLN.since=this.value;clnFetch()"></div>
+  openModal(`<h3>取り込みの点検（前の期・重複）</h3>
+    <div class="mdsub">Money Forward・CSV から入った請求・入金のうち、① <b>売上計上日が この期（${esc(st['取り込んでよい期の初め']||'')} 〜）より前</b> のもの、
+      ② <b>同じ請求が2つ以上</b>（同じ取引先・計上月・金額・請求番号）あるもの を消します。何も残らない 自動で作った取引先も消します。
+      <b>手で入れたもの・入金を充てたもの・締めた期は 消しません。</b>消した行は 操作履歴 に残ります（戻せます）。</div>
+    <div class="mf-row">取り込んだ日 <input type="date" value="${attr(CLN.since)}" onchange="CLN.since=this.value;clnFetch()"> 以降だけ
+      <span class="fhelp">（空＝いつ取り込んだかを問わない）</span></div>
     <div id="clnBody" style="margin-top:10px;">${!r? '<div class="empty">調べています…</div>' : r.error? `<div class="alertbar">${esc(r.error)}</div>` : `
-      <div class="mf-sum"><span>請求を消す <b>${st['請求を消す']||0}</b>件（${moneyPlain(st['請求の合計']||0)}円）</span><span>入金を消す <b>${st['入金を消す']||0}</b>件</span>
+      <div class="mf-sum"><span>前の期の請求 <b>${st['前の期の請求を消す']||0}</b>件</span><span>重複の請求 <b>${st['重複の請求を消す']||0}</b>件</span><span class="muted">合計 ${moneyPlain(st['消す請求の合計']||0)}円</span><span>入金を消す <b>${st['入金を消す']||0}</b>件</span>
         <span>取引先を消す <b>${st['取引先を消す']||0}</b>社</span>${st['入金が充ててあり残す']?`<span class="minus">入金が充ててあり残す ${st['入金が充ててあり残す']}件</span>`:''}</div>
       ${(r.companies||[]).length?`<div class="fhelp">消す取引先：${esc(r.companies.join('、'))}</div>`:''}
-      <div class="table-wrap" style="max-height:40vh;margin-top:6px;"><table><thead><tr><th>取引先</th><th>計上月</th><th>請求番号</th><th class="r">金額</th><th>取り込んだ日</th><th></th></tr></thead><tbody>
+      <div class="table-wrap" style="max-height:40vh;margin-top:6px;"><table><thead><tr><th>取引先</th><th>計上月</th><th>請求番号</th><th class="r">金額</th><th>取り込んだ日</th><th>理由</th></tr></thead><tbody>
         ${(r.sample||[]).map(x=>`<tr><td>${esc(arCoName(x.companyId))}</td><td>${esc(x.bookMonth||'')}</td><td>${esc(x.no)}</td><td class="r num">${moneyPlain(x.total)}</td>
-          <td>${esc(String(x.createdAt).slice(0,16).replace('T',' '))}</td><td>${x.kept?'<span class="badge b-amber">入金あり・残す</span>':''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">消すものはありません。</td></tr>'}
+          <td>${esc(String(x.createdAt).slice(0,16).replace('T',' '))}</td><td>${x.kept?`<span class="badge b-amber">${esc(x.why)}</span>`:`<span class="badge b-red">${esc(x.why)}</span>`}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">消すものはありません。</td></tr>'}
       </tbody></table></div>`}</div>
     <div class="modal-actions"><button class="btn secondary" onclick="CLN=null;closeModal()">閉じる</button>
-      ${r&&!r.error&&((st['請求を消す']||0)+(st['入金を消す']||0)+(st['取引先を消す']||0))?`<button class="btn danger" onclick="clnRun(this)">この内容で消す</button>`:''}</div>`,'xl');
+      ${r&&!r.error&&((st['前の期の請求を消す']||0)+(st['重複の請求を消す']||0)+(st['入金を消す']||0)+(st['取引先を消す']||0))?`<button class="btn danger" onclick="clnRun(this)">この内容で消す</button>`:''}</div>`,'xl');
 }
 async function clnFetch(){
   if(!CLN) return; CLN.res=null; clnDraw();

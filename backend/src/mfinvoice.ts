@@ -363,7 +363,11 @@ export async function fetchTransactions(from: string, to: string, subAccountId: 
   const seen = new Set<string>()
   for (const [s0, e0] of monthChunks(from, to)) {
     for (let page = 1; page <= 200; page++) {
-      const q = new URLSearchParams({ start_date: s0, end_date: e0, page: String(page) })
+      /* 公式仕様（developers.api-accounting.moneyforward.com v3）: start_date/end_date 必須（差は366日以内）・
+         side=INCOME で入金だけ・connected_sub_account_id で口座・per_page 最大 500 */
+      const q = new URLSearchParams({ start_date: s0, end_date: e0, page: String(page), per_page: '500' })
+      if (!opts.all) q.set('side', 'INCOME')
+      if (subAccountId) q.set('connected_sub_account_id', String(subAccountId))
       const j = await getJson(`${c.acctBase}/transactions?${q}`, token, d, '入出金明細')
       const list = listOf(j, 'transactions', 'items')
       for (const t of list) { const n = normalizeTransaction(t); if (!n.extId || seen.has(n.extId)) continue; seen.add(n.extId); out.push(n) }

@@ -162,7 +162,7 @@ function makeDeps(opts = {}) {
     const txns = await MF.fetchTransactions('2026-09-01', '2026-09-14', 'sub1', t.deps);
     eq('入金だけ・形をそろえて返す', txns.map(x => [x.extId, x.date, x.amount, x.payerName]), [['tx1', '2026-09-10', 110000, 'ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ']]);
     const q = new URL(t.calls.find(c => c.url.includes('/transactions')).url).searchParams;
-    eq('MF 会計が必須にした start_date / end_date を送る', [q.get('page'), q.get('start_date'), q.get('end_date')], ['1', '2026-09-01', '2026-09-14']);
+    eq('MF 会計が必須にした start_date / end_date ＋ 入金だけ・口座 を送る', [q.get('page'), q.get('start_date'), q.get('end_date'), q.get('side'), q.get('connected_sub_account_id')], ['1', '2026-09-01', '2026-09-14', 'INCOME', 'sub1']);
     t.calls.length = 0;
     await MF.fetchTransactions('2026-08-15', '2026-10-03', '', t.deps);
     eq('長い期間は 1か月ずつ聞く', t.calls.filter(c => c.url.includes('/transactions')).map(c => { const p = new URL(c.url).searchParams; return p.get('start_date') + '〜' + p.get('end_date') }),

@@ -233,8 +233,25 @@ console.log('\n― 前の期は 絶対に入れない・CSV と API の同じ請
     { ...mk('F', 'C1', '2026-06', '2026-09-18T21:00:00Z', 'manual'), mfId: '' }];
   st.payments = [{ id: 'P', companyId: 'C1', date: '2026-07-01', amount: 1000, allocations: [{ invoiceId: 'C', amount: 1000 }] }];
   const r = S.cleanupBeforeImport(st, { since: '2026-09-18' });
+  const all = S.cleanupBeforeImport(st, {});
+  eq('日付を指定しなければ いつ取り込んだかを問わず 前の期は消す（手入力・入金済みは残す）', all.state.invoices.map(i => i.id), ['C', 'E', 'F']);
   eq('消すのは 前の期・MF・その日以降・入金なし だけ（手入力・今の期・前から有るもの・入金済みは残す）',
     [r.state.invoices.map(i => i.id), r.stats['入金が充ててあり残す'], r.stats['取引先を消す'], r.state.companies.some(c => c.id === 'CO-x')], [['C', 'D', 'E', 'F'], 1, 1, false]);
+}
+
+{
+  /* 重複: 同じ取引先・計上月・金額・番号 → 1つ残す（入金を充てたもの ＞ MF の id ＞ 先） */
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  const mk = (id, mfId, no, created) => ({ id, companyId: 'C1', bookMonth: '2026-08', total: 5000, no, status: '確定', source: /^csv/.test(mfId) ? 'csv' : 'mf', mfId, createdAt: created });
+  st.invoices = [mk('X1', 'csv:a', '', '2026-09-01'), mk('X2', 'mf-2', 'N-1', '2026-09-02'), mk('X3', 'mf-3', 'N-1', '2026-09-03'), mk('X4', 'mf-4', 'N-2', '2026-09-03'),
+    { ...mk('X5', '', '', '2026-09-01'), source: 'manual' }];
+  const r = S.cleanupBeforeImport(st, {});
+  eq('重複は1つだけ残す（番号の違う請求・手入力は残す）', [r.state.invoices.map(i => i.id), r.stats['重複の請求を消す']], [['X2', 'X4', 'X5'], 2]);
+  st.payments = [{ id: 'P', date: '2026-09-01', amount: 5000, allocations: [{ invoiceId: 'X3', amount: 5000 }] }];
+  eq('入金を充てた方を残す', S.cleanupBeforeImport(st, {}).state.invoices.map(i => i.id), ['X3', 'X4', 'X5']);
+  const ps = baseState(); ps.settings.mfImportFrom = '2026-08';
+  ps.payments = [{ id: 'A', extId: 'mf-1', date: '2026-09-10', amount: 100, payerName: 'ﾀｶﾔﾏ(ｶ', allocations: [] }, { id: 'B', extId: 'csv:2026-09-10:100:たかやま', date: '2026-09-10', amount: 100, payerName: 'ﾀｶﾔﾏ(ｶ', allocations: [] }];
+  eq('入金が MF 会計 と CSV の両方から → CSV の方を消す', S.cleanupBeforeImport(ps, {}).state.payments.map(p => p.id), ['A']);
 }
 
 console.log('\n― 入金の二重取り込み（指紋）―');

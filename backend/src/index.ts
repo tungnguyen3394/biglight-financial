@@ -733,12 +733,12 @@ app.get('/mf/partners', async (req, res) => {
 app.post('/mf/cleanup-old', async (req, res) => {
   const me = await requireActive(req, res); if (!me) return
   if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only', message: '片づけられるのは管理者だけです。' })
-  const since = String(req.body?.since || '')
-  if (!/^\d{4}-\d{2}-\d{2}/.test(since)) return res.status(400).json({ error: 'bad-since', message: 'いつ以降に取り込んだ分か（YYYY-MM-DD）を指定してください。' })
+  const since = String(req.body?.since || '')      // 空＝いつ取り込んだかを問わない
+  if (since && !/^\d{4}-\d{2}-\d{2}/.test(since)) return res.status(400).json({ error: 'bad-since', message: '日付は YYYY-MM-DD で指定してください。' })
   try {
-    if (req.body?.dryRun) { const r = MFS.cleanupBeforeImport(await loadState(), { since }); return res.json({ ok: true, dryRun: true, stats: r.stats, byDay: r.byDay, sample: r.sample, companies: r.companies }) }
+    if (req.body?.dryRun) { const r = MFS.cleanupBeforeImport(await loadState(), { since }); return res.json({ ok: true, dryRun: true, stats: r.stats, sample: r.sample, companies: r.companies }) }
     let extra: any = {}
-    const out = await mutateState(me.email, 'mf-cleanup-old', (st) => { const r = MFS.cleanupBeforeImport(st, { since }); extra = { byDay: r.byDay, companies: r.companies }; return { state: r.state, stats: r.stats } })
+    const out = await mutateState(me.email, 'mf-cleanup-old', (st) => { const r = MFS.cleanupBeforeImport(st, { since }); extra = { companies: r.companies }; return { state: r.state, stats: r.stats } })
     mfAudit(me.email, 'mf-cleanup-old', { since, stats: out.stats, ...extra })
     res.json({ ok: true, stats: out.stats, ...extra })
   } catch (e: any) { res.status(400).json({ error: 'bad-request', message: String(e?.message || e) }) }
