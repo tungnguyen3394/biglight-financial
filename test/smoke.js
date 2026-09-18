@@ -631,6 +631,25 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   /* 売掛残高は どこで見ても 回収（売掛金）の式（前月残高＋請求−入金） */
   eq('取引先の売掛残 ＝ 回収の表の今月末残高', ctx.arBalanceOf('C1'), ctx.arMonthly('C1',[ctx.thisMonth()])[0].closing);
   eq('売掛残高の合計 ＝ 会社ごとの今月末残高の合計', ctx.arTotal(), ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[ctx.thisMonth()])[0].closing,0));
+  /* 会社の行を ▶ で開くと 請求・入金 が月ごとに見える（回収・支払 共通） */
+  {
+    const h0=ctx.viewArBook();
+    eq('閉じているときは 残高の1行だけ（▶ が付く）', h0.includes('class="ar-tg"') && !h0.includes('class="ar-sub'), true);
+    eq('見出しに「全部開く」', h0.includes('全部開く'), true);
+    const id=ctx.arCompanyIds()[0];
+    ctx.bookToggle('arCellPop', id);
+    const h1=ctx.viewArBook();
+    eq('開くと 請求・入金 の2行が足される', (h1.match(/class="ar-sub/g)||[]).length, 2);
+    eq('足した行の見出しは 請求額・入金額', h1.includes('>請求額<') || h1.includes('請求額</td>'), true);
+    ctx.bookToggle('arCellPop', id);
+    eq('もう一度押すと閉じる', ctx.viewArBook().includes('class="ar-sub'), false);
+    ctx.bookToggleAll('arCellPop');
+    const h2=ctx.viewArBook();
+    eq('全部開くと 会社の数 × 2 行', (h2.match(/class="ar-sub/g)||[]).length, ctx.arCompanyIds().length*2);
+    eq('動きの無い月は薄く（ar-flat）', h2.includes('ar-flat'), true);
+    ctx.bookToggleAll('arCellPop');
+    eq('支払（買掛金）の表も同じ仕組み', ctx.viewApBook().includes('bookToggle(\'apCellPop\''), true);
+  }
   /* 月の書き方の揺れ（旧データ・CSV・MF）を同じ月として読む */
   eq('月の書き方をそろえる', ['2026-09','2026/9','2026年9月','2026-09-30T00:00:00+09:00','2026-9-1','2026-13','あ',''].map(ctx.ymNorm),
     ['2026-09','2026-09','2026-09','2026-09','2026-09','','','']);

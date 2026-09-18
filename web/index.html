@@ -507,6 +507,14 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .ar-tbl td.ar-c:hover{box-shadow:inset 0 0 0 1.5px var(--primary); border-radius:4px;}
   .ar-tbl th.ar-cur,.ar-tbl td.ar-cur{background:var(--bg-selected);}
   .ar-tbl .ar-now{position:sticky; right:0; z-index:1; background:var(--card); border-left:1px solid var(--border); min-width:96px; font-weight:700; cursor:pointer;}
+  .ar-tbl .ar-tg{display:inline-block; width:16px; color:var(--text-muted); cursor:pointer; font-size:10px; user-select:none;}
+  .ar-tbl .ar-tg:hover{color:var(--primary);}
+  .ar-tbl .ar-tgall{font-size:10.5px; font-weight:500; color:var(--primary); cursor:pointer; margin-left:8px; white-space:nowrap;}
+  .ar-tbl td.ar-flat{opacity:.5;}
+  .ar-tbl tr.ar-sub td{font-size:11.5px; padding-top:2px; padding-bottom:2px; background:var(--surface-2); color:var(--text-muted); border-bottom:0;}
+  .ar-tbl tr.ar-sub td.ar-co{padding-left:30px; font-weight:500; background:var(--surface-2);}
+  .ar-tbl tr.ar-sub td.num.plus{color:var(--plus);} .ar-tbl tr.ar-sub td.num.minus{color:var(--minus);}
+  .ar-tbl tr.ar-sub-last td{border-bottom:1px solid var(--border);}
   .ar-tbl th.ar-now{z-index:4; background:var(--thead);}
   .ar-tbl .totrow td.ar-now{background:var(--surface-2);}
   /* 合計の下の「動き」の2行（請求・入金）。残高より一段 控えめに */
@@ -3358,6 +3366,11 @@ function bookNote(fy, what, flow){
   const month=BOOK_VIEW.per==='month'||!BOOK_PERS.some(x=>x[0]===BOOK_VIEW.per), unit=month?'月':'期間';
   return `${esc(fyLabel(fy))} ・ 金額はすべて<b>税込</b> ・ 各マス＝${unit}末の${what} ・ 合計の下＝${BOOK_VIEW.cum?'年度のはじめからの':'その'+unit+'の'}${flow} ・ マスを押すと${month?'内訳':'元帳'}`;
 }
+/** 会社の行を開いているか（side＝表の種類。保存はしない） */
+let BOOK_OPEN={ all:{}, ids:new Set() };
+const bookIsOpen=(side,id)=> (!!BOOK_OPEN.all[side]) !== BOOK_OPEN.ids.has(side+':'+id);
+function bookToggle(side,id){ const k=side+':'+id; if(BOOK_OPEN.ids.has(k)) BOOK_OPEN.ids.delete(k); else BOOK_OPEN.ids.add(k); renderPage(CURRENT_PAGE); }
+function bookToggleAll(side){ BOOK_OPEN.all[side]=!BOOK_OPEN.all[side]; BOOK_OPEN.ids.clear(); renderPage(CURRENT_PAGE); }
 /** o: { rows, months, first, col, pop, ledger, ledgerTitle, badge, flow:[増,減] } → { head, body, foot, ncol } */
 function bookGrid(o){
   const { rows, months } = o, tm=thisMonth(), cum=!!BOOK_VIEW.cum;
@@ -3371,22 +3384,36 @@ function bookGrid(o){
   const B=bookBuckets(per);
   const lastIdx = b => { for(let i=b.e;i>=b.s;i--) if(months[i]<=tm) return i; return -1; };
   const isCur = b => months.slice(b.s,b.e+1).includes(tm);
-  const head=`<tr><th class="ar-co">${o.first}</th>${B.map(b=>{
+  const side=o.pop;
+  const head=`<tr><th class="ar-co">${o.first}${rows.length?`<a class="ar-tgall" onclick="bookToggleAll('${side}')">${BOOK_OPEN.all[side]?'全部閉じる':'全部開く'}</a>`:''}</th>${B.map(b=>{
       const top = per==='month'
         ? ((b.s===0||months[b.s].endsWith('-01'))? `<span class="ar-y">${months[b.s].slice(0,4)}</span>` : '')
         : `<span class="ar-y">${esc(b.sub)}</span>`;
       return `<th class="r ${isCur(b)?'ar-cur':''}" title="${months[b.s]}〜${months[b.e]}">${top}${esc(b.label)}</th>`; }).join('')}<th class="r ar-now">${o.col}</th></tr>`;
   const cls = x => x.overdue>0? 'ar-over' : (x.closing>0? 'ar-pos' : (x.closing<0? 'ar-neg' : 'zero'));
+  /* その区切りの動き（請求・入金）。累計なら年度のはじめから */
+  const mv=(r,b,key)=>{ const k=lastIdx(b); let v=0; for(let i=(cum?0:b.s); i<=k; i++) v+=r.m[i][key]; return v; };
   const cell=(r,b)=>{
     const k=lastIdx(b); if(k<0) return `<td class="r ar-c ar-fut">—</td>`;
     const x=r.m[k];
     const go = per==='month'? `${o.pop}(event,'${attr(r.id)}','${x.ym}')` : `${o.ledger}('${attr(r.id)}')`;
-    return `<td class="r num ar-c ${cls(x)}${isCur(b)?' ar-cur':''}" onclick="${go}">${arAmt(x.closing)}</td>`;
+    const flat = !isCur(b) && !mv(r,b,'billed') && !mv(r,b,'payment');   // 動きが無い＝前からの残りだけ
+    return `<td class="r num ar-c ${cls(x)}${isCur(b)?' ar-cur':''}${flat?' ar-flat':''}" onclick="${go}" title="${flat?'この'+(per==='month'?'月':'期間')+'は動きなし（前からの残り）':''}">${arAmt(x.closing)}</td>`;
   };
-  const body=rows.map(r=>`<tr>
-      <td class="ar-co"><a class="ar-name" onclick="${o.ledger}('${attr(r.id)}')" title="${o.ledgerTitle}">${esc(r.name)}</a>${o.badge(r.st)}</td>
+  const subCell=(r,b,key,sign)=>{
+    const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
+    const v=mv(r,b,key);
+    const go = per==='month'? `${o.pop}(event,'${attr(r.id)}','${r.m[k].ym}')` : `${o.ledger}('${attr(r.id)}')`;
+    return `<td class="r num ar-c ${v? sign : 'zero'}${isCur(b)?' ar-cur':''}" onclick="${go}">${v? (sign==='minus'?'−':'＋')+moneyPlain(v) : '0'}</td>`;
+  };
+  const subRow=(r,key,label,sign,last)=>`<tr class="ar-sub${last?' ar-sub-last':''}"><td class="ar-co">${label}${cum?'（累計）':''}</td>
+      ${B.map(b=>subCell(r,b,key,sign)).join('')}
+      <td class="r num ar-now"><span class="ar-y">年度計</span>${moneyPlain(r.m.reduce((u,x)=>u+(x.future?0:x[key]),0))}</td></tr>`;
+  const body=rows.map(r=>{ const open=bookIsOpen(side,r.id); return `<tr>
+      <td class="ar-co"><span class="ar-tg" onclick="bookToggle('${side}','${attr(r.id)}')" title="${open?'閉じる':'請求・入金を月ごとに見る'}">${open?'▼':'▶'}</span><a class="ar-name" onclick="${o.ledger}('${attr(r.id)}')" title="${o.ledgerTitle}">${esc(r.name)}</a>${o.badge(r.st)}</td>
       ${B.map(b=>cell(r,b)).join('')}
-      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="${o.ledger}('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`).join('');
+      <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="${o.ledger}('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`
+      + (open? subRow(r,'billed',o.flow[0].replace(/^[＋+]\s*/,''),'plus',false) + subRow(r,'payment',o.flow[1].replace(/^[−\-]\s*/,''),'minus',true) : ''); }).join('');
   if(!rows.length) return { head, body:'', foot:'', ncol:B.length+2 };
   const tot=`<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${B.map(b=>{
       const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
