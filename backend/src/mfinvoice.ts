@@ -251,11 +251,28 @@ export function mfHasNextPage(j: any, page: number) {
   if (p.total_pages != null) return Number(p.current_page || page) < Number(p.total_pages)
   return false
 }
+/* ★ 2026-09-19 本番で HTTP 429（too_many_requests: Operations per second is over the account limit）。
+   MF は「1秒あたりの操作数」を数える。呼ぶ側（月ごと・ページごと）が続けて叩くので、ここ1か所で
+   ① 呼び出しの間を最低 MF_GAP_MS あける ② 429 なら Retry-After（無ければ 2秒×回数）待って 最大5回やり直す。
+   テストでは d.now / d.sleep を差し替えられる（待たない）。 */
+export const MF_GAP_MS = Number(process.env.MF_GAP_MS || 350)
+let lastCall = 0
+const sleep = (d: MfDeps, ms: number) => (d as any).sleep ? (d as any).sleep(ms) : new Promise(ok => setTimeout(ok, ms))
 async function getJson(url: string, token: string, d: MfDeps, what: string) {
-  const r = await d.fetch(url, { headers: { authorization: 'Bearer ' + token, accept: 'application/json' } })
-  const j: any = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(scrub(mfHttpMessage(r.status, j, what)))
-  return j
+  for (let attempt = 0; ; attempt++) {
+    const wait = lastCall + MF_GAP_MS - Date.now()
+    if (wait > 0) await sleep(d, wait)
+    lastCall = Date.now()
+    const r = await d.fetch(url, { headers: { authorization: 'Bearer ' + token, accept: 'application/json' } })
+    const j: any = await r.json().catch(() => ({}))
+    if (r.status === 429 && attempt < 5) {
+      const ra = Number((r.headers && r.headers.get && r.headers.get('retry-after')) || 0)
+      await sleep(d, (isFinite(ra) && ra > 0 ? ra * 1000 : 2000 * (attempt + 1)))
+      continue
+    }
+    if (!r.ok) throw new Error(scrub(mfHttpMessage(r.status, j, what)))
+    return j
+  }
 }
 
 /** 期間内の請求書をすべて（ページをたどって）。既定では 下書き を除く。 */

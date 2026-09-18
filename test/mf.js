@@ -24,9 +24,12 @@ const eq = (name, a, b) => { const ok = JSON.stringify(a) === JSON.stringify(b);
 
 const ENV = { MF_CLIENT_ID: 'cid', MF_CLIENT_SECRET: 'sec', MF_PUBLIC_URL: 'https://finance.example.jp' };
 function makeDeps(opts = {}) {
+  /* レート制限のテスト: 最初の N 回は 429 を返す */
+  let rate429 = opts.rate429 || 0;
   const store = {}; const calls = [];
   let now = opts.now || 1_000_000;
   const fetch = async (url, init = {}) => {
+    if (rate429 > 0 && !String(url).startsWith(MF.MF_TOKEN_URL)) { rate429--; return { ok: false, status: 429, headers: { get: () => '0' }, json: async () => ({ errors: [{ code: 'too_many_requests', message: 'Operations per second is over the account limit.' }] }) }; }
     calls.push({ url: String(url), init });
     const u = new URL(String(url));
     if (u.href.startsWith(MF.MF_TOKEN_URL)) {
@@ -166,6 +169,12 @@ function makeDeps(opts = {}) {
     eq('429 のときは レート制限と分かる言葉で止まる', [msg.includes('レート制限'), msg.includes('RATE_LIMIT_EXCEEDED')], [true, true]);
   }
 
+  console.log('\n― レート制限（HTTP 429）―');
+  { const t = makeDeps({ acct: true, rate429: 2 }); let slept = 0; t.deps.sleep = async () => { slept++; };
+    await MF.exchangeCode('good', 'a', t.deps);
+    const accs = await MF.fetchConnectedAccounts(t.deps);
+    eq('429 が2回来ても 待ってやり直して 取れる', [accs.length, slept >= 2], [1, true]);
+  }
   console.log('\n― 会計（入出金明細・試算表）―');
   { const t = makeDeps({ acct: true });
     await MF.exchangeCode('good', 'a', t.deps);
