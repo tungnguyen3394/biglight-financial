@@ -254,6 +254,31 @@ console.log('\n― 前の期は 絶対に入れない・CSV と API の同じ請
   eq('入金が MF 会計 と CSV の両方から → CSV の方を消す', S.cleanupBeforeImport(ps, {}).state.payments.map(p => p.id), ['A']);
 }
 
+console.log('\n― MF 会計 の仕訳 → 入金（2026-09-19: MF が正）―');
+{
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  const J = (o) => Object.assign({ extId: 'j:J1:0', journalId: 'J1', date: '2026-09-10', amount: 110000, fee: 660, partnerCode: 'T-1', partnerName: '株式会社高山' }, o);
+  const r = S.applyJournals(st, [J({}), J({ extId: 'j:J2:0', journalId: 'J2', partnerCode: '', partnerName: '', amount: 5000, fee: 0 }), J({ extId: 'j:J0:0', date: '2026-07-01' })]);
+  const p = r.state.payments;
+  eq('仕訳が入金になる（取引先つき・手数料つき）。取引先なしは 未対応 のまま入る。前の期は入らない',
+    [p.length, p[0].companyId, p[0].amount, p[0].fee, p[0].source, p[1].companyId, r.stats['前の期で見送り']], [2, 'C1', 110000, 660, 'mfj', '', 1]);
+  eq('取引先コードを会社に覚える', r.state.companies.find(c => c.id === 'C1').mfTradeCode, 'T-1');
+  eq('もう一度流しても増えない', S.applyJournals(r.state, [J({})]).state.payments.length, 2);
+  const up = S.applyJournals(r.state, [J({ amount: 120000 })]);
+  eq('MF で仕訳を直したら こちらも直す', [up.state.payments[0].amount, up.stats['更新']], [120000, 1]);
+  /* 銀行明細から先に入っていた同じ入金 → 付け替え */
+  const bank = baseState(); bank.settings.mfImportFrom = '2026-08';
+  bank.payments = [{ id: 'PB', extId: 'tx1', source: 'mf', companyId: 'C1', date: '2026-09-10', amount: 110000, fee: 0, allocations: [{ invoiceId: 'I1', amount: 110000 }], status: '確定' }];
+  const ad = S.applyJournals(bank, [J({})]);
+  eq('銀行明細の入金は 仕訳に付け替え（充当はそのまま・二重にしない）', [ad.state.payments.length, ad.state.payments[0].extId, ad.state.payments[0].bankExtId, ad.state.payments[0].allocations.length, ad.stats['銀行明細から付け替え']], [1, 'j:J1:0', 'tx1', 1, 1]);
+  /* 自動消込: 仕訳の入金は 期日の古い順に充てる */
+  const fifo = baseState(); fifo.settings.mfImportFrom = '2026-08';
+  fifo.invoices = [{ id: 'A', companyId: 'C1', bookMonth: '2026-08', dueDate: '2026-09-30', total: 50000, status: '確定', confirmStatus: '確定' }, { id: 'B', companyId: 'C1', bookMonth: '2026-09', dueDate: '2026-10-31', total: 70000, status: '確定', confirmStatus: '確定' }];
+  const f2 = S.applyJournals(fifo, [J({ amount: 100000, fee: 0 })]).state;
+  const rc = S.reconcile(f2);
+  eq('金額が一致しなくても 古い順に充てる（残りは次へ）', [rc.results[0].matchType, rc.results[0].allocations], ['fifo', [{ invoiceId: 'A', amount: 50000 }, { invoiceId: 'B', amount: 50000 }]]);
+}
+
 console.log('\n― 入金の二重取り込み（指紋）―');
 {
   const st = baseState();

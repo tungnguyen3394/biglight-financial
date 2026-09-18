@@ -35,7 +35,9 @@ export const MF_AUTHORIZE_URL = 'https://api.biz.moneyforward.com/authorize'
 export const MF_TOKEN_URL = 'https://api.biz.moneyforward.com/token'
 export const MF_SCOPE = 'mfc/invoice/data.read'
 /* MF 会計（銀行明細・試算表）のスコープ。2026-09-18 に https://api.biz.moneyforward.com/.well-known/oauth-authorization-server で確認 */
-export const MF_ACCOUNTING_SCOPES = ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read']
+export const MF_ACCOUNTING_SCOPES = ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read',
+  /* 2026-09-19: 仕訳（入金を取引先つきで）と 勘定科目（売掛金のID） */
+  'mfc/accounting/journal.read', 'mfc/accounting/accounts.read']
 export const MF_ACCOUNTING_SCOPE = MF_ACCOUNTING_SCOPES.join(' ')
 export const MF_ACCOUNTING_API_BASE = 'https://api-accounting.moneyforward.com/api/v3'
 
@@ -129,7 +131,7 @@ export async function mfScope(d: MfDeps): Promise<string> {
   return [...new Set(s)].join(' ')
 }
 /** 今のトークンに 会計のスコープが入っているか（無ければ もう一度「接続する」が要る） */
-export const hasAccountingScope = (tok: any) => String(tok?.scope || '').split(/\s+/).includes('mfc/accounting/transaction.read')
+export const hasAccountingScope = (tok: any) => { const s = String(tok?.scope || '').split(/\s+/); return s.includes('mfc/accounting/transaction.read') && s.includes('mfc/accounting/journal.read') }
 export const peek4 = (s: any) => { const t = String(s || ''); return t ? `${t.slice(0, 4)}…（${t.length}文字）` : '' }
 
 export function authorizeUrl(state: string, env?: Record<string, string | undefined>, clientId?: string, scope?: string) {
@@ -584,6 +586,7 @@ export function mfRouter(d: RouterDeps) {
   syncRoute('/mf/sync/billings', 'billings', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? '' : '期間（from / to）か CSV が要ります。')
   syncRoute('/mf/sync/transactions', 'transactions', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? '' : '期間（from / to）か CSV が要ります。')
   syncRoute('/mf/sync/trial-balance', 'trial-balance', b => (isMonth(b.month)) ? '' : '対象月（YYYY-MM）が要ります。')
+  syncRoute('/mf/sync/journals', 'journals', b => (isDate(b.from) && isDate(b.to)) ? '' : '期間（from / to）が要ります。')
   syncRoute('/mf/reconcile', 'reconcile')
   syncRoute('/mf/sync/run', 'run')
 
@@ -613,4 +616,60 @@ export function mfRouter(d: RouterDeps) {
     res.json({ ok: true })
   })
   return r
+}
+
+/* ---------- MF 会計 の 仕訳（2026-09-19 利用者の指示: MF 会計 が唯一の正。入金は 仕訳 の 売掛金（貸方）から）----------
+   公式仕様 v3 /api/v3/journals: start_date / end_date（取引日）・account_id（借方か貸方に持つ仕訳だけ）・page / per_page（最大 10000）
+   仕訳1件 = branches[]、各 branch に debitor / creditor（account_name・value・trade_partner_code / trade_partner_name）。 */
+export async function fetchAccounts(d: MfDeps) {
+  const c = mfConfig(d.env)
+  const j = await getJson(`${c.acctBase}/accounts`, await accessToken(d), d, '勘定科目')
+  const list = listOf(j, 'accounts', 'items')
+  return list.map((a: any) => ({ id: String(a?.id ?? ''), name: String(a?.name ?? a?.account_name ?? ''), code: String(a?.code ?? a?.account_code ?? '') }))
+}
+/** 売掛金 の勘定科目ID（無ければ ''。その場合は 全仕訳を取って こちらで 売掛金 の行を選ぶ） */
+export async function arAccountId(d: MfDeps): Promise<string> {
+  const cached = await d.cfgGet('mf_ar_account').catch(() => null)
+  if (cached) return String(cached)
+  const acc = (await fetchAccounts(d)).find(a => /売掛金/.test(a.name))
+  if (acc) await d.cfgSet('mf_ar_account', acc.id).catch(() => {})
+  return acc ? acc.id : ''
+}
+export type JournalPay = { extId: string; journalId: string; number: string; date: string; amount: number; fee: number
+  partnerCode: string; partnerName: string; remark: string; updatedAt: string; isRealized: boolean; against: string }
+/** 仕訳1件 → 入金（売掛金 の 貸方 1行 = 入金 1件）。同じ仕訳の 借方 に 手数料 があれば fee に。 */
+export function journalToPays(j: any): JournalPay[] {
+  const out: JournalPay[] = []
+  const branches: any[] = Array.isArray(j?.branches) ? j.branches : []
+  const fee = branches.reduce((s: number, b: any) => s + (/手数料/.test(String(b?.debitor?.account_name || '')) ? money(b.debitor.value) : 0), 0)
+  const against = branches.map((b: any) => String(b?.debitor?.account_name || '')).filter(n => n && !/手数料/.test(n)).join('・')
+  branches.forEach((b: any, idx: number) => {
+    const cr = b?.creditor
+    if (!cr || !/売掛金/.test(String(cr.account_name || ''))) return
+    const v = money(cr.value); if (!v) return
+    out.push({
+      extId: 'j:' + String(j.id) + ':' + idx, journalId: String(j.id), number: String(j.number ?? ''), date: dateOnly(j.transaction_date),
+      amount: v, fee: out.length ? 0 : fee, partnerCode: String(cr.trade_partner_code ?? ''), partnerName: String(cr.trade_partner_name ?? ''),
+      remark: String(b.remark ?? j.memo ?? ''), updatedAt: String(j.update_time ?? ''), isRealized: j.is_realized !== false, against,
+    })
+  })
+  return out
+}
+export async function fetchJournalPays(from: string, to: string, d: MfDeps): Promise<JournalPay[]> {
+  const c = mfConfig(d.env)
+  const token = await accessToken(d)
+  const acct = await arAccountId(d)
+  const out: JournalPay[] = []
+  const seen = new Set<string>()
+  for (const [s0, e0] of monthChunks(from, to)) {
+    for (let page = 1; page <= 500; page++) {
+      const q = new URLSearchParams({ start_date: s0, end_date: e0, page: String(page), per_page: '1000' })
+      if (acct) q.set('account_id', acct)
+      const j = await getJson(`${c.acctBase}/journals?${q}`, token, d, '仕訳')
+      const list = listOf(j, 'journals', 'items')
+      for (const x of list) for (const p of journalToPays(x)) { if (seen.has(p.extId)) continue; seen.add(p.extId); out.push(p) }
+      if (!list.length || !mfHasNextPage(j, page)) break
+    }
+  }
+  return out
 }

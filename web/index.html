@@ -4224,8 +4224,13 @@ const MF_KINDS = {
   billings:       { title:'請求を取り込む（Money Forward 請求書）', path:'/mf/sync/billings',
                     sub:'請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。下書きは入りません。前の期（計上月が この期の8月より前）の請求は、期間に入れても 入りません。',
                     csvHelp:'MF 請求書の一覧から出力した CSV（見出しで列を判断します）' },
-  transactions:   { title:'入金を取り込む（銀行の入出金明細）', path:'/mf/sync/transactions',
-                    sub:'入金だけを取り込みます。同じ明細は二度入りません（取引ID で判断）。',
+  /* ★ 2026-09-19 利用者の指示: MF 会計 が唯一の正。入金は 経理（または AI）が MF 会計 で 取引先つきに仕訳したもの（売掛金の貸方）を写す。
+       銀行の生の明細は「仮」（取引先はこちらで推測）。毎朝の自動同期は 仕訳 を使う。 */
+  journals:       { title:'入金を取り込む（MF 会計 の仕訳）', path:'/mf/sync/journals', noCsv:true,
+                    sub:'MF 会計 で 売掛金 に対して仕訳した入金を、取引先・日付・金額・手数料 ごと写します。取引先は MF で選んだものが正です。同じ仕訳は二度入りません。',
+                    csvHelp:'' },
+  transactions:   { title:'入金を仮に取り込む（銀行の入出金明細・仕訳前）', path:'/mf/sync/transactions',
+                    sub:'まだ仕訳していない銀行の明細を「仮」で入れます（取引先はこちらで推測）。あとで MF 会計 で仕訳すると、同じ入金は 仕訳の方に付け替わります。',
                     csvHelp:'MF 会計の入出金明細、または銀行からダウンロードした CSV' },
   'trial-balance':{ title:'試算表を取り込む（突合用）', path:'/mf/sync/trial-balance',
                     sub:'予実の実績は今までどおりです。試算表は「突合のための外の数字」として別に置くだけです。',
@@ -4255,10 +4260,10 @@ function mfDraw(){
     <div class="mdsub">${esc(K.sub)}</div>
     <div class="mf-src">
       <div><div class="form-section" style="margin:0 0 6px;">① API から取得</div>${api}</div>
-      <div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>
+      ${K.noCsv?'<div class="muted">CSV はありません（正は MF 会計 の仕訳です）。</div>':`<div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>`}
         <input type="file" accept=".csv,text/csv" onchange="mfPickCsv(this.files&&this.files[0])">
         <div class="fhelp">${esc(K.csvHelp)}${MFI.csvName?` ／ いま読み込んでいるファイル: <b>${esc(MFI.csvName)}</b>`:''}</div>
-        ${MFI.kind==='trial-balance'?`<div style="margin-top:6px;">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value"></div>`:''}</div>
+        ${MFI.kind==='trial-balance'?`<div style="margin-top:6px;">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value"></div>`:''}</div>${K.noCsv?'':'</div>'}
     </div>
     <div id="mfPrev" style="margin-top:12px;">${MFI.plan? mfPlanHtml() : (MFI.busy?'<div class="empty">取得しています…</div>':'')}</div>
     <div class="modal-actions">
@@ -4302,6 +4307,16 @@ function mfArgs(dry){
 function mfPlanHtml(){
   const p=MFI.plan;
   if(MFI.kind==='billings') return mfBillingPlanHtml(p);
+  if(MFI.kind==='journals'){
+    const items=(p.items||[]);
+    return `<div class="mf-sum"><span>仕訳の入金 <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>${p['銀行明細から付け替え']?`<span>銀行明細から付け替え ${p['銀行明細から付け替え']}</span>`:''}
+        ${p['更新']?`<span>MFで直された ${p['更新']}</span>`:''}<span class="muted">変更なし ${p['変更なし']||0}</span>
+        ${p['取引先未対応']?`<span class="minus">取引先なし ${p['取引先未対応']}（MF 会計 で取引先を付けてください）</span>`:''}
+        ${p['前の期で見送り']?`<span class="muted">前の期で見送り ${p['前の期で見送り']}</span>`:''}</div>
+      ${items.length?`<div class="table-wrap" style="max-height:44vh;"><table><thead><tr><th>入金日</th><th>取引先（MF）</th><th class="r">金額</th><th class="r">手数料</th><th>相手科目</th><th></th></tr></thead>
+        <tbody>${items.map(t=>`<tr><td>${esc(t.date)}</td><td>${t.companyId? esc(arCoName(t.companyId)) : `<span class="badge b-amber">${esc(t.partnerName||'取引先なし')}</span>`}</td>
+          <td class="r num">${moneyPlain(t.amount)}</td><td class="r num muted">${t.fee?moneyPlain(t.fee):''}</td><td class="muted">${esc(t.against||'')}</td><td>${t.adopt?'<span class="badge b-gray">銀行明細から付け替え</span>':''}</td></tr>`).join('')}</tbody></table></div>`:''}`;
+  }
   if(MFI.kind==='transactions'){
     const items=(p.items||[]);
     return `<div class="mf-sum"><span>読み込み <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>
@@ -4451,18 +4466,19 @@ async function mfPanelLoad(){
         </section>
         <section class="mfp-card">
           <div class="mfp-hd">${IC.yen||''} 会計 <span class="muted">MF クラウド会計</span></div>
-          <div class="mfp-what">読むもの：銀行の入出金明細・試算表</div>
+          <div class="mfp-what">読むもの：仕訳（取引先つきの入金）・試算表・銀行明細</div>
           <div class="mfp-st">${accSt}</div>
           <div class="mfp-btns">${accBtn}</div>
           <div class="mfp-ops">
-            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('transactions')">入金を取り込む</button>
-              <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button></div>`:''}
+            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('journals')">入金を取り込む（仕訳）</button>
+              <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button>
+              <button class="btn secondary sm" onclick="openMfImport('transactions')" title="まだ仕訳していない銀行の明細を仮で入れる">銀行明細（仮）</button></div>`:''}
             <div class="fhelp">${accOn? '使う口座：<span id="mfBankSel">読み込み中…</span>' : 'API が無くても CSV で取り込めます'}</div>
           </div>
         </section>
       </div>
       <div class="mfp-auto">
-        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）請求 → 入金 → 自動消込` : '<b class="minus">止めています</b>（押したときだけ）'}
+        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）請求（MF 請求書）→ 入金（MF 会計 の仕訳）→ 自動消込` : '<b class="minus">止めています</b>（押したときだけ）'}
           ${adm?` <a onclick="mfSchedForm()" style="cursor:pointer;">設定を変える</a>`:''}</div>
         <div class="mfp-btns">
           ${mgr?`<button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button>`:''}

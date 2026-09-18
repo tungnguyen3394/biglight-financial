@@ -645,6 +645,18 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       await mfRemember('ok', out.stats)
       return { ok: true, stats: out.stats, count: items.length }
     }
+    if (kind === 'journals') {
+      /* MF 会計 の 仕訳（売掛金 の貸方）＝ 取引先つきの入金。CSV は無い（正は MF） */
+      const items = await MF.fetchJournalPays(String(args.from), String(args.to), mfDeps)
+      const plan = MFS.planJournals(await loadState(), items)
+      const slim = { 新規: plan.create.length, 銀行明細から付け替え: plan.adopt.length, 更新: plan.update.length, 変更なし: plan.same.length, 取引先未対応: plan.unmapped.length,
+        前の期で見送り: plan.old.length, 締め済みで見送り: plan.closed.length,
+        items: plan.create.concat(plan.adopt).slice(0, 120).map((x: any) => ({ ...x.j, companyId: x.companyId, adopt: !!x.ex })) }
+      if (dry) return { ok: true, dryRun: true, plan: slim, count: items.length }
+      const out = await mutateState(me.email, 'mf-journals', (st) => { const r = MFS.applyJournals(st, items, { actor: me.email }); return { state: r.state, stats: r.stats } })
+      await mfRemember('ok', out.stats)
+      return { ok: true, plan: slim, stats: out.stats, count: items.length }
+    }
     if (kind === 'reconcile') {
       const res = MFS.reconcile(await loadState(), { paymentIds: args?.paymentIds })
       if (dry) return { ok: true, dryRun: true, ...slimMatch(res) }
@@ -681,9 +693,10 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       const from = args?.from || (MFS.importFromYm(await loadState()) + '-01')
       const to = args?.to || new Date().toISOString().slice(0, 10)
       const stats: any = {}
+      /* ★ 2026-09-19: 正は MF 会計。請求（MF 請求書）→ 入金（MF 会計 の仕訳）→ 自動消込。銀行の生の明細は 自動では取らない（手で「仮」として取れる） */
       stats.billings = (await mfSync('billings', { from, to }, me)).stats
-      try { stats.transactions = (await mfSync('transactions', { from, to }, me)).stats }
-      catch (e: any) { stats.transactions = { エラー: String(e?.message || e) } }
+      try { stats.journals = (await mfSync('journals', { from, to }, me)).stats }
+      catch (e: any) { stats.journals = { エラー: String(e?.message || e) } }
       stats.reconcile = (await mfSync('reconcile', {}, me)).stats
       await mfRemember('ok', stats)
       return { ok: true, stats }

@@ -473,7 +473,7 @@ export const invoiceBalance = (state: any, inv: any) => {
   return total - paid
 }
 
-export type MatchResult = { paymentId: string; companyId: string; matchType: 'exact' | 'fee' | 'multi' | 'none'
+export type MatchResult = { paymentId: string; companyId: string; matchType: 'exact' | 'fee' | 'multi' | 'fifo' | 'none'
   allocations: { invoiceId: string; amount: number }[]; fee: number; reason: string }
 
 export function reconcile(state: any, opts: { paymentIds?: string[] } = {}) {
@@ -513,6 +513,14 @@ export function reconcile(state: any, opts: { paymentIds?: string[] } = {}) {
     if (exact.length === 0 && fee.length === 0 && multi) {
       const list = multi.map(id => cands.find((i: any) => String(i.id) === id))
       results.push(take(list)); multi.forEach(id => bal.set(id, 0)); continue
+    }
+    // ④ 仕訳から来た入金（取引先は MF で確定している）→ 期日の古い順に充てる（残りは 過入金 として残る）
+    if (p.source === 'mfj') {
+      const all = invoices.filter((i: any) => String(i.companyId) === companyId && (bal.get(String(i.id)) || 0) > 0)
+        .sort((a: any, b: any) => String(a.dueDate || a.bookMonth || '').localeCompare(String(b.dueDate || b.bookMonth || '')))
+      let rest = amount; const als: { invoiceId: string; amount: number }[] = []
+      for (const i of all) { if (rest <= 0) break; const b = bal.get(String(i.id)) || 0; const take = Math.min(b, rest); als.push({ invoiceId: String(i.id), amount: take }); bal.set(String(i.id), b - take); rest -= take }
+      if (als.length) { results.push({ paymentId: String(p.id), companyId, matchType: 'fifo', fee: 0, allocations: als, reason: rest > 0 ? '過入金 ' + rest : '' }); continue }
     }
     results.push({ paymentId: String(p.id), companyId, matchType: 'none', allocations: [], fee: 0,
       reason: exact.length > 1 ? '同じ金額の請求書が複数あります' : (cands.length ? '金額が請求書と一致しません' : '期日が近い未回収の請求書がありません') })
@@ -935,4 +943,85 @@ export function cleanupBeforeImport(state: any, opts: { since?: string; actor?: 
       入金が充ててあり残す: keptPaid.length, 入金を消す: payKill.size, 取引先を消す: coDel.size },
     sample, companies: [...coDel].map(id => String((arr(state, 'companies').find((c: any) => String(c.id) === id) || {}).name || id)),
   }
+}
+
+/* ---------- 入金（MF 会計 の 仕訳 → payments）----------
+   ★ 2026-09-19 利用者の指示: MF 会計 が唯一の正。取引先の当て方も 経理（または AI）が MF で決めたものを使う。
+     ここは 仕訳の 売掛金（貸方）を 1行＝入金1件 として写すだけ。
+     ・鍵は 仕訳ID＋行番号（extId 'j:…'）。何度流しても増えない
+     ・取引先は 仕訳の trade_partner_code → 会社（mfTradeCode）、無ければ 名前（表記ゆれを畳む）。当たらなければ 未対応 のまま入れる
+     ・以前 入出金明細（銀行の生データ）から入った同じ入金（同じ会社・日・金額、または同じ日・金額で会社なし）があれば
+       新しく作らず その行を 仕訳 に付け替える（充てた入金を失わない・二重にしない）
+     ・MF で仕訳を直したら（金額・日付）: 充当が無ければ そのまま直す、有れば 直したうえで 警告
+     ・前の期・締めた期 は入れない */
+export type JPay = { extId: string; journalId?: string; number?: string; date: string; amount: number; fee?: number
+  partnerCode?: string; partnerName?: string; remark?: string; updatedAt?: string; against?: string }
+
+export function matchCompanyByTrade(state: any, p: { partnerCode?: string; partnerName?: string }) {
+  const cos = liveCos(state)
+  if (p.partnerCode) { const c = cos.find((x: any) => String(x.mfTradeCode || '') === String(p.partnerCode)); if (c) return { companyId: String(c.id), how: 'code' as const } }
+  const n = normName(p.partnerName)
+  if (n) { const hits = cos.filter((x: any) => companyNames(x).includes(n)); if (hits.length === 1) return { companyId: String(hits[0].id), how: 'name' as const } }
+  return { companyId: '', how: 'none' as const }
+}
+export function planJournals(state: any, items: JPay[]) {
+  const pays = arr(state, 'payments')
+  const byExt = new Map(pays.filter((p: any) => p.extId).map((p: any) => [String(p.extId), p]))
+  const taken = new Set<string>()
+  const out = { create: [] as any[], adopt: [] as any[], update: [] as any[], same: [] as any[], old: [] as any[], closed: [] as any[], unmapped: [] as any[], learn: [] as any[] }
+  const learned = new Set<string>()
+  for (const j of items) {
+    if (!j || !j.extId || !j.date || !num(j.amount)) continue
+    const ym = ymOf(j.date)
+    if (isBeforeImport(state, ym)) { out.old.push(j); continue }
+    const m = matchCompanyByTrade(state, j)
+    if (!m.companyId) out.unmapped.push(j)
+    else if (m.how === 'name' && j.partnerCode && !learned.has(m.companyId)) { learned.add(m.companyId); out.learn.push({ companyId: m.companyId, code: j.partnerCode, name: j.partnerName || '' }) }
+    const ex: any = byExt.get(String(j.extId))
+    if (ex) {
+      if (isClosedYm(state, ymOf(ex.date))) { out.closed.push(j); continue }
+      const changed = dateOnly(ex.date) !== dateOnly(j.date) || num(ex.amount) !== num(j.amount) || num(ex.fee) !== num(j.fee || 0) || (!ex.companyId && m.companyId)
+      if (changed) out.update.push({ j, ex, companyId: ex.companyId || m.companyId }); else out.same.push(j)
+      continue
+    }
+    if (isClosedYm(state, ym)) { out.closed.push(j); continue }
+    /* 入出金明細（銀行）から先に入っていた同じ入金 → 付け替え */
+    const twin = pays.find((p: any) => p.status !== '取消' && !taken.has(String(p.id)) && !/^j:/.test(String(p.extId || '')) && (p.extId || p.source === 'mf' || p.source === 'csv')
+      && dateOnly(p.date) === dateOnly(j.date) && num(p.amount) === num(j.amount)
+      && (!p.companyId || !m.companyId || String(p.companyId) === m.companyId))
+    if (twin) { taken.add(String(twin.id)); out.adopt.push({ j, ex: twin, companyId: twin.companyId || m.companyId }); continue }
+    out.create.push({ j, companyId: m.companyId })
+  }
+  return out
+}
+export function applyJournals(state: any, items: JPay[], opts: { actor?: string } = {}) {
+  const plan = planJournals(state, items)
+  const now = new Date().toISOString(), actor = opts.actor || 'mf-sync', stamp = { updatedAt: now, updatedBy: actor }
+  const out: any = { ...state, payments: arr(state, 'payments').slice() }
+  const byId = new Map<string, number>(out.payments.map((p: any, i: number) => [String(p.id), i] as [string, number]))
+  const base = (j: JPay) => ({ mfJournalId: j.journalId || '', mfJournalNo: j.number || '', mfTradeCode: j.partnerCode || '', mfTradeName: j.partnerName || '',
+    mfAgainst: j.against || '', mfUpdatedAt: j.updatedAt || '', source: 'mfj', extId: String(j.extId) })
+  for (const c of plan.create) out.payments.push({
+    id: newId('PAY'), companyId: c.companyId || '', date: dateOnly(c.j.date), amount: num(c.j.amount), fee: num(c.j.fee || 0),
+    method: '銀行振込', note: c.j.remark || '', allocations: [], status: '確定', payerName: c.j.partnerName || '', matchType: '',
+    ...base(c.j), createdAt: now, createdBy: actor, ...stamp,
+  })
+  for (const a of plan.adopt) { const i = byId.get(String(a.ex.id)); if (i == null) continue
+    out.payments[i] = { ...out.payments[i], companyId: a.companyId || '', fee: num(a.j.fee || 0) || num(out.payments[i].fee), bankExtId: out.payments[i].extId || '', ...base(a.j), ...stamp } }
+  let warn = 0
+  for (const u of plan.update) { const i = byId.get(String(u.ex.id)); if (i == null) continue
+    const cur = out.payments[i], hasAlloc = (cur.allocations || []).some((x: any) => num(x.amount))
+    const next = { ...cur, companyId: u.companyId || '', date: dateOnly(u.j.date), amount: num(u.j.amount), fee: num(u.j.fee || 0), ...base(u.j),
+      mfChanges: [...(cur.mfChanges || []), { at: now, fields: { date: [cur.date, dateOnly(u.j.date)], amount: [num(cur.amount), num(u.j.amount)] } }].slice(-10), ...stamp }
+    if (hasAlloc && (num(cur.amount) !== num(u.j.amount) || String(cur.companyId) !== String(u.companyId))) { (next as any).mfChangeWarn = 'MF で仕訳が直されました。充当を確かめてください'; warn++ }
+    out.payments[i] = next }
+  if (plan.learn.length) {
+    const cos = arr(out, 'companies').slice(); let touched = false
+    for (const l of plan.learn) { const at = cos.findIndex((c: any) => String(c.id) === l.companyId); if (at < 0 || cos[at].mfTradeCode === l.code) continue
+      cos[at] = { ...cos[at], mfTradeCode: l.code, mfTradeName: l.name, ...stamp }; touched = true }
+    if (touched) out.companies = cos
+  }
+  const stats = { 新規: plan.create.length, 銀行明細から付け替え: plan.adopt.length, 更新: plan.update.length, 変更なし: plan.same.length,
+    取引先未対応: plan.unmapped.length, 前の期で見送り: plan.old.length, 締め済みで見送り: plan.closed.length, 充当の確認: warn }
+  return { state: out, plan, stats }
 }

@@ -39,6 +39,17 @@ function makeDeps(opts = {}) {
     if (u.pathname.endsWith('/connected_accounts')) {
       return { ok: true, status: 200, json: async () => ({ data: [{ id: 'acc1', name: '【法人】あいち銀行', connected_sub_accounts: [{ id: 'sub1', name: '山田支店 普通', last_synced_at: '2026-09-14T06:00:00+09:00' }] }] }) };
     }
+    if (u.pathname.endsWith('/accounts')) {
+      return { ok: true, status: 200, json: async () => ({ accounts: [{ id: 'acc-cash', name: '現金' }, { id: 'acc-ar', name: '売掛金' }] }) };
+    }
+    if (u.pathname.endsWith('/journals')) {
+      const mk = (id, date, v, fee, name, code) => ({ id, number: 7, transaction_date: date, update_time: '2026-09-19T01:00:00Z', is_realized: true, branches: [
+        { remark: '振込', debitor: { account_name: '普通預金', value: v - fee }, creditor: { account_name: '売掛金', value: v, trade_partner_code: code, trade_partner_name: name } },
+        ...(fee ? [{ remark: '', debitor: { account_name: '支払手数料', value: fee }, creditor: null }] : []) ] });
+      return { ok: true, status: 200, json: async () => ({ journals: [mk('J1', '2026-09-10', 110000, 660, '株式会社高山', 'T-1'), mk('J2', '2026-09-11', 5000, 0, '', ''),
+        { id: 'J3', transaction_date: '2026-09-12', branches: [{ debitor: { account_name: '売掛金', value: 100 }, creditor: { account_name: '売上高', value: 100 } }] }],
+        metadata: { total_count: 3, total_pages: 1 } }) };
+    }
     if (u.pathname.endsWith('/transactions')) {
       return { ok: true, status: 200, json: async () => ({ data: [
         { id: 'tx1', transaction_date: '2026-09-10', content: 'ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ', value: '110000', side: 'INCOME' },
@@ -169,6 +180,11 @@ function makeDeps(opts = {}) {
       ['2026-08-15〜2026-08-31', '2026-09-01〜2026-09-30', '2026-10-01〜2026-10-03']);
     eq('請求書を MF の画面で開く場所', [MF.billingWebUrl({ id: 'b9' }), MF.billingWebUrl({ id: 'b9', url: 'https://invoice.moneyforward.com/api/v3/billings/b9' })],
       ['https://invoice.moneyforward.com/billings/b9', 'https://invoice.moneyforward.com/billings/b9']);
+    const jp = await MF.fetchJournalPays('2026-09-01', '2026-09-30', t.deps);
+    eq('仕訳の 売掛金（貸方）だけが入金になる（手数料つき・売上の仕訳は入らない）',
+      jp.map(x => [x.extId, x.date, x.amount, x.fee, x.partnerName, x.partnerCode]), [['j:J1:0', '2026-09-10', 110000, 660, '株式会社高山', 'T-1'], ['j:J2:0', '2026-09-11', 5000, 0, '', '']]);
+    const jq = new URL(t.calls.filter(c => c.url.includes('/journals')).pop().url).searchParams;
+    eq('仕訳は 売掛金 の科目IDで絞り、期間つき', [jq.get('account_id'), jq.get('start_date'), jq.get('end_date')], ['acc-ar', '2026-09-01', '2026-09-30']);
     const tb = await MF.fetchTrialBalance('2026-09', t.deps);
     eq('試算表は 科目と残高', tb, [{ code: '1130', name: '売掛金', amount: 264000 }]);
     const tq = new URL(t.calls.filter(c => c.url.includes('/reports/trial_balance')).pop().url).searchParams;
@@ -239,7 +255,7 @@ function makeDeps(opts = {}) {
   }
 
   console.log('\n― 銀行明細（MF 会計）: 画面から ON → 会計のスコープ付きで認可 → 明細を読む ―');
-  eq('会計のスコープは 公式一覧の名前（data.read ではない）', MF.MF_ACCOUNTING_SCOPES, ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read']);
+  eq('会計のスコープは 公式一覧の名前（2026-09-19: 仕訳・勘定科目 も）', MF.MF_ACCOUNTING_SCOPES, ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read', 'mfc/accounting/journal.read', 'mfc/accounting/accounts.read']);
   eq('会計 API の基底 URL', MF.mfConfig({}).acctBase, 'https://api-accounting.moneyforward.com/api/v3');
   {
     const t = makeDeps({ env: { MF_CLIENT_ID: 'cid', MF_CLIENT_SECRET: 'sec', MF_PUBLIC_URL: 'https://finance.example.jp' } });
@@ -260,11 +276,11 @@ function makeDeps(opts = {}) {
     who.current = { email: 'boss@biglight.jp', role: 'Admin' };
     const on = await call('POST', '/mf/accounting/enable', { enabled: true });
     eq('ON にすると「もう一度 接続」が要ると返す', [on.j.enabled, on.j.reconnect], [true, true]);
-    eq('スコープに会計の3つが足される', on.j.scope, 'mfc/invoice/data.read mfc/accounting/connected_account.read mfc/accounting/transaction.read mfc/accounting/report.read');
+    eq('スコープに会計の5つが足される', on.j.scope, 'mfc/invoice/data.read ' + ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read', 'mfc/accounting/journal.read', 'mfc/accounting/accounts.read'].join(' '));
     const c2 = await call('POST', '/mf/connect');
     eq('認可 URL にも会計のスコープ', new URL(c2.j.url).searchParams.get('scope').includes('mfc/accounting/transaction.read'), true);
     /* MF がスコープ付きでトークンを返した体 */
-    t.store.mf_token = JSON.stringify({ access_token: 'AT-acc', refresh_token: 'RT', expires_at: 9_000_000, scope: 'mfc/invoice/data.read mfc/accounting/connected_account.read mfc/accounting/transaction.read mfc/accounting/report.read' });
+    t.store.mf_token = JSON.stringify({ access_token: 'AT-acc', refresh_token: 'RT', expires_at: 9_000_000, scope: 'mfc/invoice/data.read ' + ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read', 'mfc/accounting/journal.read', 'mfc/accounting/accounts.read'].join(' ') });
     eq('状態: 銀行明細 ON・スコープあり', [(await call('GET', '/mf/status')).j.accounting, (await call('GET', '/mf/status')).j.accountingScopeOk], [true, true]);
     const acc = await call('GET', '/mf/accounting/accounts');
     eq('連携口座が読める', [acc.status, acc.j.items[0].name, acc.j.items[0].subAccounts[0].name], [200, '【法人】あいち銀行', '山田支店 普通']);
