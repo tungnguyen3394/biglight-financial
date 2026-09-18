@@ -650,7 +650,7 @@ export default {
             shot: 'bill_form', modal: true, maxH: 128,
             steps: [
               { mark: 'co', text: '`支払先`: nhà cung cấp gửi hoá đơn.' },
-              { mark: 'book', text: '`計上月`: tháng mà khoản chi **thuộc về** (không phải tháng trả tiền).' },
+              { mark: 'book', text: '`計上月`: tháng của hoá đơn (không phải tháng trả tiền) — trong bảng 買掛金 nó nằm ở tháng này. Chi phí **thực tế** trong 予実 không lấy từ đây mà nhập từ 試算表.' },
               { mark: 'due', text: '`支払期日`: hạn phải trả. Nếu `計上月` đã có sẵn khi chọn `支払先`, hạn tự điền theo 締日・サイト của nhà cung cấp — sửa được.' },
               { mark: 'lines', text: '`＋ 行を追加`: thêm từng dòng — tài khoản, nội dung, số lượng, đơn giá, **loại thuế**.' },
               { mark: 'files', text: '**File hoá đơn** (`*確定に必要`): bắt buộc nếu muốn lưu ở trạng thái `確定`.' },
@@ -849,7 +849,7 @@ export default {
           blocks: [
             { p: 'Khách hàng (所属機関) được **đồng bộ từ CRM** (`設定` › `CRM連携`): tên, địa chỉ, người liên hệ. Các mục kế toán như ngày chốt, hạn trả, tài khoản ngân hàng **chỉ nhập ở đây** và không bị CRM ghi đè.' },
           ],
-          note: 'Cột `請求ルール` và lời nhắc “chưa có 請求ルール” là của chức năng **tự tạo hoá đơn**, hiện không dùng vì hoá đơn làm ở Money Forward. **Không cần thiết lập.**',
+          note: 'Hoá đơn **làm ở Money Forward**, hệ thống không tự tạo hoá đơn. Cột `請求ルール` (số tiền mỗi tháng) chỉ dùng để **đối chiếu**: hoá đơn MF đúng số tiền thì tự `確定`, lệch thì thành `未確認`; và để `請求もれチェック` tìm tháng chưa có hoá đơn. **Không bắt buộc** — không nhập thì mọi hoá đơn MF đều tự 確定.',
         },
         {
           title: 'Xử lý đối tác từ Money Forward (取引先の確認)',

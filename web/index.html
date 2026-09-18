@@ -1253,7 +1253,7 @@ const ENTITIES = {
     fields:[
       {name:'no',        label:'管理番号',  type:'text', section:'支払情報', secIcon:'file', ph:'空欄なら自動採番'},
       {name:'companyId', label:'支払先',    type:'ref', ref:'companies', refFilter:'payee', req:true},
-      {name:'bookMonth', label:'計上月',    type:'month', req:true, help:'予実の費用に入る月。支払月ではありません。'},
+      {name:'bookMonth', label:'計上月',    type:'month', req:true, help:'請求書の対象月（買掛金の表でこの月に並びます）。支払月ではありません。予実の費用の実績は 試算表 から入れます。'},
       {name:'recvDate',  label:'請求書受領日', type:'date'},
       {name:'dueDate',   label:'支払期日',  type:'date', req:true},
       {name:'status',    label:'状態',      type:'select', options:BILL_STATUS},
@@ -5632,7 +5632,6 @@ function viewApBook(){
   const tools=`${canCreate('payouts')?`<button class="btn" onclick="openPayout()">＋ 支払を記録</button>`:''}
     ${canCreate('bills')?`<button class="btn secondary" onclick="openForm('bills')">＋ 支払請求を登録</button>`:''}
     ${toolsMenu(`${canCreate('bills')&&costItemsSorted().some(isApCost)?`<button class="btn secondary" onclick="openGenBills()">定期の支払を作成（月まとめ）</button><hr>`:''}
-      <button class="btn secondary" onclick="goto('apsuii')">支払推移表（科目 › 支払先）</button>
       <button class="btn secondary" onclick="exportApBookCsv()">${IC.doc} CSV出力（この表）</button>
       <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button>`)}`;
   return pageShell({ title:'支払（買掛金）', count:all.length, shown:rows.length,
@@ -6020,7 +6019,7 @@ function drawPayoutModal(){
     <div class="form-grid">
       <div><label>支払日</label><input type="date" value="${attr(c.date)}" onchange="PO_CTX.date=this.value"></div>
       <div><label>支払先</label><select onchange="PO_CTX.companyId=this.value;PO_CTX.allocations=[];drawPayoutModal()">
-        <option value="">-</option>${(DB.companies||[]).filter(x=>!x._gone).map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
+        <option value="">-</option>${(DB.companies||[]).filter(x=>!x._gone && (coIsAp(x) || String(x.id)===String(c.companyId))).map(x=>`<option value="${attr(x.id)}" ${String(x.id)===String(c.companyId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div>
       <div><label>支払額 <span class="muted" style="font-weight:400;">（振り込んだ金額）</span></label><input class="num" style="text-align:right;" value="${c.amount?moneyPlain(c.amount):''}" oninput="fmtMoneyInput(this);PO_CTX.amount=num(this.value);poRest()"></div>
       <div><label>方法</label><select onchange="PO_CTX.method=this.value">${selOpts(PAY_METHODS,c.method)}</select></div>
       <div class="full"><label>備考</label><input value="${attr(c.note||'')}" oninput="PO_CTX.note=this.value"></div>
@@ -8928,7 +8927,9 @@ function viewCompanies(mode){
         <button class="btn sm" style="margin-left:auto;" onclick="goto('coreview')">確認する</button></div>`:'')
     + (mism? `<div class="infobar">区分と実際の動きが違う会社が ${mism}社あります（区分の下に理由を出しています）。「両方にする」で直せます。</div>`:'')
     + (tab==='ap' && !all.length? `<div class="warnbar">まだ支払先がありません。「＋ 支払先を追加」から、毎月お金を払っている会社を登録してください。</div>`:'')
-    + (noRule? `<div class="warnbar">請求ルールが未設定の得意先が ${noRule}社あります。ルールを作ると毎月の請求が自動で作られます。</div>`:'');
+    /* ★ 2026-09-18: 請求は Money Forward で作る。請求ルールの使い道は「MF の請求の金額チェック」と「請求もれチェック」だけ
+       （旧文言「ルールを作ると毎月の請求が自動で作られます」は誤り）。警告ではなく案内にする。 */
+    + (noRule? `<div class="infobar">請求ルール（毎月の金額）が無い得意先が ${noRule}社あります。入れておくと、Money Forward から入った請求の金額を自動で照らし合わせ（違えば「未確認」）、請求もれも見つけます。</div>`:'');
   return pageShell({ title:'取引先', count:all.length, shown:rows.length, tools,
     body: tabs + bars + dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('companies','${r.id}')` }) });
 }
@@ -10071,7 +10072,7 @@ const PAGE_GUIDE = {
   cashflow:   { step:'⑥', what:'通帳の<b>開始残高</b>だけ（設定 › 資金繰りの開始残高）',
                 effect:'入金予定 − 支払予定 で、週ごと・月ごとの残高見込み' },
 
-  companies:  { step:'①', what:'会社名・区分と <b>締日・支払サイト・支払日</b>。さらに <b>請求ルール</b>（人数×単価／月額固定／都度）',
+  companies:  { step:'①', what:'会社名・区分と <b>締日・支払サイト・支払日</b>。得意先は <b>請求ルール</b>（月額固定／都度）— MF の請求の金額チェックと 請求もれチェック に使います',
                 effect:'入金期日・年齢表・資金繰り・台帳の色、すべてのもとになります' },
   coreview:   { step:'①', what:'Money Forward から<b>自動で作った取引先</b>と、<b>似た会社があって止めている取引先</b>を片づける（統合／このままでよい）',
                 effect:'統合すると 請求・入金 は既存の会社にまとまり、次からは MF の取り込みも その会社に当たります' },

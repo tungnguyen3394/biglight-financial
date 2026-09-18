@@ -410,6 +410,13 @@ console.log('\n― 画面が落ちずに描けるか ―');
   } catch (e) { console.log('  NG  ' + fn + '  →  ' + e.message); fail++; }
 });
 
+console.log('\n― 16日から残っていた4か所（2026-09-18）―');
+try{
+  eq('買掛金のツールに 外した画面（支払推移表）へのボタンが無い', ctx.viewApBook().includes("goto('apsuii')"), false);
+  eq('請求ルールの案内は「自動で作られます」と言わない', ctx.viewCompanies('').includes('自動で作られます'), false);
+  eq('支払請求の 計上月 は 予実の費用 と言わない', ctx.__x.ENTITIES.bills.fields.find(x=>x.name==='bookMonth').help.includes('予実の費用に入る月'), false);
+}catch(e){ console.log('  NG  4か所  →  '+e.message); fail++; }
+
 console.log('\n― 取引先の3タブ・取引先の確認（2026-09-18）―');
 {
   const keepCo=_db.companies.slice(), keepQ=_db.mfPartnerQueue, keepInv=_db.invoices.slice();
