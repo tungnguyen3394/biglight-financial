@@ -3297,7 +3297,7 @@ function arDataCheckFacts(){
   const live=inv.filter(AR_LIVE);
   const f = {
     total: inv.length, live: live.length,
-    fromMf: live.filter(i=>i.source==='mf').length,
+    fromMf: live.filter(i=>i.source==='mf'||i.source==='mfj').length,
     fromCsv: live.filter(i=>i.source==='csv').length,
     draftOrCancel: inv.length-live.length,
     noDate: live.filter(i=>!arYmOfInv(i)),
@@ -3616,7 +3616,7 @@ function mfImportFromYm(){
 }
 function mfImportAlert(){
   const from=mfImportFromYm();
-  const imp=(DB.invoices||[]).filter(i=>i.mfId && i.status!=='取消' && (i.source==='mf'||i.source==='csv'||/^csv/.test(String(i.mfId))));
+  const imp=(DB.invoices||[]).filter(i=>(i.mfId||i.jExtId) && i.status!=='取消' && (i.source==='mf'||i.source==='mfj'||i.source==='csv'||/^csv/.test(String(i.mfId))));
   const old=imp.filter(i=>String(i.bookMonth||'')<from).length;
   const seen={}; let dup=0;
   imp.filter(i=>String(i.bookMonth||'')>=from).forEach(i=>{ const k=[i.companyId,i.bookMonth,num(i.total),String(i.no||'')].join('|'); if(seen[k]) dup++; else seen[k]=1; });
@@ -3663,7 +3663,7 @@ function arCellPop(ev, companyId, ym){
   arPopClose();
   const f=arFacts(companyId), r=arMonthly(companyId,[ym],f)[0];
   const bills=f.bills.filter(b=>b.ym===ym), pays=f.pays.filter(x=>x.ym===ym);
-  const srcTag = d => d.source==='mf'? '<span class="ar-src">MF</span>' : ((d.items||[]).length? '<span class="ar-src old">旧</span>' : '<span class="ar-src man">手入力</span>');
+  const srcTag = d => d.source==='mf'||d.source==='mfj'? '<span class="ar-src">MF</span>' : ((d.items||[]).length? '<span class="ar-src old">旧</span>' : '<span class="ar-src man">手入力</span>');
   const list=(arr, label, fn)=>arr.length? `<div class="ar-pop-l"><div class="muted">${label}</div>${arr.slice(0,6).map(fn).join('')}${arr.length>6?`<div class="muted">他 ${arr.length-6}件</div>`:''}</div>` : '';
   const pop=document.createElement('div');
   pop.id='arPop'; pop.className='ar-pop';
@@ -3678,7 +3678,7 @@ function arCellPop(ev, companyId, ym){
       ${r.overdue>0?`<tr><td class="minus">うち期限超過</td><td class="r num minus">¥${moneyPlain(r.overdue)}</td></tr>`:''}
     </table>
     ${list(bills,'請求', b=>`<div class="ar-pop-i"><span>${esc(b.doc.issueDate||b.doc.bookMonth||'')} ${srcTag(b.doc)} ${invTaxBadge(b.doc)}${b.doc.no?` <span class="muted">${esc(b.doc.no)}</span>`:''} ${mfWebLink(b.doc,'MF')}</span>
-      <span class="num">${attBtn('invoices', b.doc.id, b.doc)} ${moneyPlain(b.amount)}${(b.doc.source!=='mf'&&!(b.doc.items||[]).length&&canEdit('invoices'))?` <a onclick="arPopClose();openArBillForm('${attr(b.doc.id)}')">修正</a>`:''}</span></div>`)}
+      <span class="num">${attBtn('invoices', b.doc.id, b.doc)} ${moneyPlain(b.amount)}${(b.doc.source!=='mf'&&b.doc.source!=='mfj'&&!(b.doc.items||[]).length&&canEdit('invoices'))?` <a onclick="arPopClose();openArBillForm('${attr(b.doc.id)}')">修正</a>`:''}</span></div>`)}
     ${list(pays,'入金', x=>`<div class="ar-pop-i"><span>${esc(x.date)}${x.doc.method?` <span class="muted">${esc(x.doc.method)}</span>`:''}</span>
       <span class="num">${attBtn('payments', x.doc.id, x.doc)} ${moneyPlain(x.amount)}${canEdit('receipts')?` <a onclick="arPopClose();openPayment('${attr(x.doc.id)}')">修正</a>`:''}</span></div>`)}
     <div class="ar-pop-f"><a onclick="arPopClose();openArLedger('${attr(companyId)}')">売掛元帳を見る ›</a></div>`;
@@ -3931,8 +3931,8 @@ function arApplyUnallocated(companyId){
 function openArBillForm(id, preset){
   if(!id) return openArBillBulk(preset? [Object.assign(abBlank(), preset)] : null);   // preset（元帳などから）は そのまま使う
   const inv=id? findById('invoices',id) : null;
-  if(inv && (inv.source==='mf' || (inv.items||[]).length)){
-    toast(inv.source==='mf'? 'Money Forward の請求です。MF で直してから取り込み直してください。' : '明細のある請求（旧画面で作成）はここでは直せません。','err'); return; }
+  if(inv && (inv.source==='mf' || inv.source==='mfj' || (inv.items||[]).length)){
+    toast(inv.source==='mf'||inv.source==='mfj'? 'Money Forward の請求です。MF で直してから取り込み直してください。' : '明細のある請求（旧画面で作成）はここでは直せません。','err'); return; }
   if(id? !canEdit('invoices') : !canCreate('invoices')){ toast('権限がありません。','err'); return; }
   const r=inv||Object.assign({ bookMonth:thisMonth(), issueDate:today() }, preset||{});
   const cos=(DB.companies||[]).filter(x=>!x._gone && x.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
@@ -4248,8 +4248,8 @@ const MF_KINDS = {
                     csvHelp:'MF 請求書の一覧から出力した CSV（見出しで列を判断します）' },
   /* ★ 2026-09-19 利用者の指示: MF 会計 が唯一の正。入金は 経理（または AI）が MF 会計 で 取引先つきに仕訳したもの（売掛金の貸方）を写す。
        銀行の生の明細は「仮」（取引先はこちらで推測）。毎朝の自動同期は 仕訳 を使う。 */
-  journals:       { title:'入金を取り込む（MF 会計 の仕訳）', path:'/mf/sync/journals', noCsv:true,
-                    sub:'MF 会計 で 売掛金 に対して仕訳した入金を、取引先・日付・金額・手数料 ごと写します。取引先は MF で選んだものが正です。同じ仕訳は二度入りません。',
+  journals:       { title:'請求と入金を取り込む（MF 会計 の売掛金の元帳）', path:'/mf/sync/journals', noCsv:true,
+                    sub:'MF 会計 の 売掛金 の仕訳を写します。借方＝請求（売上）、貸方＝入金。取引先は 補助科目・摘要 から。MF 請求書 の番号（No.）が同じ請求には PDF・リンクを付けます。同じ仕訳は二度入りません。',
                     csvHelp:'' },
   transactions:   { title:'入金を仮に取り込む（銀行の入出金明細・仕訳前）', path:'/mf/sync/transactions',
                     sub:'まだ仕訳していない銀行の明細を「仮」で入れます（取引先はこちらで推測）。あとで MF 会計 で仕訳すると、同じ入金は 仕訳の方に付け替わります。',
@@ -4344,7 +4344,11 @@ function mfPlanHtml(){
   }
   if(MFI.kind==='journals'){
     const items=(p.items||[]);
-    return `<div class="mf-sum"><span>仕訳の入金 <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>${p['銀行明細から付け替え']?`<span>銀行明細から付け替え ${p['銀行明細から付け替え']}</span>`:''}
+    const bs=p['請求']||{};
+    return `<div class="mf-sum"><span>仕訳の請求 新規 <b>${bs['新規']||0}</b></span>${bs['請求書APIの請求に付ける']?`<span>請求書の請求に付ける ${bs['請求書APIの請求に付ける']}</span>`:''}${bs['更新']?`<span>MFで直された ${bs['更新']}</span>`:''}<span class="muted">変更なし ${bs['変更なし']||0}</span>${bs['会計に未計上']?`<span class="minus">会計に未計上 ${bs['会計に未計上']}</span>`:''}</div>
+      ${(p.billItems||[]).length?`<div class="table-wrap" style="max-height:26vh;margin-bottom:8px;"><table><thead><tr><th>請求日</th><th>取引先</th><th>番号</th><th class="r">金額</th></tr></thead>
+        <tbody>${p.billItems.map(t=>`<tr><td>${esc(t.date)}</td><td>${t.companyId? esc(arCoName(t.companyId)) : `<span class="badge b-amber">${esc(t.name||'取引先なし')}</span>`}</td><td>${esc(t.no||'')}</td><td class="r num">${moneyPlain(t.total)}</td></tr>`).join('')}</tbody></table></div>`:''}
+      <div class="mf-sum"><span>仕訳の入金 <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>${p['銀行明細から付け替え']?`<span>銀行明細から付け替え ${p['銀行明細から付け替え']}</span>`:''}
         ${p['更新']?`<span>MFで直された ${p['更新']}</span>`:''}<span class="muted">変更なし ${p['変更なし']||0}</span>
         ${p['取引先未対応']?`<span class="minus">取引先なし ${p['取引先未対応']}（MF 会計 で取引先を付けてください）</span>`:''}
         ${p['前の期で見送り']?`<span class="muted">前の期で見送り ${p['前の期で見送り']}</span>`:''}</div>
@@ -4505,7 +4509,7 @@ async function mfPanelLoad(){
           <div class="mfp-st">${accSt}</div>
           <div class="mfp-btns">${accBtn}</div>
           <div class="mfp-ops">
-            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('journals')">入金を取り込む（仕訳）</button>
+            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('journals')">売掛金の元帳（請求・入金）</button>
               <button class="btn secondary sm" onclick="openMfImport('pl')">予実の実績（損益）</button>
               <button class="btn secondary sm" onclick="openMfImport('trial-balance')">突合用の試算表</button>
               <button class="btn secondary sm" onclick="openMfImport('transactions')" title="まだ仕訳していない銀行の明細を仮で入れる">銀行明細（仮）</button></div>`:''}
@@ -4514,7 +4518,7 @@ async function mfPanelLoad(){
         </section>
       </div>
       <div class="mfp-auto">
-        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）請求（MF 請求書）→ 入金（MF 会計 の仕訳）→ 自動消込` : '<b class="minus">止めています</b>（押したときだけ）'}
+        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）MF 会計 の元帳（請求・入金）→ 請求書のリンク → 自動消込 → 予実の実績` : '<b class="minus">止めています</b>（押したときだけ）'}
           ${adm?` <a onclick="mfSchedForm()" style="cursor:pointer;">設定を変える</a>`:''}</div>
         <div class="mfp-btns">
           ${mgr?`<button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button>`:''}
@@ -4733,7 +4737,7 @@ function viewArConfirm(){
   const cols=[
     {key:'ck', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'?'':`<input type="checkbox" class="arcfck" value="${attr(r.id)}" onclick="event.stopPropagation()">`},
     {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
-    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}${r.mfId?` <a class="pillbtn" onclick="event.stopPropagation();mfOpenPdf('${attr(r.id)}')">PDF</a> ${mfWebLink(r)}`:''}`},
+    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'||r.source==='mfj'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}${r.notInLedger?' <span class="badge b-amber" title="MF 会計 の元帳に この請求の仕訳がありません">会計に未計上</span>':''}${r.mfId?` <a class="pillbtn" onclick="event.stopPropagation();mfOpenPdf('${attr(r.id)}')">PDF</a> ${mfWebLink(r)}`:''}`},
     {key:'companyId', label:'取引先', raw:r=>arCoName(r.companyId), val:r=>r.companyId? esc(arCoName(r.companyId))
       : `<a class="pillbtn pill-new" onclick="event.stopPropagation();mfSetCompany('${attr(r.id)}')">取引先を選ぶ</a>`},
     {key:'issueDate', label:'請求日', date:true, val:r=>esc(r.issueDate||'')},

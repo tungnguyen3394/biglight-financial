@@ -266,10 +266,13 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
     if (!ex) {
       /* ★ 2026-09-19: 以前 CSV で入れた請求（mfId が csv:…）と 同じもの（取引先・計上月・金額、番号があれば番号も同じ）を
          API が持ってきたら、新しく作らずに その行を API の id に付け替える（同じ請求が2つになって 売掛金が倍にならないように）。 */
-      const twin = invoices.find((i: any) => /^csv/.test(String(i.mfId || '')) && i.status !== '取消' && !taken.has(String(i.id))
-        && String(i.companyId) === m.companyId && ymOf(i.bookMonth) === rec.bookMonth && num(i.total) === rec.total
-        && (!i.no || !rec.no || String(i.no) === String(rec.no)))
-      if (twin && !/^csv/.test(String(b.mfId))) { taken.add(String(twin.id)); out.adopt.push({ b, rec, ex: twin }); continue }
+      /* 相手: 以前 CSV で入れた同じ請求、または MF 会計 の仕訳から入った同じ請求（番号が同じ、無ければ 計上月＋金額）。
+         仕訳から来た請求には 金額を上書きしない（MF 会計 が正）— リンク・PDF・期日・番号 だけ付ける */
+      const sameNo = (i: any) => i.no && rec.no && String(i.no).replace(/\D/g, '') === String(rec.no).replace(/\D/g, '')
+      const twin = invoices.find((i: any) => i.status !== '取消' && !taken.has(String(i.id)) && String(i.companyId) === m.companyId
+        && ((/^csv/.test(String(i.mfId || '')) && ymOf(i.bookMonth) === rec.bookMonth && num(i.total) === rec.total && (!i.no || !rec.no || sameNo(i)))
+          || (i.jExtId && !i.mfId && (sameNo(i) || (ymOf(i.bookMonth) === rec.bookMonth && num(i.total) === rec.total)))))
+      if (twin && !/^csv/.test(String(b.mfId))) { taken.add(String(twin.id)); out.adopt.push({ b, rec, ex: twin, ledger: !!twin.jExtId }); continue }
       const ruleAmt = ruleAmountOf(state, m.companyId)
       const auto = ruleAmt == null || ruleAmt === rec.total
       /* 二重の疑い: 同じ取引先・同じ計上月に この システムで作った（MF 以外の）請求がある */
@@ -323,8 +326,10 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
   }
   for (const a of plan.adopt) {
     const i = byId.get(String(a.ex.id)); if (i == null) continue
-    out.invoices[i] = { ...out.invoices[i], mfId: String(a.b.mfId), source: 'mf', mfUpdatedAt: a.b.updatedAt || '', mfStatus: a.b.mfStatus || '',
-      mfPdfUrl: a.b.pdfUrl || '', mfWebUrl: a.b.webUrl || '', mfPartnerId: a.b.partnerId || '', csvMfId: out.invoices[i].mfId, updatedAt: now, updatedBy: actor }
+    const link = { mfId: String(a.b.mfId), mfUpdatedAt: a.b.updatedAt || '', mfStatus: a.b.mfStatus || '', mfPdfUrl: a.b.pdfUrl || '', mfWebUrl: a.b.webUrl || '', mfPartnerId: a.b.partnerId || '', updatedAt: now, updatedBy: actor }
+    out.invoices[i] = a.ledger
+      ? { ...out.invoices[i], ...link, no: out.invoices[i].no || a.rec.no, dueDate: out.invoices[i].dueDate || a.rec.dueDate, issueDate: out.invoices[i].issueDate || a.rec.issueDate, taxCat: out.invoices[i].taxCat || a.rec.taxCat }
+      : { ...out.invoices[i], ...link, source: 'mf', csvMfId: out.invoices[i].mfId }
   }
   let overPaid = 0
   for (const u of plan.update) {
@@ -872,7 +877,7 @@ export function cleanupBeforeImport(state: any, opts: { since?: string; actor?: 
   const allocated = new Set<string>()
   for (const p of arr(state, 'payments')) if (p.status !== '取消') for (const a of (p.allocations || [])) if (num(a.amount)) allocated.add(String(a.invoiceId))
   const newer = (r: any) => !since || String(r.createdAt || '') >= since
-  const imported = (i: any) => !!i.mfId && (i.source === 'mf' || i.source === 'csv' || /^csv/.test(String(i.mfId)))
+  const imported = (i: any) => (!!i.mfId && (i.source === 'mf' || i.source === 'csv' || /^csv/.test(String(i.mfId)))) || !!i.jExtId
   const live = (i: any) => i.status !== '取消' && !isClosedYm(state, i.bookMonth)
   const invs = arr(state, 'invoices')
 
@@ -1041,4 +1046,70 @@ export function applyJournals(state: any, items: JPay[], opts: { actor?: string 
   const stats = { 新規: plan.create.length, 銀行明細から付け替え: plan.adopt.length, 更新: plan.update.length, 変更なし: plan.same.length,
     取引先未対応: plan.unmapped.length, 前の期で見送り: plan.old.length, 締め済みで見送り: plan.closed.length, 充当の確認: warn }
   return { state: out, plan, stats }
+}
+
+/* ---------- 請求（MF 会計 の仕訳 借方 売掛金 → invoices）----------
+   ★ 2026-09-19 利用者の指示: 請求も MF 会計 の元帳が正。1借方行＝請求1件（鍵 jExtId 'ji:…'）。
+     ・取引先は 入金と同じ（コード → 補助科目／取引先名 → 摘要）
+     ・すでに 請求書 API から入っている同じ請求（番号が同じ、無ければ 計上月＋金額）があれば その行に仕訳を付ける（金額は仕訳）
+     ・請求書 API から入ったのに、取った期間の元帳に無い請求 → 「会計に未計上」（作成中 に戻す ＝ 売掛金・売上に入れない）
+     ・仕訳が直されたら 金額・日付を直す。前の期（importFrom より前）・締めた期は入れない */
+export type JBill = { extId: string; journalId?: string; number?: string; date: string; amount: number; invoiceNo?: string
+  partnerCode?: string; partnerName?: string; subAccount?: string; remark?: string; against?: string; updatedAt?: string }
+const digits = (s: any) => String(s || '').replace(/\D/g, '')
+export function applyJournalBills(state: any, items: JBill[], opts: { actor?: string; from?: string; to?: string } = {}) {
+  const now = new Date().toISOString(), actor = opts.actor || 'mf-sync', stamp = { updatedAt: now, updatedBy: actor }
+  const invs = arr(state, 'invoices').slice()
+  const byExt = new Map<string, number>(invs.map((i: any, k: number) => [String(i.jExtId || ''), k] as [string, number]))
+  const taken = new Set<string>()
+  const stats = { 新規: 0, 請求書APIの請求に付ける: 0, 更新: 0, 変更なし: 0, 取引先未対応: 0, 前の期で見送り: 0, 締め済みで見送り: 0, 会計に未計上: 0 }
+  const created: any[] = []
+  const seenYm = new Set<string>()
+  for (const b of items) {
+    if (!b || !b.extId || !b.date || !num(b.amount)) continue
+    const ym = ymOf(b.date)
+    if (isBeforeImport(state, ym)) { stats.前の期で見送り++; continue }
+    seenYm.add(ym)
+    const m = matchCompanyByTrade(state, b)
+    if (!m.companyId) stats.取引先未対応++
+    const k = byExt.get(String(b.extId))
+    if (k != null) {
+      const ex = invs[k]
+      if (isClosedYm(state, ex.bookMonth)) { stats.締め済みで見送り++; continue }
+      const changed = num(ex.total) !== num(b.amount) || dateOnly(ex.issueDate) !== dateOnly(b.date) || (!ex.companyId && m.companyId) || ex.status === '作成中'
+      if (!changed) { stats.変更なし++; continue }
+      invs[k] = { ...ex, total: num(b.amount), subtotal: ex.subtotal && num(ex.total) ? Math.round(num(ex.subtotal) * num(b.amount) / num(ex.total)) : ex.subtotal,
+        issueDate: dateOnly(b.date), bookMonth: ym, companyId: ex.companyId || m.companyId, status: ex.status === '作成中' ? '確定' : ex.status, notInLedger: false,
+        mfChanges: [...(ex.mfChanges || []), { at: now, by: actor, fields: { total: { before: num(ex.total), after: num(b.amount) } } }].slice(-10), ...stamp }
+      stats.更新++; continue
+    }
+    if (isClosedYm(state, ym)) { stats.締め済みで見送り++; continue }
+    /* 請求書 API から先に入っている同じ請求 */
+    const twin = invs.find((i: any) => !i.jExtId && i.status !== '取消' && !taken.has(String(i.id)) && (i.mfId || i.source === 'mf' || i.source === 'csv')
+      && (!m.companyId || !i.companyId || String(i.companyId) === m.companyId)
+      && ((b.invoiceNo && digits(i.no) && digits(i.no) === digits(b.invoiceNo)) || (ymOf(i.bookMonth) === ym && num(i.total) === num(b.amount))))
+    if (twin) {
+      taken.add(String(twin.id)); const k2 = invs.indexOf(twin)
+      invs[k2] = { ...twin, jExtId: String(b.extId), mfJournalId: b.journalId || '', mfJournalNo: b.number || '', total: num(b.amount), companyId: twin.companyId || m.companyId,
+        status: twin.status === '作成中' ? '確定' : twin.status, confirmStatus: '確定', confirmedAt: twin.confirmedAt || now, confirmedBy: twin.confirmedBy || actor, notInLedger: false, ...stamp }
+      stats.請求書APIの請求に付ける++; continue
+    }
+    const co = arr(state, 'companies').find((c: any) => String(c.id) === m.companyId)
+    const taxCat = co && TAX_RATE[co.taxCat] != null ? co.taxCat : '課税10%'
+    const rec = { id: newId('INV'), companyId: m.companyId || '', bookMonth: ym, issueDate: dateOnly(b.date), dueDate: '', total: num(b.amount),
+      subtotal: Math.round(num(b.amount) / (1 + (TAX_RATE[taxCat] || 0))), no: b.invoiceNo || '', taxCat, items: [], status: '確定', locked: true,
+      source: 'mfj', jExtId: String(b.extId), mfJournalId: b.journalId || '', mfJournalNo: b.number || '', mfId: '', mfPartnerId: '', mfTradeName: b.partnerName || b.subAccount || '',
+      note: b.remark || '', confirmStatus: '確定', confirmedAt: now, confirmedBy: actor, createdAt: now, createdBy: actor, ...stamp }
+    invs.push(rec); byExt.set(rec.jExtId, invs.length - 1); created.push(rec); stats.新規++
+  }
+  /* 取った期間の元帳に無い 請求書 API の請求 → 会計に未計上 */
+  const lo = String(opts.from || '').slice(0, 7), hi = String(opts.to || '').slice(0, 7)
+  if (lo && hi) for (let k = 0; k < invs.length; k++) {
+    const i = invs[k]
+    if (i.jExtId || !i.mfId || /^csv/.test(String(i.mfId)) || i.status === '取消' || taken.has(String(i.id))) continue
+    const ym = ymOf(i.bookMonth); if (ym < lo || ym > hi || !seenYm.has(ym) || isClosedYm(state, ym)) continue
+    if (i.notInLedger) continue
+    invs[k] = { ...i, notInLedger: true, ledgerStatusBefore: i.status, status: '作成中', ...stamp }; stats.会計に未計上++
+  }
+  return { state: { ...state, invoices: invs }, stats, created }
 }

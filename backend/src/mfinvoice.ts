@@ -666,11 +666,32 @@ export function journalToPays(j: any): JournalPay[] {
 /** MF の ID は もともと %2B / %3D のように URL エンコード済みで返ってくる。URLSearchParams に入れると二重にエンコードされ
     「invalid_query_parameter_value: account_id」になる（2026-09-19 本番で発覚）。一度ほどいてから入れる。 */
 export const rawId = (id: any) => { const t = String(id || ''); try { return decodeURIComponent(t) } catch { return t } }
-export async function fetchJournalPays(from: string, to: string, d: MfDeps): Promise<JournalPay[]> {
+/** 仕訳の 借方 売掛金 ＝ 請求（売上）1件。摘要の「No.327」が MF 請求書 の番号（リンクは 請求書 API の同じ番号から付ける）。
+    ★ 2026-09-19 利用者の指示: 請求も MF 会計 の元帳から取る（請求書 API は 番号→PDF・リンク の索引にだけ使う）。 */
+export type JournalBill = { extId: string; journalId: string; number: string; date: string; amount: number; invoiceNo: string
+  partnerCode: string; partnerName: string; subAccount: string; remark: string; against: string; updatedAt: string; enteredBy: string }
+export function journalToBills(j: any): JournalBill[] {
+  const out: JournalBill[] = []
+  const branches: any[] = Array.isArray(j?.branches) ? j.branches : []
+  const against = branches.map((b: any) => String(b?.creditor?.account_name || '')).filter(Boolean).join('・')
+  branches.forEach((b: any, idx: number) => {
+    const dr = b?.debitor
+    if (!dr || !/売掛金/.test(String(dr.account_name || ''))) return
+    const v = money(dr.value); if (!v) return
+    const remark = String(b.remark || j.memo || '')
+    const m = remark.match(/No\.?\s*([0-9]+)/i)
+    out.push({ extId: 'ji:' + String(j.id) + ':' + idx, journalId: String(j.id), number: String(j.number ?? ''), date: dateOnly(j.transaction_date), amount: v,
+      invoiceNo: m ? m[1] : '', partnerCode: String(dr.trade_partner_code ?? ''), partnerName: String(dr.trade_partner_name ?? ''),
+      subAccount: String(dr.sub_account_name ?? ''), remark, against, updatedAt: String(j.update_time ?? ''), enteredBy: String(j.entered_by ?? '') })
+  })
+  return out
+}
+export async function fetchJournalPays(from: string, to: string, d: MfDeps): Promise<JournalPay[]> { return (await fetchJournalLines(from, to, d)).pays }
+export async function fetchJournalLines(from: string, to: string, d: MfDeps): Promise<{ pays: JournalPay[]; bills: JournalBill[] }> {
   const c = mfConfig(d.env)
   const token = await accessToken(d)
   let acct = await arAccountId(d)
-  const out: JournalPay[] = []
+  const out: JournalPay[] = [], bills: JournalBill[] = []
   const seen = new Set<string>()
   for (const [s0, e0] of monthChunks(from, to)) {
     for (let page = 1; page <= 500; page++) {
@@ -685,9 +706,12 @@ export async function fetchJournalPays(from: string, to: string, d: MfDeps): Pro
         q.delete('account_id'); j = await getJson(`${c.acctBase}/journals?${q}`, token, d, '仕訳')
       }
       const list = listOf(j, 'journals', 'items')
-      for (const x of list) for (const p of journalToPays(x)) { if (seen.has(p.extId)) continue; seen.add(p.extId); out.push(p) }
+      for (const x of list) {
+        for (const p of journalToPays(x)) { if (seen.has(p.extId)) continue; seen.add(p.extId); out.push(p) }
+        for (const b of journalToBills(x)) { if (seen.has(b.extId)) continue; seen.add(b.extId); bills.push(b) }
+      }
       if (!list.length || !mfHasNextPage(j, page)) break
     }
   }
-  return out
+  return { pays: out, bills }
 }

@@ -648,15 +648,21 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
     }
     if (kind === 'journals') {
       /* MF 会計 の 仕訳（売掛金 の貸方）＝ 取引先つきの入金。CSV は無い（正は MF） */
-      const items = await MF.fetchJournalPays(String(args.from), String(args.to), mfDeps)
-      const plan = MFS.planJournals(await loadState(), items)
+      const lines = await MF.fetchJournalLines(String(args.from), String(args.to), mfDeps)
+      const items = lines.pays
+      const st0 = await loadState()
+      const plan = MFS.planJournals(st0, items)
+      const billsDry = MFS.applyJournalBills(st0, lines.bills, { actor: me.email, from: String(args.from), to: String(args.to) })
       const slim = { 新規: plan.create.length, 銀行明細から付け替え: plan.adopt.length, 更新: plan.update.length, 変更なし: plan.same.length, 取引先未対応: plan.unmapped.length,
-        前の期で見送り: plan.old.length, 締め済みで見送り: plan.closed.length,
-        items: plan.create.concat(plan.adopt).slice(0, 120).map((x: any) => ({ ...x.j, companyId: x.companyId, adopt: !!x.ex })) }
-      if (dry) return { ok: true, dryRun: true, plan: slim, count: items.length }
-      const out = await mutateState(me.email, 'mf-journals', (st) => { const r = MFS.applyJournals(st, items, { actor: me.email }); return { state: r.state, stats: r.stats } })
+        前の期で見送り: plan.old.length, 締め済みで見送り: plan.closed.length, 請求: billsDry.stats,
+        items: plan.create.concat(plan.adopt).slice(0, 120).map((x: any) => ({ ...x.j, companyId: x.companyId, adopt: !!x.ex })),
+        billItems: billsDry.created.slice(0, 120).map((x: any) => ({ date: x.issueDate, companyId: x.companyId, name: x.mfTradeName, no: x.no, total: x.total })) }
+      if (dry) return { ok: true, dryRun: true, plan: slim, count: items.length + lines.bills.length }
+      const out = await mutateState(me.email, 'mf-journals', (st) => {
+        const b = MFS.applyJournalBills(st, lines.bills, { actor: me.email, from: String(args.from), to: String(args.to) })
+        const r = MFS.applyJournals(b.state, items, { actor: me.email }); return { state: r.state, stats: { ...r.stats, 請求: b.stats } } })
       await mfRemember('ok', out.stats)
-      return { ok: true, plan: slim, stats: out.stats, count: items.length }
+      return { ok: true, plan: slim, stats: out.stats, count: items.length + lines.bills.length }
     }
     if (kind === 'pl') {
       /* 予実の実績: MF 会計 の試算表（損益）を 月ごとに。from/to は日付でも月でもよい */

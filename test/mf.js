@@ -184,6 +184,9 @@ function makeDeps(opts = {}) {
     const jp = await MF.fetchJournalPays('2026-09-01', '2026-09-30', t.deps);
     eq('仕訳の 売掛金（貸方）だけが入金になる（手数料つき・売上の仕訳は入らない）',
       jp.map(x => [x.extId, x.date, x.amount, x.fee, x.partnerName, x.partnerCode, x.subAccount, x.remark]), [['j:J1:0', '2026-09-10', 110000, 660, '株式会社高山', 'T-1', '', '振込'], ['j:J2:0', '2026-09-11', 5000, 0, '', '', 'ライクスタカギ', '振込']]);
+    const jl = await MF.fetchJournalLines('2026-09-01', '2026-09-30', t.deps);
+    eq('借方 売掛金 は請求（摘要の No. が請求書番号）', jl.bills.map(x => [x.extId, x.amount, x.invoiceNo, x.against]), [['ji:J3:0', 100, '', '売上高']]);
+    eq('journalToBills: 摘要から No. を読む', MF.journalToBills({ id: 'x', number: 5, transaction_date: '2026-08-16', branches: [{ remark: 'No.327 株式会社ゴトウ樹脂・2025年８月度のご請求書', debitor: { account_name: '売掛金', value: '82500', sub_account_name: '株式会社ゴトウ樹脂' }, creditor: { account_name: '売上高', value: '82500' } }] }).map(b => [b.invoiceNo, b.subAccount, b.amount]), [['327', '株式会社ゴトウ樹脂', 82500]]);
     const jq = new URL(t.calls.filter(c => c.url.includes('/journals')).pop().url).searchParams;
     eq('仕訳は 売掛金 の科目IDで絞り（MF の ID は二重にエンコードしない）、期間つき', [jq.get('account_id'), jq.get('start_date'), jq.get('end_date')], ['OwMh+3QQ==', '2026-09-01', '2026-09-30']);
     const tb = await MF.fetchTrialBalance('2026-09', t.deps);

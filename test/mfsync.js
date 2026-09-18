@@ -288,6 +288,31 @@ console.log('\n― MF 会計 の仕訳 → 入金（2026-09-19: MF が正）―'
   eq('金額が一致しなくても 古い順に充てる（残りは次へ）', [rc.results[0].matchType, rc.results[0].allocations], ['fifo', [{ invoiceId: 'A', amount: 50000 }, { invoiceId: 'B', amount: 50000 }]]);
 }
 
+console.log('\n― MF 会計 の仕訳 → 請求（借方 売掛金。2026-09-19: 請求も元帳が正）―');
+{
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  const B = (o) => Object.assign({ extId: 'ji:J9:0', journalId: 'J9', number: '103', date: '2026-08-16', amount: 82500, invoiceNo: '327', subAccount: '株式会社高山', remark: 'No.327 株式会社高山・2026年8月度のご請求書', against: '売上高' }, o);
+  const r = S.applyJournalBills(st, [B({}), B({ extId: 'ji:J8:0', subAccount: '知らない会社', invoiceNo: '', amount: 1000 }), B({ extId: 'ji:J7:0', date: '2026-07-01' })], { from: '2026-08-01', to: '2026-09-30' });
+  const iv = r.state.invoices;
+  eq('借方 売掛金 が請求になる（補助科目→取引先・番号・確定）。取引先なしも入る。前の期は入らない',
+    [iv.length, iv[0].companyId, iv[0].no, iv[0].total, iv[0].status, iv[0].confirmStatus, iv[0].source, iv[1].companyId, r.stats['前の期で見送り']],
+    [2, 'C1', '327', 82500, '確定', '確定', 'mfj', '', 1]);
+  eq('もう一度流しても増えない', S.applyJournalBills(r.state, [B({})], {}).state.invoices.length, 2);
+  eq('MF で直したら金額を直す', S.applyJournalBills(r.state, [B({ amount: 99000 })], {}).state.invoices[0].total, 99000);
+  /* 請求書 API から先に入っている同じ請求 → 付ける（リンクを失わない）。元帳に無い API の請求 → 会計に未計上 */
+  let st2 = baseState(); st2.settings.mfImportFrom = '2026-08';
+  st2 = S.applyBillings(st2, [bill({ mfId: 'm327', number: '327', partnerId: 'p1', total: 82500 }), bill({ mfId: 'm999', number: '999', partnerId: 'p1', total: 5000 })]).state;
+  const r2 = S.applyJournalBills(st2, [B({})], { from: '2026-08-01', to: '2026-09-30' });
+  const a = r2.state.invoices.find(i => i.mfId === 'm327'), g = r2.state.invoices.find(i => i.mfId === 'm999');
+  eq('番号が同じ API の請求に 仕訳を付ける（1件のまま・PDF の場所も残る）', [r2.state.invoices.length, a.jExtId, a.mfId, r2.stats['請求書APIの請求に付ける']], [2, 'ji:J9:0', 'm327', 1]);
+  eq('元帳に無い API の請求は 会計に未計上（作成中＝売掛金に入れない）', [g.notInLedger, g.status, r2.stats['会計に未計上']], [true, '作成中', 1]);
+  /* 逆順: 仕訳が先、あとから 請求書 API → 同じ行にリンクを付け、金額は仕訳のまま */
+  const st3 = baseState(); st3.settings.mfImportFrom = '2026-08';
+  const j3 = S.applyJournalBills(st3, [B({})], {}).state;
+  const r3 = S.applyBillings(j3, [bill({ mfId: 'm327', number: '327', partnerId: 'p1', total: 82499, pdfUrl: 'https://x/a.pdf' })]);
+  eq('あとから来た 請求書 API は 同じ行にリンクを付けるだけ（金額は元帳）', [r3.state.invoices.length, r3.state.invoices[0].mfId, r3.state.invoices[0].mfPdfUrl, r3.state.invoices[0].total, r3.stats['CSVの請求と同じ']], [1, 'm327', 'https://x/a.pdf', 82500, 1]);
+}
+
 console.log('\n― 入金の二重取り込み（指紋）―');
 {
   const st = baseState();
