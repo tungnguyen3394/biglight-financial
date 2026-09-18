@@ -201,3 +201,21 @@ export function billDetail(st: any, bill: any) {
     payouts: outs, note: bill.note || null, updated_at: bill.updatedAt || null,
   }
 }
+
+/* ============================================================================
+   経理（会計事務所）へ渡すための2本 — 2026-09-18
+   ・settlementReport … どの入金を どの請求書に充てたか（MF 会計で仕訳を入れる材料）
+   ・reconciliationReport … この システムの売掛残高 ⇔ 試算表の売掛金
+   どちらも読むだけ。仕訳は人が MF 会計で入れます。
+   ========================================================================== */
+import * as MFS from '../mfsync'
+
+export function settlementReport(st: any, month: string) {
+  const rows = MFS.settlementRows(st, month)
+  const head = rows[0]
+  return { month, columns: head, count: rows.length - 1,
+    rows: rows.slice(1).map((r: any[]) => Object.fromEntries(head.map((h: string, k: number) => [h, r[k]]))) }
+}
+export function reconciliationReport(st: any, month: string) {
+  return MFS.reconciliation(st, month, MFS.tbArAmount(st, month))
+}

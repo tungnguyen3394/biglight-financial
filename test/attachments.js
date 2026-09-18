@@ -216,7 +216,7 @@ STC.invalidateStateCache && STC.invalidateStateCache();
     const html = fs.readFileSync(ROOT + '/web/index.html', 'utf8');
     const s0 = html.lastIndexOf('<script>'), e0 = html.lastIndexOf('</script>');
     let code = html.slice(s0 + 8, e0).replace(/\/\* ============ 起動 ============ \*\/[\s\S]*$/, '');
-    code += '\n;globalThis.__x={ setDB:v=>{DB=v}, docNet, docTaxCat, mfToInvoice, invTaxBadge, attMissing, setCounts:v=>{ATT_COUNTS=v} };';
+    code += '\n;globalThis.__x={ setDB:v=>{DB=v}, docNet, docTaxCat, invTaxBadge, attMissing, setCounts:v=>{ATT_COUNTS=v} };';
     const noop = () => {};
     const el = { innerHTML: '', style: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, querySelector: () => null,
       querySelectorAll: () => [], addEventListener: noop, appendChild: noop, focus: noop, dataset: {}, value: '', setAttribute: noop, remove: noop };
@@ -236,7 +236,10 @@ STC.invalidateStateCache && STC.invalidateStateCache();
     eq('backend も同じ税区分', state.invoices.map(i => FIN.docTaxCat(i, state)), state.invoices.map(i => W.docTaxCat(i)));
     eq('明細のある請求は 明細の税抜（税区分は見ない）', W.docNet({ companyId: 'C2', total: 999, items: [{ amount: 700 }] }), 700);
 
-    const mf = (x, cid) => { const r = W.mfToInvoice(Object.assign({ mfId: 'M', salesDate: '2026-08-31', billingDate: '2026-08-31' }, x), cid); return [r.taxCat, r.subtotal]; };
+    /* ★ 2026-09-18: 取り込みの規則は サーバー（backend/src/mfsync.ts）に移しました。
+       画面もサーバーも この1本を通るので、CSV でも API でも 毎朝の自動同期でも 同じ税区分になります。 */
+    const MFS = loadTs(ROOT + '/backend/src/mfsync.ts');
+    const mf = (x, cid) => { const r = MFS.billingToRec(state, Object.assign({ mfId: 'M', salesDate: '2026-08-31', billingDate: '2026-08-31' }, x), cid); return [r.taxCat, r.subtotal]; };
     eq('MF: 税込＝税抜 → 対象外', mf({ total: 50000, subtotal: 50000 }, 'C1'), ['対象外', 50000]);
     eq('MF: 税込＝税抜・会社が非課税 → 非課税', mf({ total: 50000, subtotal: 50000 }, 'C2'), ['非課税', 50000]);
     eq('MF: 10% → 課税10%', mf({ total: 110000, subtotal: 100000 }, 'C1'), ['課税10%', 100000]);

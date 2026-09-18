@@ -36,6 +36,18 @@ function makeDeps(opts = {}) {
       const n = calls.filter(c => c.url.startsWith(MF.MF_TOKEN_URL)).length;
       return { ok: true, status: 200, json: async () => ({ access_token: 'AT' + n, refresh_token: 'RT' + n, expires_in: 3600 }) };
     }
+    if (u.pathname.endsWith('/connected_accounts')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: 'acc1', name: '【法人】あいち銀行', connected_sub_accounts: [{ id: 'sub1', name: '山田支店 普通', last_synced_at: '2026-09-14T06:00:00+09:00' }] }] }) };
+    }
+    if (u.pathname.endsWith('/transactions')) {
+      return { ok: true, status: 200, json: async () => ({ data: [
+        { id: 'tx1', transaction_date: '2026-09-10', content: 'ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ', value: '110000', side: 'INCOME' },
+        { id: 'tx2', transaction_date: '2026-09-11', content: 'ﾃﾞﾝｷﾀﾞｲ', value: '-8000', side: 'EXPENSE' },
+      ], pagination: { total_count: 2, total_pages: 1, per_page: 100, current_page: 1 } }) };
+    }
+    if (u.pathname.includes('/reports/trial_balance')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ account_code: '1130', account_name: '売掛金', closing_balance: '264000' }] }) };
+    }
     if (u.pathname.endsWith('/billings')) {
       const page = Number(u.searchParams.get('page'));
       const mk = i => ({ id: 'b' + i, billing_number: 'N-' + i, partner_id: 'p1', partner_name: '株式会社テスト', title: 't',
@@ -92,16 +104,43 @@ function makeDeps(opts = {}) {
       [110000, 100000, 10000, '2026-08-31', '2026-09-30', '株式会社テスト']);
   }
 
+  console.log('\n― 下書きを取り込まない（status で絞る）―');
+  { const t = makeDeps();
+    await MF.exchangeCode('good', 'a', t.deps);
+    await MF.fetchBillings('2026-08-01', '2026-09-14', t.deps);
+    const statuses = t.calls.filter(c => c.url.includes('/billings')).map(c => new URL(c.url).searchParams.get('status'));
+    eq('ロック中と未ロックだけを取りに行く（下書きは取らない）', [...new Set(statuses)], ['ロック中', '未ロック']);
+    const items = await MF.fetchBillings('2026-08-01', '2026-09-14', t.deps, { statuses: [] });
+    eq('status を使わない指定もできる', new URL(t.calls[t.calls.length - 1].url).searchParams.get('status'), null);
+    eq('同じ請求書を2回数えない（id で重複除去）', items.length, 3);
+  }
+
+  console.log('\n― 会計（入出金明細・試算表）―');
+  { const t = makeDeps({ acct: true });
+    await MF.exchangeCode('good', 'a', t.deps);
+    const accs = await MF.fetchConnectedAccounts(t.deps);
+    eq('連携口座と その中の口座を返す', [accs[0].name, accs[0].subAccounts[0].id], ['【法人】あいち銀行', 'sub1']);
+    const txns = await MF.fetchTransactions('2026-09-01', '2026-09-14', 'sub1', t.deps);
+    eq('入金だけ・形をそろえて返す', txns.map(x => [x.extId, x.date, x.amount, x.payerName]), [['tx1', '2026-09-10', 110000, 'ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ']]);
+    const q = new URL(t.calls.find(c => c.url.includes('/transactions')).url).searchParams;
+    eq('口座と期間と入金の指定', [q.get('connected_sub_account_id'), q.get('side'), q.get('start_date')], ['sub1', 'INCOME', '2026-09-01']);
+    const tb = await MF.fetchTrialBalance('2026-09', t.deps);
+    eq('試算表は 科目と残高', tb, [{ code: '1130', name: '売掛金', amount: 264000 }]);
+  }
+
   console.log('\n― 画面からの口（権限） ―');
   { const t = makeDeps();
     const who = { current: { email: 'staff@biglight.jp', role: 'Staff' } };
     const app = express(); app.use(express.json());
-    app.use(MF.mfRouter({ ...t.deps, verify: async () => who.current }));
+    app.use(MF.mfRouter({ ...t.deps, verify: async () => who.current,
+      sync: async (kind, args, me) => ({ kind, args, by: me.email }) }));
     const srv = await new Promise(r => { const s = app.listen(0, () => r(s)) });
     const base = `http://127.0.0.1:${srv.address().port}`;
     const call = async (m, u, body) => { const r = await fetch(base + u, { method: m, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' }); return { status: r.status, loc: r.headers.get('location'), j: await r.json().catch(() => ({})) } };
 
-    eq('状態は誰でも見られる（秘密は返さない）', (await call('GET', '/mf/status')).j, { configured: true, connected: false, connectedBy: '', connectedAt: '', redirectUri: 'https://finance.example.jp/api/mf/callback' });
+    const st0 = (await call('GET', '/mf/status')).j;
+    eq('状態は誰でも見られる', [st0.configured, st0.connected, st0.redirectUri], [true, false, 'https://finance.example.jp/api/mf/callback']);
+    eq('状態に秘密（トークン）は入れない', JSON.stringify(st0).includes('AT1') || JSON.stringify(st0).includes('sec'), false);
     eq('スタッフは接続できない', (await call('POST', '/mf/connect')).status, 403);
     eq('スタッフは取り込めない', (await call('POST', '/mf/billings', { from: '2026-08-01', to: '2026-09-01' })).status, 403);
     who.current = { email: 'boss@biglight.jp', role: 'Admin' };
@@ -120,6 +159,14 @@ function makeDeps(opts = {}) {
     who.current = { email: 'mgr@biglight.jp', role: 'Manager' };
     eq('マネージャーも取れる', (await call('POST', '/mf/billings', { from: '2026-08-01', to: '2026-09-14' })).status, 200);
     eq('マネージャーは切断できない', (await call('POST', '/mf/disconnect')).status, 403);
+    /* 取り込みは index.ts の sync() に渡すだけ（ここでは受け渡しだけ確かめる） */
+    eq('取り込みの口は sync に渡す', (await call('POST', '/mf/sync/billings', { from: '2026-08-01', to: '2026-09-14', dryRun: true })).j,
+      { kind: 'billings', args: { from: '2026-08-01', to: '2026-09-14', dryRun: true }, by: 'mgr@biglight.jp' });
+    eq('CSV だけでも受け付ける（期間なし）', (await call('POST', '/mf/sync/billings', { csv: 'a,b' })).status, 200);
+    eq('期間も CSV も無ければ 400', (await call('POST', '/mf/sync/billings', {})).status, 400);
+    eq('試算表は対象月が要る', (await call('POST', '/mf/sync/trial-balance', {})).status, 400);
+    who.current = { email: 'staff@biglight.jp', role: 'Staff' };
+    eq('スタッフは取り込みの口も使えない', (await call('POST', '/mf/sync/billings', { csv: 'a,b' })).status, 403);
     srv.close();
   }
   { const t = makeDeps({ env: {} });

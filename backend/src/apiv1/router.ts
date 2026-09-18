@@ -200,6 +200,16 @@ export function apiV1Router(d: Deps): Router {
     const st = await loadStateCached(pool)
     res.json(R.payablesReport(st, { overdueOnly: boolQ(req.query.overdue_only), dueWithinDays: req.query.due_within_days == null ? undefined : Number(req.query.due_within_days), companyId: safeId(req.query.company_id) || undefined, limit: Number(req.query.limit) || 100 }))
   })
+  r.get('/v1/reports/settlement', need('invoices.read'), async (req: any, res: any) => {
+    const month = String(req.query.month || '')
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(month)) return fail(res, 400, 'bad-month', 'month は YYYY-MM で')
+    res.json(R.settlementReport(await loadStateCached(pool), month))
+  })
+  r.get('/v1/reports/reconciliation', need('invoices.read'), async (req: any, res: any) => {
+    const month = String(req.query.month || '')
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(month)) return fail(res, 400, 'bad-month', 'month は YYYY-MM で')
+    res.json(R.reconciliationReport(await loadStateCached(pool), month))
+  })
   r.get('/v1/reports/cashflow', need('yojitsu.read'), async (req: any, res: any) => {
     const st = await loadStateCached(pool)
     const mode = String(req.query.mode || 'week') === 'month' ? 'month' : 'week'

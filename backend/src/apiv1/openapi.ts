@@ -95,6 +95,20 @@ export function buildOpenApi(publicBase: string) {
           responses: { 200: { description: 'ok' } },
         },
       },
+      '/reports/settlement': {
+        get: {
+          summary: '消込一覧（入金 × 請求書）— 経理が MF 会計で仕訳を入れるための材料',
+          parameters: [{ name: 'month', in: 'query', required: true, schema: { type: 'string', example: '2026-09' } }],
+          responses: { 200: { description: 'ok' } },
+        },
+      },
+      '/reports/reconciliation': {
+        get: {
+          summary: '突合（この システムの売掛残高 ⇔ 試算表の売掛金）',
+          parameters: [{ name: 'month', in: 'query', required: true, schema: { type: 'string', example: '2026-09' } }],
+          responses: { 200: { description: 'ok' } },
+        },
+      },
       '/reports/cashflow': {
         get: {
           summary: '資金繰り（入金予定 − 支払予定）  スコープ: yojitsu.read',

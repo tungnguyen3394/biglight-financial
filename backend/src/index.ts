@@ -16,7 +16,9 @@ import { mergeCollection, isRecordArray, isSuspiciousShrink, diffRecord } from '
 import { checkCollections, checkMoneyRules, permOf, billsNeedingFile, checkClosedPeriods } from './authz'
 import { initFiles, filesRouter, attachmentCounts } from './files'
 import { loadStateCached } from './statecache'
+import * as MF from './mfinvoice'
 import { mfRouter } from './mfinvoice'
+import * as MFS from './mfsync'
 /* CSV_MAP_WORKER / CSV_MAP_ASSIGN は crmsync.ts に残してあります（人を扱う必要が戻ったら
    この import と下の map の分岐を足すだけ。公式 §16「使わなくなってもコードは消さない」）。 */
 import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY } from './crmsync'
@@ -538,14 +540,156 @@ app.use(filesRouter({
 
 /* ===================== Money Forward 請求書（読むだけ・mfinvoice.ts） =====================
    MF_CLIENT_ID / MF_CLIENT_SECRET が無ければ /mf/status が configured:false を返すだけ。 */
-app.use(mfRouter({
+const mfAudit = (email: string, action: string, detail: any) =>
+  pool.query('INSERT INTO audit_log(actor_email,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5::jsonb)',
+    [email, action, 'moneyforward', '', JSON.stringify(detail || {})]).then(() => {}).catch((e: any) => console.error('[mf] audit:', e?.message))
+const mfDeps = {
   fetch: (...a: Parameters<typeof fetch>) => fetch(...a),
   cfgGet, cfgSet: (k: string, v: string) => cfgSet(k, v),
-  verify: requireActive,
-  audit: (email: string, action: string, detail: any) =>
-    pool.query('INSERT INTO audit_log(actor_email,action,entity,entity_id,detail) VALUES($1,$2,$3,$4,$5::jsonb)',
-      [email, action, 'moneyforward', '', JSON.stringify(detail || {})]).then(() => {}).catch((e: any) => console.error('[mf] audit:', e?.message)),
-}))
+}
+const loadState = async () => (await pool.query('SELECT data FROM app_state WHERE id=1')).rows[0]?.data || {}
+const mfRemember = (result: string, stats: any, error = '') =>
+  cfgSet('mf_last', JSON.stringify({ at: new Date().toISOString(), result, stats, error })).catch(() => {})
+
+/** state を安全に書き換える共通の道（CRM同期と同じ作り）。
+    1行ロック → 変わった分だけ監査ログ → 履歴 → SSE。取り込みはすべてここを通る。 */
+async function mutateState(actor: string, reason: string, fn: (state: any) => { state: any; stats?: any }) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const r = await client.query('SELECT data FROM app_state WHERE id=1 FOR UPDATE')
+    const base = r.rows[0]?.data || {}
+    const { state, stats } = fn(base)
+    const changed: any = {}
+    for (const k of Object.keys(state)) {
+      if (!Array.isArray(state[k])) continue
+      const old = new Map((Array.isArray(base[k]) ? base[k] : []).map((x: any) => [String(x?.id), JSON.stringify(x)]))
+      const list = state[k].filter((x: any) => x && JSON.stringify(x) !== old.get(String(x.id)))
+      if (list.length) changed[k] = list
+    }
+    if (!Object.keys(changed).length) { await client.query('ROLLBACK'); return { ok: true, stats, changed: {} } }
+    await client.query('UPDATE app_state SET data=$1::jsonb, updated_at=now() WHERE id=1', [JSON.stringify(state)])
+    await client.query('COMMIT')
+    bumpRevs(Object.keys(changed))
+    saveHistory(state, actor, reason)
+    writeAudit(actor, reason, base, changed, {})
+    sseBroadcast(actor)
+    return { ok: true, stats, changed: Object.fromEntries(Object.entries(changed).map(([k, v]: any) => [k, v.length])) }
+  } catch (e) {
+    try { await client.query('ROLLBACK') } catch { /* ignore */ }
+    throw e
+  } finally { client.release() }
+}
+
+const slimPlan = (p: any) => ({
+  新規: p.create.length, 更新: p.update.length, 変更なし: p.same.length, MF差異: p.diff.length,
+  下書き除外: p.drafts, 締め済みで見送り: p.closed.length, 二重の疑い: p.dupWarn.length,
+  unmapped: p.unmapped,
+  createSample: p.create.slice(0, 80).map((x: any) => ({ ...x.rec, mfId: x.b.mfId, partnerName: x.b.partnerName, auto: x.auto })),
+  diffSample: p.diff.slice(0, 80).map((x: any) => ({ id: x.ex.id, no: x.ex.no, companyId: x.ex.companyId, changed: x.changed,
+    mf: { total: x.rec.total, dueDate: x.rec.dueDate, bookMonth: x.rec.bookMonth }, finance: { total: x.ex.total, dueDate: x.ex.dueDate, bookMonth: x.ex.bookMonth } })),
+  dupSample: p.dupWarn.slice(0, 30).map((x: any) => ({ companyId: x.rec.companyId, bookMonth: x.rec.bookMonth, total: x.rec.total })),
+})
+const slimMatch = (r: any) => ({
+  自動消込: r.matched.length, 要確認: r.none.length, 振込名義が未対応: r.unknownPayer.length,
+  matched: r.matched.slice(0, 200), none: r.none.slice(0, 200), unknownPayer: r.unknownPayer.slice(0, 200),
+})
+
+/** 取り込みの本体。API から取るか CSV を読むかだけが違い、そのあとの規則は mfsync.ts で共通。 */
+async function mfSync(kind: string, args: any, me: { email: string; role: string }): Promise<any> {
+  const dry = !!args?.dryRun
+  const csvText = typeof args?.csv === 'string' ? args.csv : ''
+  try {
+    if (kind === 'billings') {
+      let items: any[]
+      if (csvText) { const p = MFS.parseBillingCsv(csvText); if (p.error) throw new Error(p.error); items = p.items! }
+      else items = await MF.fetchBillings(String(args.from), String(args.to), mfDeps)
+      const plan = MFS.planBillings(await loadState(), items, args?.map)
+      if (dry) return { ok: true, dryRun: true, plan: slimPlan(plan), count: items.length }
+      const out = await mutateState(me.email, 'mf-billings', (st) => {
+        const r = MFS.applyBillings(st, items, { map: args?.map, actor: me.email, source: csvText ? 'csv' : 'api' })
+        return { state: r.state, stats: r.stats }
+      })
+      await mfRemember('ok', out.stats)
+      return { ok: true, plan: slimPlan(plan), stats: out.stats, count: items.length }
+    }
+    if (kind === 'transactions') {
+      let items: any[]
+      if (csvText) { const p = MFS.parseBankCsv(csvText); if (p.error) throw new Error(p.error); items = p.items! }
+      else items = await MF.fetchTransactions(String(args.from), String(args.to), (await cfgGet('mf_bank_account')) || '', mfDeps)
+      const plan = MFS.planTransactions(await loadState(), items)
+      if (dry) return { ok: true, dryRun: true, plan: { 新規: plan.create.length, 取込済み: plan.dup.length, 締め済みで見送り: plan.closed.length, items: plan.create.slice(0, 80) }, count: items.length }
+      const out = await mutateState(me.email, 'mf-transactions', (st) => {
+        const r = MFS.applyTransactions(st, items, { actor: me.email, source: csvText ? 'csv' : 'mf' })
+        return { state: r.state, stats: r.stats }
+      })
+      await mfRemember('ok', out.stats)
+      return { ok: true, stats: out.stats, count: items.length }
+    }
+    if (kind === 'reconcile') {
+      const res = MFS.reconcile(await loadState(), { paymentIds: args?.paymentIds })
+      if (dry) return { ok: true, dryRun: true, ...slimMatch(res) }
+      const out = await mutateState(me.email, 'mf-reconcile', (st) => {
+        const r = MFS.applyReconcile(st, MFS.reconcile(st, { paymentIds: args?.paymentIds }), { actor: me.email })
+        return { state: r.state, stats: r.stats }
+      })
+      return { ok: true, stats: out.stats, ...slimMatch(res) }
+    }
+    if (kind === 'trial-balance') {
+      const month = String(args.month)
+      let items: any[]
+      if (csvText) { const p = MFS.parseTrialBalanceCsv(csvText); if (p.error) throw new Error(p.error); items = p.items! }
+      else items = await MF.fetchTrialBalance(month, mfDeps, args?.kind === 'pl' ? 'pl' : 'bs')
+      if (dry) return { ok: true, dryRun: true, count: items.length, items: items.slice(0, 80) }
+      const out = await mutateState(me.email, 'mf-trial-balance', (st) => {
+        const r = MFS.applyTrialBalance(st, month, items, { actor: me.email, source: csvText ? 'csv' : 'mf' })
+        return { state: r.state, stats: r.stats }
+      })
+      return { ok: true, stats: out.stats, count: items.length }
+    }
+    if (kind === 'run') {
+      /* 毎朝の自動同期: 請求書 → 入出金明細 → 自動消込 */
+      const from = args?.from || new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10)
+      const to = args?.to || new Date().toISOString().slice(0, 10)
+      const stats: any = {}
+      stats.billings = (await mfSync('billings', { from, to }, me)).stats
+      try { stats.transactions = (await mfSync('transactions', { from, to }, me)).stats }
+      catch (e: any) { stats.transactions = { エラー: String(e?.message || e) } }
+      stats.reconcile = (await mfSync('reconcile', {}, me)).stats
+      await mfRemember('ok', stats)
+      return { ok: true, stats }
+    }
+    throw new Error('unknown kind: ' + kind)
+  } catch (e: any) {
+    await mfRemember('error', null, String(e?.message || e))
+    throw e
+  }
+}
+
+app.use(mfRouter({ ...mfDeps, verify: requireActive, audit: mfAudit, sync: mfSync }))
+
+/** 経理へ渡す「消込一覧」CSV（MF 会計で仕訳を入れるのは人） */
+app.get('/mf/settlement.csv', async (req, res) => {
+  const me = await requireActive(req, res); if (!me) return
+  const month = String(req.query.month || '')
+  if (!/^[0-9]{4}-[0-9]{2}$/.test(month)) return res.status(400).json({ error: 'bad-month' })
+  const rows = MFS.settlementRows(await loadState(), month)
+  const esc = (c: any) => { const t = String(c ?? ''); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t }
+  const csv = rows.map(r => r.map(esc).join(',')).join('\r\n')
+  mfAudit(me.email, 'mf-settlement-csv', { month, rows: rows.length - 1 })
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="settlement_' + month + '.csv"')
+  res.send('\uFEFF' + csv)
+})
+
+/** 突合（この システムの売掛残高 ⇔ 試算表の売掛金） */
+app.get('/mf/reconciliation', async (req, res) => {
+  const me = await requireActive(req, res); if (!me) return
+  const month = String(req.query.month || '')
+  if (!/^[0-9]{4}-[0-9]{2}$/.test(month)) return res.status(400).json({ error: 'bad-month' })
+  const state = await loadState()
+  res.json(MFS.reconciliation(state, month, MFS.tbArAmount(state, month)))
+})
 
 /* ===================== CRM連携 ===================== */
 app.get('/crm/status', async (req, res) => {
@@ -634,6 +778,16 @@ async function start() {
     const now = new Date()
     if (now.getHours() === 3 && now.getMinutes() === 0) {
       if (process.env.CRM_API_BASE && process.env.CRM_EXPORT_KEY) runCrmSync('api', 'cron')
+    }
+    /* ★ 2026-09-18: 毎朝 06:00 に Money Forward から 請求書・入金 を取り、自動消込までやる。
+       鍵が無い／未接続のときは静かに何もしない（エラーで起動を汚さない）。 */
+    if (now.getHours() === 6 && now.getMinutes() === 0 && MF.mfConfigured()) {
+      cfgGet('mf_token').then(t => {
+        if (!t) return
+        mfSync('run', {}, { email: 'cron@biglight.jp', role: 'Admin' })
+          .then((r: any) => console.log('[MF] 朝の同期:', JSON.stringify(r.stats)))
+          .catch((e: any) => console.error('[MF] 朝の同期に失敗:', e?.message))
+      }).catch(() => {})
     }
   }, 60_000)
 

@@ -600,16 +600,23 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   eq('予実の税抜: subtotal があればそれ', ctx.docNet({ total:110000, subtotal:100001 }), 100001);
   eq('予実の税抜: 無ければ今までどおり ÷1.1', ctx.docNet({ total:110000 }), 100000);
 
-  /* Money Forward CSV */
-  const csv='﻿請求書番号,取引先名,件名,請求日,売上計上日,お支払期限,小計,消費税,合計金額\n'
-    +'"INV-1","株式会社 売掛テストK1","9月分","2025/09/30","2025/09/30","2025/10/31","100,000","10,000","110,000"\n'
-    +'"INV-2","㈱売掛テストK1","10月分","2025/10/31","2025/10/31","2025/11/30","200000","20000","220000"\n';
-  const pr=ctx.mfParseCsv(csv);
-  eq('MF CSV: 見出しで列を見つける', pr.items&&pr.items.map(x=>[x.number,x.billingDate,x.dueDate,x.subtotal,x.total]),
-    [['INV-1','2025-09-30','2025-10-31',100000,110000],['INV-2','2025-10-31','2025-11-30',200000,220000]]);
-  eq('MF CSV: 必要な列が無ければ理由を返す', !!ctx.mfParseCsv('a,b\n1,2\n').error, true);
-  eq('MF: 計上月は 売上計上日の月', ctx.mfToInvoice({ mfId:'X', salesDate:'2025-09-01', billingDate:'2025-10-05', total:1, number:'' },'K1').bookMonth, '2025-09');
-  eq('MF: 取引先名の表記ゆれ（株式会社・㈱・空白）を同じとみなす', ctx.__x.arNormName('株式会社 売掛テストK1')===ctx.__x.arNormName('㈱売掛テストK1'), true);
+  /* Money Forward の取り込み規則は サーバー（test/mfsync.js）で確かめています。
+     ここでは 画面が その結果をどう見せるかだけを見ます。 */
+  _db.invoices[0].confirmStatus='未確認'; _db.invoices[0].source='mf';
+  _db.invoices[1].confirmStatus='確定';
+  _db.invoices[2].mfDiff={ at:'2026-09-18T00:00:00Z', fields:{ total:{ finance:100000, mf:120000 } } };
+  const mfC=ctx.mfCheckCounts();
+  eq('確認待ち・MF差異を数える', [mfC['未確認']>=1, mfC['MF差異']>=1, mfC['確定']>=1], [true,true,true]);
+  const cfH=ctx.viewArConfirm();
+  eq('請求の確認の画面が出る', ['請求の確認','確定','MF差異','要対応'].every(x=>cfH.includes(x)), true);
+  const fyKeep=ctx.__x.CUR_FY; ctx.__x.setFY(ctx.fyOf(_db.invoices[0].bookMonth));   // 期の中でだけ確定できる
+  ctx.mfConfirm([_db.invoices[0].id]);
+  eq('確定すると印と担当者が残る', [_db.invoices[0].confirmStatus, !!_db.invoices[0].confirmedBy], ['確定', true]);
+  ctx.__x.setFY(fyKeep);
+  const rcH=ctx.viewArRecon();
+  eq('突合の画面が出る', ['突合','試算表の売掛金','差'].every(x=>rcH.includes(x)), true);
+  eq('振込名義の表記ゆれ（半角カナ・カ)）をまとめる', ctx.mfNormPayer('ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ')===ctx.mfNormPayer('タカヤマ'), true);
+  eq('請求書を自動で作る機能は無い', typeof ctx.genGo, 'undefined');
 
   _db.invoices=keep.inv; _db.payments=keep.pay; _db.companies=keep.co;
 }

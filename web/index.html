@@ -477,6 +477,18 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   }
   @media(max-width:520px){ .form-grid.co-sub{grid-template-columns:minmax(0,1fr);} }
 
+  /* ===== Money Forward 連携（取り込み・確認・突合） ===== */
+  .mf-src{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .mf-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px;}
+  .mf-row input{padding:5px 8px; border:1px solid var(--border-strong); border-radius:7px;}
+  .mf-sum{display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; margin-bottom:8px;}
+  .mf-chips{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px;}
+  .mf-st{display:inline-block; font-size:10.5px; font-weight:600; padding:1px 7px; border-radius:5px; white-space:nowrap;}
+  .mf-st.s-ok{color:var(--text-muted); background:var(--surface-2);}
+  .mf-st.s-open{color:var(--warning); background:var(--warning-soft);}
+  .mf-src-tag{font-size:9.5px; font-weight:700; padding:0 4px; border-radius:4px; background:var(--primary-soft); color:var(--primary);}
+  @media(max-width:980px){ .mf-src{grid-template-columns:1fr;} }
+
   /* ===== 回収（売掛金）: 取引先 × 月 の残高表 ===== */
   .ar-kpis .num{font-size:21px;}
   .ar-filters{display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin:0 0 10px;}
@@ -821,7 +833,7 @@ const ADMIN_ONLY_PAGES = ['users','audit','settings','crmlink','apilink'];
 function myRole(){ return (SESSION && SESSION.role) || 'Viewer'; }
 function isAdmin(){ return myRole()==='Admin'; }
 /* 同じ台帳を別の入口から見る画面は、権限も同じにする（二重に設定させない） */
-const PAGE_PERM_ALIAS = { arbook:'invoices', archeck:'invoices', arshort:'invoices', apbook:'bills', apsuii:'bills', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
+const PAGE_PERM_ALIAS = { arbook:'invoices', arconfirm:'invoices', arrecon:'invoices', archeck:'invoices', arshort:'invoices', apbook:'bills', apsuii:'bills', vendors:'companies', ledger:'companies', arco:'invoices', apco:'bills', dunning:'invoices', kbunrui:'expenses', properties:'properties', accounts:'settings' };
 function permOf(page){
   page = PAGE_PERM_ALIAS[page] || page;
   const role = myRole();
@@ -1283,11 +1295,13 @@ const SECTIONS = [
        古いリンクは PAGE_REDIRECT で 売掛金 に案内します）。戻すときは下の行を tabs に足すだけ:
          {id:'invoices', label:'請求管理'}, {id:'aging', label:'未回収（年齢表）'}, {id:'arco', label:'取引先別'} */
   { id:'sec-ar', label:'回収（売掛金）', icon:'invoice', tabs:[
-    {id:'arbook',   label:'売掛金'},
-    {id:'receipts', label:'入金'},
-    {id:'archeck',  label:'入金チェック'},
-    {id:'arshort',  label:'差額（手数料・不足）'},
-    {id:'dunning',  label:'督促（今日やること）'} ]},
+    {id:'arbook',    label:'売掛金'},
+    {id:'arconfirm', label:'請求の確認'},
+    {id:'receipts',  label:'入金'},
+    {id:'archeck',   label:'入金チェック'},
+    {id:'arshort',   label:'差額（手数料・不足）'},
+    {id:'dunning',   label:'督促（今日やること）'},
+    {id:'arrecon',   label:'突合'} ]},
   /* ★ 2026-09-15 利用者の指示: 買掛金は 売掛金と同じ「支払先×月の残高」、費用は 推移表（大・中・小 › 支払先）。
        未払（年齢表）・支払先別 はメニューから外しました（買掛金と買掛元帳が同じことを見せるため。コードは残してあります。
        古いリンクは PAGE_REDIRECT で 買掛金 に案内）。支払請求（一覧）は 作成中の確定に要るので残します。 */
@@ -1770,6 +1784,8 @@ function renderPage(page){
       case 'arbook':    html=viewArBook();    break;
       case 'invoices':  html=viewInvoices();  break;
       case 'receipts':  html=viewReceipts();  break;
+      case 'arconfirm': html=viewArConfirm(); break;
+      case 'arrecon':   html=viewArRecon();   break;
       case 'archeck':   html=viewArCheck();   break;
       case 'arshort':   html=viewArShort();   break;
       case 'apbook':    html=viewApBook();    break;
@@ -3380,7 +3396,7 @@ function viewArBook(){
       <button class="btn secondary" onclick="openArBillBulk()">＋ 請求を手入力（複数行）</button>
       <button class="btn secondary" onclick="arCsvTemplate()">${IC.doc} CSVテンプレート</button>
       <label class="btn secondary tp-file">${IC.doc} CSVを取り込む<input type="file" accept=".csv,text/csv" onchange="arCsvUpload(this.files[0]);this.value=''"></label>
-      ${mgr? `<button class="btn secondary" onclick="openMfImport()">Money Forward から取り込む</button>` : ''}` : ''}
+      ${mgr? `<button class="btn secondary" onclick="openMfImport('billings')">Money Forward から取り込む</button>` : ''}` : ''}
       <div class="tp-h">出力</div>
       <div class="tp-two"><button class="btn secondary" onclick="exportArBookCsv()">${IC.doc} CSV出力</button>
         <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button></div>
@@ -3953,86 +3969,20 @@ function arBillCancel(id){
 }
 
 /* ============================================================================
-   Money Forward 請求書 → このシステムの請求（invoices, source:'mf'）
+   ⑩-2 Money Forward 連携 — 取り込み・請求の確認・自動消込・突合
    ----------------------------------------------------------------------------
-   ・取り方は2つ。どちらも同じ形 {mfId, number, partnerId, partnerName, billingDate, salesDate,
-     dueDate, subtotal, total} にそろえてから、同じ手順で取り込む。
-       ① API（サーバーの /mf/billings。接続は管理者が1回）  ② MF から出した CSV
-   ・取引先の対応: 取引先に覚えさせた MF の取引先ID（mfPartnerId）→ 無ければ 名前（株式会社などを除いて一致）
-     → それでも無ければ 画面で選ぶ。選んだ対応は取引先に保存し、次からは自動。
-   ・同じ請求は mfId（CSV で ID が無いときは 請求書番号）で見分けて 更新する（二重にしない）。
-   ・計上月 ＝ 売上計上日の月（無ければ請求日の月）。入金期日 ＝ MF の支払期限。
-   ・MF で消した請求は、ここでは自動で消しません（取消は人が決める）。
+   ★ 2026-09-18 利用者の指示:
+     ・BIGLIGHT が触るのは この システムだけ。仕訳は 経理（会計事務所）が MF 会計 で入れる。
+       → ここからは「消込一覧 CSV」を渡す。**MF には一切書き込まない**。
+     ・API が使えないときのために、CSV を読み込む道を必ず残す。
+   ★ 取り込みの規則は サーバー（backend/src/mfsync.ts）に1つだけ置いています。
+     画面は「取りに行く・見せる・押させる」だけ。毎朝 6:00 の自動同期と必ず同じ結果になります。
+     ・請求の鍵は MF の id（請求書番号は MF 側で重複するため鍵にしない）
+     ・下書きは取り込まない ／ 確定済みを MF が直しても数字は動かさず mfDiff に差を残す
+     ・締めた期（settings.closedFy）は 自動同期でも人の操作でも動かさない
    ========================================================================== */
-let MFI=null;     // 取り込みの作業中データ
+/* 会社名・CSV の小道具は 請求の手入力（複数行・CSV）でも使うので ここに置いたままにします */
 const arNormName = s => String(s||'').normalize('NFKC').replace(/株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|一般財団法人|\(株\)|\(有\)|\(同\)|㈱|㈲|御中|様|\s|　/g,'').toLowerCase();
-
-async function openMfImport(){
-  if(!(myRole()==='Admin'||myRole()==='Manager')){ toast('取り込めるのは 管理者・マネージャー だけです。','err'); return; }
-  const fy=CUR_FY;
-  MFI={ items:[], source:'', map:{}, status:null, from:`${fy}-08-01`, to:today() };
-  mfDraw();
-  try{
-    const r=await fetch(API_BASE+'/mf/status',{headers:headers()});
-    MFI.status = r.ok? await r.json() : { configured:false, connected:false, error:'HTTP '+r.status };
-  }catch(e){ MFI.status={ configured:false, connected:false, error:'通信に失敗しました' }; }
-  if(MFI && !MFI.items.length) mfDraw();
-}
-function mfDraw(){
-  if(!MFI) return;
-  const s=MFI.status;
-  const apiBox = !s? '<div class="muted">接続の状態を確認しています…</div>'
-    : !s.configured? `<div class="muted">API は未設定です（サーバーの .env に MF_CLIENT_ID / MF_CLIENT_SECRET を入れると使えます）。下の CSV で取り込めます。</div>`
-    : !s.connected? `<div>Money Forward と未接続です。${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に「接続する」を依頼してください。'}</div>`
-    : `<div class="ar-mf-row">期間（請求日）<input type="date" id="mfFrom" value="${attr(MFI.from)}"> 〜 <input type="date" id="mfTo" value="${attr(MFI.to)}">
-        <button class="btn" onclick="mfFetchApi()">請求書を取得</button>
-        <span class="muted">接続: ${esc(String(s.connectedBy||'').split('@')[0])}${isAdmin()?` ・ <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}</span></div>`;
-  openModal(`<h3>Money Forward から請求を取り込む</h3>
-    <div class="mdsub">請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。</div>
-    <div class="ar-mf-src">
-      <div><div class="form-section" style="margin:0 0 6px;">① API で取得</div>${apiBox}</div>
-      <div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>
-        <input type="file" accept=".csv,text/csv" onchange="mfReadCsv(this.files&&this.files[0])">
-        <div class="fhelp">MF 請求書の一覧から出力した CSV。見出しで列を判断します（取引先名・請求日・合計金額 など）。</div></div>
-    </div>
-    <div id="mfPrev" style="margin-top:12px;">${MFI.items.length? mfPreviewHtml() : ''}</div>
-    <div class="modal-actions"><button class="btn secondary" onclick="closeModal();MFI=null;">閉じる</button>
-      ${MFI.items.length?`<button class="btn" onclick="mfApply()">この内容で取り込む</button>`:''}</div>`,'xl');
-}
-async function mfConnect(){
-  try{
-    const r=await fetch(API_BASE+'/mf/connect',{method:'POST',headers:headers()}); const d=await r.json().catch(()=>({}));
-    if(!r.ok||!d.url){ toast(d.message||'接続を始められませんでした。','err'); return; }
-    location.href=d.url;
-  }catch(e){ toast('通信に失敗しました。','err'); }
-}
-async function mfDisconnect(){
-  if(!confirm('Money Forward との接続を切ります。よろしいですか？')) return;
-  await fetch(API_BASE+'/mf/disconnect',{method:'POST',headers:headers()}).catch(()=>{});
-  openMfImport();
-}
-async function mfFetchApi(){
-  MFI.from=document.getElementById('mfFrom').value; MFI.to=document.getElementById('mfTo').value;
-  const box=document.getElementById('mfPrev'); if(box) box.innerHTML='<div class="empty">Money Forward から取得しています…</div>';
-  try{
-    const r=await fetch(API_BASE+'/mf/billings',{method:'POST',headers:headers(),body:JSON.stringify({from:MFI.from,to:MFI.to})});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok){ if(box) box.innerHTML=`<div class="alertbar">${esc(d.message||('HTTP '+r.status))}</div>`; return; }
-    mfSetItems(d.items||[], 'api');
-  }catch(e){ if(box) box.innerHTML='<div class="alertbar">通信に失敗しました。</div>'; }
-}
-function mfReadCsv(file){
-  if(!file) return;
-  const fr=new FileReader();
-  fr.onload=()=>{
-    const buf=fr.result; let text=new TextDecoder('utf-8').decode(buf);
-    if(text.includes('�')){ try{ text=new TextDecoder('shift_jis').decode(buf); }catch(e){} }   // MF の CSV は Shift_JIS のことがある
-    const res=mfParseCsv(text);
-    if(res.error){ document.getElementById('mfPrev').innerHTML=`<div class="alertbar">${esc(res.error)}</div>`; return; }
-    mfSetItems(res.items, 'csv');
-  };
-  fr.readAsArrayBuffer(file);
-}
 function arCsvRows(text){
   const rows=[]; let row=[], cell='', q=false; const s=String(text||'').replace(/^﻿/,'');
   for(let i=0;i<s.length;i++){ const ch=s[i];
@@ -4042,141 +3992,514 @@ function arCsvRows(text){
   if(cell!==''||row.length){ row.push(cell); rows.push(row); }
   return rows.filter(r=>r.some(c=>String(c).trim()!==''));
 }
-/** MF 請求書 CSV → そろえた形。列は見出しの候補で探す（出力の設定で順番が変わるため）。 */
-function mfParseCsv(text){
-  const rows=arCsvRows(text); if(rows.length<2) return { error:'CSV に行がありません。' };
-  const head=rows[0].map(h=>String(h).trim().normalize('NFKC'));
-  const col=names=>{ for(const n of names){ const i=head.findIndex(h=>h===n.normalize('NFKC')); if(i>=0) return i; } return -1; };
-  const C={ id:col(['ID','請求書ID','id']), number:col(['請求書番号','請求番号','billing_number']),
-    partnerId:col(['取引先ID','partner_id']), partner:col(['取引先名','取引先','請求先','partner_name']),
-    billingDate:col(['請求日','発行日','billing_date']), salesDate:col(['売上計上日','計上日','sales_date']),
-    dueDate:col(['お支払期限','支払期限','入金期日','支払期日','due_date']),
-    total:col(['合計金額','請求金額','合計','金額(税込)','税込金額','total_price']), subtotal:col(['小計','小計金額','税抜金額','金額(税抜)','subtotal_price']) };
-  const miss=[['取引先名',C.partner],['請求日',C.billingDate],['合計金額',C.total]].filter(x=>x[1]<0).map(x=>x[0]);
-  if(miss.length) return { error:`CSV に必要な列が見つかりません：${miss.join('・')}（見つかった見出し：${head.slice(0,12).join(' / ')}）` };
-  const d=v=>{ const m=String(v||'').trim().match(/^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/); return m? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : ''; };
-  const v=(r,i)=>i>=0? String(r[i]??'').trim() : '';
-  const items=rows.slice(1).map(r=>({
-    mfId: v(r,C.id), number:v(r,C.number), partnerId:v(r,C.partnerId), partnerName:v(r,C.partner),
-    billingDate:d(v(r,C.billingDate)), salesDate:d(v(r,C.salesDate)), dueDate:d(v(r,C.dueDate)),
-    total:Math.round(num(v(r,C.total))), subtotal: C.subtotal>=0 && v(r,C.subtotal)!==''? Math.round(num(v(r,C.subtotal))) : null,
-  })).filter(x=>x.partnerName && (x.billingDate||x.salesDate) && x.total);
-  items.forEach(x=>{ if(!x.mfId) x.mfId = x.number? 'no:'+x.number : `csv:${arNormName(x.partnerName)}:${x.billingDate}:${x.total}`; });
-  return items.length? { items } : { error:'取り込める行がありませんでした（取引先名・請求日・合計金額 が入っている行が必要です）。' };
+
+/* ---------- サーバーの取り込み口 ---------- */
+async function mfCall(path, body){
+  const r = await fetch(API_BASE+path, { method:'POST', headers:headers(), body:JSON.stringify(body||{}) });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.message || d.error || ('HTTP '+r.status));
+  return d;
 }
-function mfSetItems(items, source){
-  MFI.items=items; MFI.source=source; MFI.map={};
-  const cos=(DB.companies||[]).filter(c=>!c._gone);
-  const byPid={}; cos.forEach(c=>{ if(c.mfPartnerId) byPid[String(c.mfPartnerId)]=c; });
-  const byName={}; cos.forEach(c=>{ const k=arNormName(c.mfPartnerName||c.name); if(!k) return; (byName[k]=byName[k]||[]).push(c); });
-  items.forEach(x=>{
-    const key=mfPartnerKey(x); if(MFI.map[key]!==undefined) return;
-    let c=x.partnerId&&byPid[x.partnerId];
-    if(!c){ const hit=byName[arNormName(x.partnerName)]||[]; if(hit.length===1) c=hit[0]; }
-    MFI.map[key]= c? String(c.id) : '';
+async function mfGet(path){
+  const r = await fetch(API_BASE+path, { headers:headers() });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.message || d.error || ('HTTP '+r.status));
+  return d;
+}
+/** Shift_JIS の CSV も読めるように（MF・銀行の出力は Shift_JIS のことがある） */
+function mfReadFile(file){
+  return new Promise((ok,ng)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{ const buf=fr.result; let t=new TextDecoder('utf-8').decode(buf);
+      if(t.includes('�')){ try{ t=new TextDecoder('shift_jis').decode(buf); }catch(e){} }
+      ok(t); };
+    fr.onerror=()=>ng(new Error('ファイルを読めませんでした'));
+    fr.readAsArrayBuffer(file);
   });
+}
+
+/* ---------- 取り込みモーダル（請求・入金・試算表で共用）---------- */
+let MFI = null;   // { kind, status, from, to, month, csv, csvName, plan, map, busy }
+const MF_KINDS = {
+  billings:       { title:'請求を取り込む（Money Forward 請求書）', path:'/mf/sync/billings',
+                    sub:'請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。下書きは入りません。',
+                    csvHelp:'MF 請求書の一覧から出力した CSV（見出しで列を判断します）' },
+  transactions:   { title:'入金を取り込む（銀行の入出金明細）', path:'/mf/sync/transactions',
+                    sub:'入金だけを取り込みます。同じ明細は二度入りません（取引ID で判断）。',
+                    csvHelp:'MF 会計の入出金明細、または銀行からダウンロードした CSV' },
+  'trial-balance':{ title:'試算表を取り込む（突合用）', path:'/mf/sync/trial-balance',
+                    sub:'予実の実績は今までどおりです。試算表は「突合のための外の数字」として別に置くだけです。',
+                    csvHelp:'MF 会計の試算表（貸借対照表）を CSV 出力したもの' },
+};
+async function openMfImport(kind){
+  kind = kind || 'billings';
+  if(!(myRole()==='Admin'||myRole()==='Manager')){ toast('取り込めるのは 管理者・マネージャー だけです。','err'); return; }
+  MFI = { kind, status:null, from:fyStartDate(CUR_FY), to:defaultDateIn(CUR_FY), month:defaultYmIn(CUR_FY), csv:null, csvName:'', plan:null, map:{}, busy:false };
+  mfDraw();
+  try{ MFI.status = await mfGet('/mf/status'); }catch(e){ MFI.status={ configured:false, connected:false, error:String(e.message||e) }; }
   mfDraw();
 }
-const mfPartnerKey = x => x.partnerId? 'id:'+x.partnerId : 'nm:'+arNormName(x.partnerName);
-/** 1件の MF 請求 → invoices の形 */
-function mfToInvoice(x, companyId){
-  const bm=(x.salesDate||x.billingDate).slice(0,7);
-  const rec={ companyId, bookMonth:bm, issueDate:x.billingDate||x.salesDate, dueDate:x.dueDate||'', total:num(x.total),
-    no:x.number||'', note:x.title||'', items:[], status:'確定', locked:true, source:'mf', mfId:String(x.mfId), mfPartnerId:x.partnerId||'' };
-  /* ★ 2026-09-16: 税区分を付ける。MF の税抜があれば 税込との比で決める（同じなら 非課税・対象外）。
-     税抜が無い CSV は 取引先の税区分で税抜を出す（以前は いつも ÷1.1）。 */
-  const c=findById('companies', companyId);
-  if(x.subtotal!=null && x.subtotal!==''){
-    rec.subtotal=num(x.subtotal);
-    const t=rec.total, n=rec.subtotal;
-    if(t===n) rec.taxCat = (c && TAX_RATE[c.taxCat]===0)? c.taxCat : '対象外';
-    else if(n && Math.abs(t-Math.floor(n*1.10))<=1) rec.taxCat='課税10%';
-    else if(n && Math.abs(t-Math.floor(n*1.08))<=1) rec.taxCat='軽減8%';
-    else rec.taxCat='混在';
-  } else {
-    rec.taxCat = (c && TAX_RATE[c.taxCat]!=null)? c.taxCat : '課税10%';
-    rec.subtotal = Math.round(rec.total/(1+(TAX_RATE[rec.taxCat]||0)));
-  }
-  return rec;
-}
-/** 取り込み先の既存請求（mfId → 無ければ 同じ取引先の同じ請求書番号の MF 請求） */
-function mfExisting(x, companyId){
-  const list=(DB.invoices||[]).filter(i=>i.source==='mf');
-  return list.find(i=>String(i.mfId)===String(x.mfId))
-    || (x.number? list.find(i=>String(i.no)===String(x.number) && String(i.companyId)===String(companyId)) : null) || null;
-}
-/** 取り込みの計画（画面の確認と、実際の取り込みで同じものを使う） */
-function mfPlan(){
-  const plan={ add:[], upd:[], same:[], unmapped:[], dupWarn:[], outside:[] };
-  MFI.items.forEach(x=>{
-    /* ★ 2026-09-17: 選んでいる期の外（計上月）は取り込まない */
-    if(fyOf((x.salesDate||x.billingDate||'').slice(0,7))!==CUR_FY){ plan.outside.push(x); return; }
-    const cid=MFI.map[mfPartnerKey(x)];
-    if(!cid || cid==='__skip'){ plan.unmapped.push(x); return; }
-    const rec=mfToInvoice(x, cid==='__new'? '__new' : cid), ex=cid==='__new'? null : mfExisting(x, cid);
-    if(ex){
-      if(ex.status==='取消') rec.status='取消';          // こちらで取消にした請求は、取り込み直しても生き返らせない
-      const keys=['companyId','bookMonth','issueDate','dueDate','total','subtotal','taxCat','no'];
-      (keys.some(k=>String(ex[k]??'')!==String(rec[k]??'')) || String(ex.mfId)!==String(rec.mfId))? plan.upd.push({x,rec,ex}) : plan.same.push({x,rec,ex});
-    }else{
-      plan.add.push({x,rec});
-      if(cid!=='__new' && (DB.invoices||[]).some(i=>i.source!=='mf' && AR_LIVE(i) && String(i.companyId)===String(cid) && arYmOfInv(i)===rec.bookMonth)) plan.dupWarn.push({x,rec});
-    }
-  });
-  return plan;
-}
-function mfPreviewHtml(){
-  const groups={};
-  MFI.items.forEach(x=>{ const k=mfPartnerKey(x); (groups[k]=groups[k]||{ k, name:x.partnerName, n:0, total:0 }); groups[k].n++; groups[k].total+=num(x.total); });
-  const cos=(DB.companies||[]).filter(c=>!c._gone && c.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
-  const P=mfPlan();
-  const g=Object.values(groups).sort((a,b)=>(MFI.map[a.k]?1:0)-(MFI.map[b.k]?1:0) || b.total-a.total);
-  return `<div class="ar-mf-sum">
-      <span>読み込み <b>${MFI.items.length}</b>件（${MFI.source==='api'?'API':'CSV'}）</span>
-      <span>新規 <b>${P.add.length}</b></span><span>更新 <b>${P.upd.length}</b></span><span class="muted">変更なし ${P.same.length}</span>
-      ${P.unmapped.length?`<span class="minus">取引先が未対応 ${P.unmapped.length}件（取り込みません）</span>`:''}
-      ${P.outside.length?`<span class="minus">${fyShort(CUR_FY)}の外 ${P.outside.length}件（取り込みません。その期に切り替えて取り込んでください）</span>`:''}
+function mfDraw(){
+  if(!MFI) return;
+  const K=MF_KINDS[MFI.kind], s=MFI.status;
+  const api = !s ? '<div class="muted">接続の状態を確認しています…</div>'
+    : !s.configured ? `<div class="muted">API は未設定です（サーバーの .env に MF_CLIENT_ID / MF_CLIENT_SECRET）。右の CSV で同じことができます。</div>`
+    : !s.connected ? `<div>Money Forward と未接続です。${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}</div>`
+    : MFI.kind==='trial-balance'
+      ? `<div class="mf-row">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value">
+          <button class="btn" onclick="mfFetch()">取得する</button></div>`
+      : `<div class="mf-row">期間 <input type="date" value="${attr(MFI.from)}" onchange="MFI.from=this.value"> 〜
+          <input type="date" value="${attr(MFI.to)}" onchange="MFI.to=this.value">
+          <button class="btn" onclick="mfFetch()">取得する</button></div>`;
+  openModal(`<h3>${esc(K.title)}</h3>
+    <div class="mdsub">${esc(K.sub)}</div>
+    <div class="mf-src">
+      <div><div class="form-section" style="margin:0 0 6px;">① API から取得</div>${api}</div>
+      <div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>
+        <input type="file" accept=".csv,text/csv" onchange="mfPickCsv(this.files&&this.files[0])">
+        <div class="fhelp">${esc(K.csvHelp)}${MFI.csvName?` ／ いま読み込んでいるファイル: <b>${esc(MFI.csvName)}</b>`:''}</div>
+        ${MFI.kind==='trial-balance'?`<div style="margin-top:6px;">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value"></div>`:''}</div>
     </div>
-    ${P.dupWarn.length?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に、このシステムで作った請求がすでにある分が ${P.dupWarn.length}件あります
-      （${esc([...new Set(P.dupWarn.map(d=>arCoName(d.rec.companyId)+' '+d.rec.bookMonth))].slice(0,6).join('、'))}）。二重計上にならないよう、古い方を 取消 にするか確認してください。</div>`:''}
-    <div class="table-wrap" style="max-height:46vh;"><table>
-      <thead><tr><th>MF の取引先</th><th class="r">件数</th><th class="r">合計（税込）</th><th>このシステムの取引先</th></tr></thead>
-      <tbody>${g.map(x=>`<tr><td>${esc(x.name)}</td><td class="r num">${x.n}</td><td class="r num">${moneyPlain(x.total)}</td>
-        <td><select onchange="MFI.map['${attr(x.k)}']=this.value;document.getElementById('mfPrev').innerHTML=mfPreviewHtml();" style="min-width:240px;${MFI.map[x.k]?'':'border-color:var(--danger);'}">
-          <option value="">— 選んでください —</option>
-          <option value="__new" ${MFI.map[x.k]==='__new'?'selected':''}>＋ 新しい得意先として作る（${esc(x.name)}）</option>
-          <option value="__skip" ${MFI.map[x.k]==='__skip'?'selected':''}>取り込まない</option>
-          ${cos.map(c=>`<option value="${attr(c.id)}" ${String(MFI.map[x.k])===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></td></tr>`).join('')}
-      </tbody></table></div>`;
+    <div id="mfPrev" style="margin-top:12px;">${MFI.plan? mfPlanHtml() : (MFI.busy?'<div class="empty">取得しています…</div>':'')}</div>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="MFI=null;closeModal()">閉じる</button>
+      ${MFI.plan? `<button class="btn" onclick="mfApply()">この内容で取り込む</button>`:''}
+    </div>`,'xl');
 }
-function mfApply(){
-  if(!MFI || !MFI.items.length) return;
-  if(!periodGuard([], 'Money Forward の取り込み')) return;
-  /* 新しく作る取引先を先に作り、対応表を本物の ID に置き換える */
-  const newCo={};
-  Object.keys(MFI.map).forEach(k=>{
-    if(MFI.map[k]!=='__new') return;
-    const x=MFI.items.find(i=>mfPartnerKey(i)===k); if(!x) return;
-    const { record }=commitRecord('companies', { name:x.partnerName, kind:'得意先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%',
-      mfPartnerId:x.partnerId||'', mfPartnerName:x.partnerName }, {});
-    newCo[k]=String(record.id); MFI.map[k]=String(record.id);
+async function mfConnect(){
+  try{ const d=await mfCall('/mf/connect'); if(d.url) location.href=d.url; }
+  catch(e){ toast(String(e.message||e),'err'); }
+}
+async function mfDisconnect(){
+  if(!confirm('Money Forward との接続を切ります。よろしいですか？')) return;
+  try{ await mfCall('/mf/disconnect'); toast('接続を切りました。','ok'); }catch(e){ toast(String(e.message||e),'err'); }
+  renderPage(CURRENT_PAGE);
+}
+async function mfPickCsv(file){
+  if(!file || !MFI) return;
+  try{ MFI.csv=await mfReadFile(file); MFI.csvName=file.name; MFI.plan=null; await mfFetch(); }
+  catch(e){ toast(String(e.message||e),'err'); }
+}
+/** まず計画（dryRun）だけ見る。取り込みはボタンを押してから。 */
+async function mfFetch(){
+  if(!MFI) return;
+  MFI.busy=true; const box=document.getElementById('mfPrev'); if(box) box.innerHTML='<div class="empty">取得しています…</div>';
+  try{
+    const d=await mfCall(MF_KINDS[MFI.kind].path, mfArgs(true));
+    MFI.plan=d.plan||d; MFI.count=d.count; MFI.busy=false; mfDraw();
+  }catch(e){
+    MFI.busy=false; const b=document.getElementById('mfPrev');
+    if(b) b.innerHTML=`<div class="alertbar">${esc(String(e.message||e))}</div>`;
+  }
+}
+function mfArgs(dry){
+  const a={ dryRun:!!dry };
+  if(MFI.csv) a.csv=MFI.csv; else { a.from=MFI.from; a.to=MFI.to; }
+  if(MFI.kind==='trial-balance') a.month=MFI.month;
+  if(MFI.kind==='billings' && Object.keys(MFI.map).length) a.map=MFI.map;
+  return a;
+}
+function mfPlanHtml(){
+  const p=MFI.plan;
+  if(MFI.kind==='billings') return mfBillingPlanHtml(p);
+  if(MFI.kind==='transactions'){
+    const items=(p.items||[]);
+    return `<div class="mf-sum"><span>読み込み <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>
+        <span class="muted">取込済み ${p['取込済み']||0}</span>${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}</div>
+      ${items.length?`<div class="table-wrap" style="max-height:44vh;"><table><thead><tr><th>入金日</th><th>振込名義</th><th class="r">金額</th><th>取引先（自動）</th></tr></thead>
+        <tbody>${items.map(t=>{ const c=mfPayerCompany(t.payerName);
+          return `<tr><td>${esc(t.date)}</td><td>${esc(t.payerName||'')}</td><td class="r num">${moneyPlain(t.amount)}</td>
+            <td>${c? esc(arCoName(c)) : '<span class="badge b-amber">取り込み後に対応づけ</span>'}</td></tr>`; }).join('')}</tbody></table></div>`:''}`;
+  }
+  const items=(p.items||[]);
+  return `<div class="mf-sum"><span>科目 <b>${MFI.count||0}</b>件</span><span class="muted">対象月 ${esc(MFI.month)}</span></div>
+    ${items.length?`<div class="table-wrap" style="max-height:44vh;"><table><thead><tr><th>コード</th><th>勘定科目</th><th class="r">残高</th></tr></thead>
+      <tbody>${items.map(r=>`<tr><td>${esc(r.code||'')}</td><td>${esc(r.name)}</td><td class="r num">${moneyPlain(r.amount)}</td></tr>`).join('')}</tbody></table></div>`:''}`;
+}
+function mfBillingPlanHtml(p){
+  const cos=(DB.companies||[]).filter(c=>!c._gone && c.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  const unmapped=(p.unmapped||[]);
+  return `<div class="mf-sum">
+      <span>読み込み <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span><span>更新 <b>${p['更新']||0}</b></span>
+      <span class="muted">変更なし ${p['変更なし']||0}</span>${p['下書き除外']?`<span class="muted">下書き除外 ${p['下書き除外']}</span>`:''}
+      ${p['MF差異']?`<span class="minus">確定済みとの差異 ${p['MF差異']}</span>`:''}
+      ${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}
+      ${unmapped.length?`<span class="minus">取引先が未対応 ${unmapped.reduce((s,g)=>s+g.n,0)}件</span>`:''}</div>
+    ${p['二重の疑い']?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に この システムで作った請求がすでにある分が ${p['二重の疑い']}件あります。二重計上にならないか確認してください。</div>`:''}
+    ${unmapped.length?`<div class="form-section" style="margin-top:10px;">取引先の対応づけ（選ぶと取り込めます）</div>
+      <div class="table-wrap" style="max-height:30vh;"><table>
+        <thead><tr><th>MF の取引先</th><th class="r">件数</th><th class="r">合計</th><th>この システムの取引先</th></tr></thead>
+        <tbody>${unmapped.map(g=>`<tr><td>${esc(g.partnerName)}</td><td class="r num">${g.n}</td><td class="r num">${moneyPlain(g.total)}</td>
+          <td><select onchange="mfMap('${attr(g.key)}',this.value)" style="min-width:230px;${MFI.map[g.key]?'':'border-color:var(--danger);'}">
+            <option value="">— 選んでください —</option>
+            <option value="__new" ${MFI.map[g.key]==='__new'?'selected':''}>＋ 新しい得意先として作る（${esc(g.partnerName)}）</option>
+            <option value="__skip" ${MFI.map[g.key]==='__skip'?'selected':''}>取り込まない</option>
+            ${cos.map(c=>`<option value="${attr(c.id)}" ${String(MFI.map[g.key])===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}
+          </select></td></tr>`).join('')}</tbody></table></div>`:''}
+    ${(p.createSample||[]).length?`<div class="form-section" style="margin-top:10px;">新しく入る請求</div>
+      <div class="table-wrap" style="max-height:30vh;"><table><thead><tr><th>取引先</th><th>計上月</th><th>請求日</th><th>期日</th><th class="r">金額</th><th>確定</th></tr></thead>
+        <tbody>${p.createSample.map(x=>`<tr><td>${esc(x.partnerName||arCoName(x.companyId))}</td><td>${esc(x.bookMonth||'')}</td><td>${esc(x.issueDate||'')}</td>
+          <td>${esc(x.dueDate||'')}</td><td class="r num">${moneyPlain(x.total)}</td>
+          <td>${x.auto?'<span class="mf-st s-ok">自動で確定</span>':'<span class="mf-st s-open">要確認</span>'}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${(p.diffSample||[]).length?`<div class="form-section" style="margin-top:10px;">確定済みなのに MF 側が変わったもの（この システムの数字は変えません）</div>
+      <div class="table-wrap" style="max-height:24vh;"><table><thead><tr><th>請求番号</th><th>取引先</th><th>違う項目</th><th class="r">この システム</th><th class="r">MF</th></tr></thead>
+        <tbody>${p.diffSample.map(x=>`<tr><td>${esc(x.no||'')}</td><td>${esc(arCoName(x.companyId))}</td><td>${esc((x.changed||[]).join('・'))}</td>
+          <td class="r num">${moneyPlain(x.finance.total)}</td><td class="r num minus">${moneyPlain(x.mf.total)}</td></tr>`).join('')}</tbody></table></div>`:''}`;
+}
+function mfMap(key,v){ MFI.map[key]=v; mfFetch(); }
+/** 新しい得意先はこちらで作ってから、その ID で取り込む（サーバーは会社を作りません） */
+function mfCreateCompanies(){
+  const p=MFI.plan||{}; let n=0;
+  (p.unmapped||[]).forEach(g=>{
+    if(MFI.map[g.key]!=='__new') return;
+    const { record }=commitRecord('companies', { name:g.partnerName, kind:'得意先', closingDay:31, paySite:1, payDay:31, taxCat:'課税10%',
+      mfPartnerId: g.key.indexOf('id:')===0? g.key.slice(3) : '', mfPartnerName:g.partnerName }, {});
+    MFI.map[g.key]=String(record.id); n++;
   });
-  const P=mfPlan();
-  if(!P.add.length && !P.upd.length){ toast('取り込む変更はありませんでした。','ok'); return; }
-  if(P.dupWarn.length && !confirm(`同じ取引先・同じ計上月に このシステムの請求がすでにある分が ${P.dupWarn.length}件あります。\n二重計上にならないか確認しましたか？ 取り込みますか？`)) return;
-  const touched=new Set();
-  P.add.forEach(({rec})=>{ stampStaff(rec); commitRecord('invoices', rec, {}); touched.add(String(rec.companyId)); });
-  P.upd.forEach(({rec,ex})=>{ commitRecord('invoices', rec, { existingId:ex.id }); touched.add(String(rec.companyId)); touched.add(String(ex.companyId)); });
-  /* 取引先に MF の取引先を覚えさせる（次回から自動で対応） */
-  Object.keys(MFI.map).forEach(k=>{
-    const cid=MFI.map[k]; if(!cid || cid==='__skip' || newCo[k]) return;
-    const x=MFI.items.find(i=>mfPartnerKey(i)===k), c=findById('companies',cid); if(!x||!c) return;
-    if(String(c.mfPartnerId||'')!==String(x.partnerId||'') || String(c.mfPartnerName||'')!==x.partnerName)
-      commitRecord('companies', { mfPartnerId:x.partnerId||'', mfPartnerName:x.partnerName }, { existingId:cid });
+  return n;
+}
+async function mfApply(){
+  if(!MFI) return;
+  if(MFI.kind==='billings' && mfCreateCompanies()) await pushDelta();
+  try{
+    const d=await mfCall(MF_KINDS[MFI.kind].path, mfArgs(false));
+    await pullState();
+    MFI=null; closeModal(); renderPage(CURRENT_PAGE);
+    const done=Object.entries(d.stats||{}).filter(([,v])=>typeof v==='number'&&v).map(([k,v])=>`${k} ${v}`).join(' ／ ');
+    toast(done? '取り込みました：'+done : '取り込む変更はありませんでした。','ok');
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+
+/* ---------- 設定 › API・AI連携 に出す Money Forward の箱 ---------- */
+async function mfPanelLoad(){
+  const box=document.getElementById('mfPanel'); if(!box) return;
+  let st=null;
+  try{ st=await mfGet('/mf/status'); }catch(e){ return; }
+  const b=document.getElementById('mfPanel');
+  if(!b || b.id!=='mfPanel') return;
+  const mgr = myRole()==='Admin'||myRole()==='Manager';
+  const line = st.lastSyncAt? `最後の同期 ${esc(String(st.lastSyncAt).slice(0,16).replace('T',' '))}${st.lastResult==='error'?' <span class="minus">失敗</span>':''}` : 'まだ同期していません';
+  b.innerHTML=`<div class="panel"><div class="panel-hd"><b>Money Forward 連携</b>
+      <span class="sub">請求書と入出金明細を「読むだけ」。仕訳は経理が MF 会計で入れます</span>
+      ${mgr?`<button class="btn sm" style="margin-left:auto;" onclick="mfSyncNow()">今すぐ同期</button>`:''}</div>
+    <div class="panel-bd" style="font-size:13px;line-height:1.9;">
+      ${!st.configured? '<span class="muted">API は未設定です（.env に MF_CLIENT_ID / MF_CLIENT_SECRET）。設定しなくても、各画面の「取り込む」から CSV で運用できます。</span>'
+        : (st.connected? `<span class="badge b-green">接続中</span> ${esc(String(st.connectedBy||'').split('@')[0])} ・ ${line}
+            ${isAdmin()?` <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}`
+          : `<span class="badge b-amber">未接続</span> ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}`)}
+      ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
+      <div class="fhelp">毎朝 6:00 に「請求 → 入金 → 自動消込」を自動で行います。手順は docs/MONEYFORWARD.md。<br>
+        戻り先URL：${esc(st.redirectUri||'')} ／ スコープ：${esc(st.scopes||'')}</div>
+      ${mgr?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn secondary sm" onclick="openMfImport('billings')">請求を取り込む</button>
+        <button class="btn secondary sm" onclick="openMfImport('transactions')">入金を取り込む</button>
+        <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button>
+        <button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button></div>`:''}
+    </div></div>`;
+}
+async function mfSyncNow(){
+  toast('Money Forward と同期しています…','ok');
+  try{
+    const d=await mfCall('/mf/sync/run',{});
+    await pullState(); renderPage(CURRENT_PAGE);
+    const s=d.stats||{};
+    toast(`同期しました：請求 ${JSON.stringify(s.billings||{})} ／ 入金 ${JSON.stringify(s.transactions||{})} ／ 消込 ${JSON.stringify(s.reconcile||{})}`,'ok');
+  }catch(e){ toast(String(e.message||e),'err'); renderPage(CURRENT_PAGE); }
+}
+
+/* ---------- 請求の確認（未確認・MF差異・取引先未対応）---------- */
+const mfNeedsCheck = i => AR_LIVE(i) && (i.confirmStatus==='未確認' || i.mfDiff || !i.companyId);
+function mfCheckCounts(){
+  const list=(DB.invoices||[]).filter(AR_LIVE);
+  return { 未確認:list.filter(i=>i.confirmStatus==='未確認').length, MF差異:list.filter(i=>i.mfDiff).length,
+    取引先未対応:list.filter(i=>!i.companyId).length, 確定:list.filter(i=>i.confirmStatus==='確定').length, all:list.length };
+}
+let ARCF_FILT='要対応';
+function arcfFilt(v){ ARCF_FILT=v; renderPage('arconfirm'); }
+function viewArConfirm(){
+  const p='arconfirm', C=mfCheckCounts();
+  const all=(DB.invoices||[]).filter(AR_LIVE).slice()
+    .sort((a,b)=>String(b.bookMonth||'').localeCompare(String(a.bookMonth||''))||String(b.issueDate||'').localeCompare(String(a.issueDate||'')));
+  const q=(SEARCH[p]||'').trim().toLowerCase();
+  let rows=all.filter(i=>{
+    if(ARCF_FILT==='要対応' && !mfNeedsCheck(i)) return false;
+    if(ARCF_FILT==='未確認' && i.confirmStatus!=='未確認') return false;
+    if(ARCF_FILT==='確定' && i.confirmStatus!=='確定') return false;
+    if(ARCF_FILT==='MF差異' && !i.mfDiff) return false;
+    if(ARCF_FILT==='取引先未対応' && i.companyId) return false;
+    if(q && !((arCoName(i.companyId)+(i.no||'')+(i.note||'')).toLowerCase().includes(q))) return false;
+    return true;
   });
-  touched.forEach(id=>arApplyUnallocated(id));
-  const msg=`取り込みました：新規 ${P.add.length}件 ／ 更新 ${P.upd.length}件${P.unmapped.length?` ／ 未対応で見送り ${P.unmapped.length}件`:''}`;
-  MFI=null; closeModal(); renderPage(CURRENT_PAGE); toast(msg,'ok');
+  const chip=(k,n)=>`<button type="button" class="btn ${ARCF_FILT===k?'':'secondary'} sm" onclick="arcfFilt('${k}')">${k}${n!=null?` (${n})`:''}</button>`;
+  const kpis=`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl">確認待ち</div><div class="num ${C['未確認']?'minus':''}">${C['未確認']}</div><div class="sub">MF から入った請求のうち、まだ見ていないもの</div></div>
+    <div class="kpi"><div class="lbl">MF と差異</div><div class="num ${C['MF差異']?'minus':''}">${C['MF差異']}</div><div class="sub">確定後に MF 側が変わった</div></div>
+    <div class="kpi"><div class="lbl">取引先が未対応</div><div class="num ${C['取引先未対応']?'minus':''}">${C['取引先未対応']}</div></div>
+    <div class="kpi"><div class="lbl">確定済み</div><div class="num">${C['確定']}</div><div class="sub">売掛金・予実に入っています</div></div>
+  </div>`;
+  const cols=[
+    {key:'ck', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'?'':`<input type="checkbox" class="arcfck" value="${attr(r.id)}" onclick="event.stopPropagation()">`},
+    {key:'bookMonth', label:'計上月', date:true, val:r=>esc(r.bookMonth||'')},
+    {key:'no', label:'請求番号', val:r=>`${esc(r.no||'-')}${r.source==='mf'?' <span class="mf-src-tag">MF</span>':(r.source==='csv'?' <span class="mf-src-tag">CSV</span>':'')}`},
+    {key:'companyId', label:'取引先', raw:r=>arCoName(r.companyId), val:r=>r.companyId? esc(arCoName(r.companyId))
+      : `<a class="pillbtn pill-new" onclick="event.stopPropagation();mfSetCompany('${attr(r.id)}')">取引先を選ぶ</a>`},
+    {key:'issueDate', label:'請求日', date:true, val:r=>esc(r.issueDate||'')},
+    {key:'dueDate', label:'入金期日', date:true, val:r=>esc(r.dueDate||'')},
+    {key:'total', label:'請求額', cls:'r', noFilter:true, val:r=>`<b class="num">${moneyPlain(docTotal(r))}</b>`},
+    {key:'confirmStatus', label:'確定', raw:r=>r.confirmStatus||'未確認', val:r=>r.confirmStatus==='確定'
+      ? `<span class="mf-st s-ok">確定</span>${r.confirmedBy?`<div class="muted" style="font-size:10.5px;">${esc(String(r.confirmedBy).split('@')[0])}</div>`:''}`
+      : '<span class="mf-st s-open">未確認</span>'},
+    {key:'mfDiff', label:'MF差異', noFilter:true, val:r=>r.mfDiff? `<a class="pillbtn pill-del" onclick="event.stopPropagation();mfDiffOpen('${attr(r.id)}')">差異を見る</a>`:''},
+    {key:'act', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'||!canEdit('invoices')? '' :
+      `<a class="pillbtn pill-save" onclick="event.stopPropagation();mfConfirm(['${attr(r.id)}'])">確定</a>`},
+  ];
+  const mgr=myRole()==='Admin'||myRole()==='Manager';
+  const tools=`${searchBox(p,'取引先・請求番号で検索')}
+    ${mgr&&canCreate('invoices')?`<button class="btn" onclick="openMfImport('billings')">請求を取り込む</button>`:''}
+    ${canEdit('invoices')?`<button class="btn secondary" onclick="mfConfirmChecked()">選んだものを確定</button>`:''}
+    ${toolsMenu(`<button class="btn secondary" onclick="openBillingGap()">請求もれチェック</button>`)}`;
+  return pageShell({ title:'請求の確認', count:all.length, shown:rows.length,
+    sub:'Money Forward から入った請求を確認して確定します。確定した請求だけが 自動消込 の相手になります。',
+    tools, body: kpis
+      + `<div class="mf-chips">${['要対応','未確認','確定','MF差異','取引先未対応','すべて'].map(k=>chip(k, k==='すべて'?all.length:(k==='要対応'?all.filter(mfNeedsCheck).length:C[k]))).join(' ')}</div>`
+      + dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('invoices','${r.id}')` }) });
+}
+function mfConfirmChecked(){
+  const ids=[...document.querySelectorAll('.arcfck:checked')].map(x=>x.value);
+  if(!ids.length){ toast('確定するものを選んでください。','err'); return; }
+  mfConfirm(ids);
+}
+function mfConfirm(ids){
+  if(!canEdit('invoices')){ toast('権限がありません。','err'); return; }
+  const list=ids.map(id=>findById('invoices',id)).filter(Boolean);
+  if(!list.length) return;
+  if(!periodGuard(list.map(i=>i.bookMonth||i.issueDate), '請求の確定')) return;
+  let n=0, skipped=0;
+  list.forEach(inv=>{
+    if(!inv.companyId){ skipped++; return; }
+    inv.confirmStatus='確定'; inv.confirmedAt=new Date().toISOString(); inv.confirmedBy=(SESSION&&SESSION.email)||'';
+    inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv); n++;
+  });
+  renderPage(CURRENT_PAGE);
+  toast(`${n}件を確定しました。${skipped?`（${skipped}件は 取引先が未設定のため見送り）`:''}`, n?'ok':'err');
+}
+function mfSetCompany(id){
+  const inv=findById('invoices',id); if(!inv) return;
+  const cos=(DB.companies||[]).filter(c=>!c._gone && c.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  openModal(`<h3>取引先を選ぶ</h3>
+    <div class="mdsub">MF の取引先「${esc(inv.mfPartnerName||inv.note||inv.no||'')}」の請求です。選ぶと、同じ MF 取引先は次から自動で当たります。</div>
+    <div class="form-grid"><div class="full"><label>取引先</label><select id="mfSetCo">
+      ${cos.map(c=>`<option value="${attr(c.id)}">${esc(c.name)}</option>`).join('')}</select></div></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="mfSetCompanyGo('${attr(id)}')">決定</button></div>`);
+}
+function mfSetCompanyGo(id){
+  const inv=findById('invoices',id), cid=document.getElementById('mfSetCo').value;
+  if(!inv||!cid) return;
+  if(!periodGuard([inv.bookMonth||inv.issueDate], '請求')) return;
+  inv.companyId=cid; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
+  if(inv.mfPartnerId){
+    const c=findById('companies',cid);
+    if(c && String(c.mfPartnerId||'')!==String(inv.mfPartnerId)) commitRecord('companies',{ mfPartnerId:inv.mfPartnerId, mfPartnerName:inv.mfPartnerName||'' },{ existingId:cid });
+  }
+  closeModal(); renderPage(CURRENT_PAGE); toast('取引先を設定しました。','ok');
+}
+function mfDiffOpen(id){
+  const inv=findById('invoices',id); if(!inv||!inv.mfDiff) return;
+  const f=inv.mfDiff.fields||{};
+  const label={ total:'請求額', dueDate:'入金期日', bookMonth:'計上月', issueDate:'請求日', companyId:'取引先', no:'請求番号', subtotal:'税抜' };
+  openModal(`<h3>MF 側が変わりました — ${esc(inv.no||'')}</h3>
+    <div class="mdsub">確定済みの請求です。この システムの数字は勝手に変えていません。どちらに合わせるか選んでください。</div>
+    <div class="table-wrap"><table><thead><tr><th>項目</th><th class="r">この システム</th><th class="r">Money Forward</th></tr></thead>
+      <tbody>${Object.keys(f).map(k=>`<tr><td>${esc(label[k]||k)}</td>
+        <td class="r num">${esc(k==='companyId'? arCoName(f[k].finance) : String(f[k].finance==null?'':f[k].finance))}</td>
+        <td class="r num minus">${esc(k==='companyId'? arCoName(f[k].mf) : String(f[k].mf==null?'':f[k].mf))}</td></tr>`).join('')}</tbody></table></div>
+    <div class="infobar" style="margin-top:10px;">${esc(String(inv.mfDiff.at||'').slice(0,16).replace('T',' '))} に見つかりました。</div>
+    <div class="modal-actions split">
+      <button class="btn secondary" onclick="mfDiffKeep('${attr(id)}')">この システムのままにする</button>
+      <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">あとで</button>
+        <button class="btn" onclick="mfDiffAdopt('${attr(id)}')">MF に合わせる</button></div></div>`,'lg');
+}
+function mfDiffKeep(id){
+  const inv=findById('invoices',id); if(!inv) return;
+  inv.mfDiff=null; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
+  closeModal(); renderPage(CURRENT_PAGE); toast('この システムの数字を残しました。','ok');
+}
+function mfDiffAdopt(id){
+  const inv=findById('invoices',id); if(!inv||!inv.mfDiff) return;
+  if(!periodGuard([inv.bookMonth||inv.issueDate], '請求')) return;
+  const f=inv.mfDiff.fields||{};
+  Object.keys(f).forEach(k=>{ inv[k]= (k==='total'||k==='subtotal')? num(f[k].mf) : f[k].mf; });
+  inv.mfDiff=null; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
+  closeModal(); renderPage(CURRENT_PAGE); toast('MF の数字に合わせました。','ok');
+}
+
+/* ---------- 請求もれチェック（請求ルールの使い道はこれだけ）----------
+   ★ 2026-09-18: 請求書は MF が作ります。ルールは「今月ぶんが MF から入ってきたか」を見張るだけ。 */
+function billingGaps(ym){
+  const out={ missing:[], mismatch:[] };
+  (DB.companies||[]).forEach(c=>{
+    if(c._gone || c.kind==='仕入先') return;
+    const rules=rulesOfCompany(c.id).filter(r=>r.kind!=='spot');
+    if(!rules.length) return;
+    const want=rules.reduce((s,r)=>s+Math.round(num(r.unitPrice)*(1+(TAX_RATE[r.taxCat||'課税10%']||0))),0);
+    const invs=(DB.invoices||[]).filter(i=>AR_LIVE(i)&&String(i.companyId)===String(c.id)&&ymOfDoc(i)===ym);
+    if(!invs.length){ out.missing.push({ c, want }); return; }
+    const got=invs.reduce((s,i)=>s+docTotal(i),0);
+    if(want && got!==want) out.mismatch.push({ c, want, got });
+  });
+  return out;
+}
+function openBillingGap(ym){
+  ym = ym || defaultYmIn(CUR_FY);
+  const g=billingGaps(ym);
+  openModal(`<h3>請求もれチェック — ${esc(ym)}</h3>
+    <div class="mdsub">請求書は Money Forward で作ります。ここは「ルールがあるのに請求が入っていない／金額が違う」取引先を知らせるだけです。</div>
+    <div class="form-grid"><div><label>対象月</label><input type="month" value="${attr(ym)}" onchange="closeModal();openBillingGap(this.value)"></div></div>
+    ${g.missing.length? `<div class="form-section" style="margin-top:12px;">${IC.warn} 請求が入っていない（${g.missing.length}社）</div>
+      <div class="table-wrap"><table><thead><tr><th>取引先</th><th class="r">ルール上の金額（税込）</th></tr></thead>
+      <tbody>${g.missing.map(x=>`<tr><td>${esc(x.c.name)}</td><td class="r num">${moneyPlain(x.want)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="infobar" style="margin-top:12px;">ルールのある取引先は、すべて請求が入っています。</div>'}
+    ${g.mismatch.length? `<div class="form-section" style="margin-top:12px;">金額がルールと違う（${g.mismatch.length}社）</div>
+      <div class="table-wrap"><table><thead><tr><th>取引先</th><th class="r">ルール</th><th class="r">実際の請求</th><th class="r">差</th></tr></thead>
+      <tbody>${g.mismatch.map(x=>`<tr><td>${esc(x.c.name)}</td><td class="r num">${moneyPlain(x.want)}</td><td class="r num">${moneyPlain(x.got)}</td>
+        <td class="r num minus">${moneyPlain(x.got-x.want)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+
+/* ---------- 自動消込（規則はサーバー。ここは押すだけ）---------- */
+async function mfReconcile(dry){
+  if(!canEdit('receipts')){ toast('権限がありません。','err'); return; }
+  try{
+    const d=await mfCall('/mf/reconcile', { dryRun: !!dry });
+    if(dry){ mfReconcileReport(d); return; }
+    await pullState(); renderPage(CURRENT_PAGE);
+    toast(`自動消込 ${d['自動消込']||0}件 ／ 要確認 ${d['要確認']||0}件`, 'ok');
+    if((d['要確認']||0)+(d['振込名義が未対応']||0)) mfReconcileReport(d);
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+function mfReconcileReport(d){
+  openModal(`<h3>自動消込の結果</h3>
+    <div class="mf-sum"><span>消し込んだ <b>${d['自動消込']||0}</b></span><span class="minus">要確認 <b>${d['要確認']||0}</b></span>
+      <span class="minus">振込名義が未対応 <b>${d['振込名義が未対応']||0}</b></span></div>
+    ${(d.unknownPayer||[]).length?`<div class="form-section">振込名義が どの取引先か分かりません</div>
+      <div class="table-wrap" style="max-height:30vh;"><table><thead><tr><th>入金日</th><th>振込名義</th><th class="r">金額</th><th></th></tr></thead>
+      <tbody>${d.unknownPayer.map(x=>`<tr><td>${esc(x.date)}</td><td>${esc(x.payerName||'')}</td><td class="r num">${moneyPlain(x.amount)}</td>
+        <td><a class="pillbtn pill-new" onclick="closeModal();mfPayerMap('${attr(x.paymentId)}')">取引先を決める</a></td></tr>`).join('')}</tbody></table></div>`:''}
+    ${(d.none||[]).length?`<div class="form-section" style="margin-top:10px;">金額が合わず、消し込めなかった入金</div>
+      <div class="table-wrap" style="max-height:30vh;"><table><thead><tr><th>取引先</th><th>理由</th><th></th></tr></thead>
+      <tbody>${d.none.map(x=>`<tr><td>${esc(arCoName(x.companyId))}</td><td class="muted">${esc(x.reason||'')}</td>
+        <td><a class="pillbtn pill-save" onclick="closeModal();openPayment('${attr(x.paymentId)}')">開く</a></td></tr>`).join('')}</tbody></table></div>`:''}
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
+/** 振込名義 → 取引先。決めたら companies.bankPayerNames に覚える（次から自動で当たる） */
+function mfPayerMap(paymentId){
+  const p=findById('payments',paymentId); if(!p) return;
+  const cos=(DB.companies||[]).filter(c=>!c._gone && c.kind!=='仕入先').slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  openModal(`<h3>この振込は どの取引先ですか？</h3>
+    <div class="mdsub">振込名義：<b>${esc(p.payerName||'（名義なし）')}</b> ／ ${esc(p.date||'')} ／ <b class="num">${moneyPlain(p.amount)}</b> 円</div>
+    <div class="form-grid"><div class="full"><label>取引先</label><select id="mfPayerCo">
+      ${cos.map(c=>`<option value="${attr(c.id)}" ${String(c.id)===String(p.companyId)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      <div class="fhelp">決めると、この振込名義は次から自動でこの取引先になります。</div></div></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="mfPayerMapGo('${attr(paymentId)}')">決定して消し込む</button></div>`);
+}
+async function mfPayerMapGo(paymentId){
+  const p=findById('payments',paymentId), cid=document.getElementById('mfPayerCo').value;
+  if(!p||!cid) return;
+  if(!periodGuard([p.date], '入金')) return;
+  const c=findById('companies',cid);
+  if(c && p.payerName){
+    const names=(c.bankPayerNames||[]).slice();
+    if(!names.some(x=>String(x)===String(p.payerName))){ names.push(p.payerName); commitRecord('companies',{ bankPayerNames:names },{ existingId:cid }); }
+  }
+  p.companyId=cid; p.updatedAt=new Date().toISOString(); markDirty('payments', p);
+  closeModal(); await pushDelta(); mfReconcile(false);
+}
+function mfNormPayer(s){ return String(s||'').normalize('NFKC')
+  .replace(/^(振込|フリコミ|入金|ATM|口座振替)[\s:：]*/,'')
+  .replace(/カブシキガイシャ|ユウゲンガイシャ|ゴウドウガイシャ|カ\)|\(カ|ユ\)|\(ユ/g,'')
+  .replace(/[\s　・,.，。\-ー－]/g,'').toLowerCase(); }
+const mfPayerCompany = payer => {
+  const n=mfNormPayer(payer); if(!n) return '';
+  const cos=(DB.companies||[]).filter(c=>!c._gone);
+  const mapped=cos.filter(c=>(c.bankPayerNames||[]).some(x=>mfNormPayer(x)===n));
+  if(mapped.length===1) return String(mapped[0].id);
+  if(mapped.length>1) return '';
+  const hits=cos.filter(c=>{ const k=mfNormPayer(c.kana||c.name); return !!k && (k===n || (n.length>=4 && (k.indexOf(n)===0||n.indexOf(k)===0))); });
+  return hits.length===1? String(hits[0].id) : '';
+};
+
+/* ---------- 突合（この システム ⇔ MF 会計の試算表）---------- */
+let RECON_YM=null;
+function setReconYm(v){ RECON_YM=v; renderPage('arrecon'); }
+function viewArRecon(){
+  const ym = RECON_YM || defaultYmIn(CUR_FY);
+  const tb=(DB.trialBalance||[]).filter(r=>String(r.ym)===ym);
+  const hit=tb.find(r=>String(r.name).indexOf('売掛金')>=0);
+  const mfAr = hit? num(hit.amount) : null;
+  const fin = arCompanyIds().reduce((s,id)=>s+arMonthly(id,[ym])[0].closing,0);
+  const diff = mfAr==null? null : fin-mfAr;
+  const invs=(DB.invoices||[]).filter(i=>AR_LIVE(i)&&ymOfDoc(i)<=ym);
+  const sus={
+    未確認の請求: invs.filter(i=>i.confirmStatus==='未確認'),
+    MFと差異: invs.filter(i=>i.mfDiff),
+    取引先が未対応: invs.filter(i=>!i.companyId),
+    未消込の入金: (DB.payments||[]).filter(p=>p.status!=='取消'&&String(p.date).slice(0,7)<=ym&&!(p.allocations||[]).length),
+  };
+  const box=(label,list,go)=>`<div class="kpi ${list.length&&go?'clickable':''}" ${list.length&&go?`onclick="${go}"`:''}>
+    <div class="lbl">${label}</div><div class="num ${list.length?'minus':''}">${list.length}</div>
+    ${list.length?`<div class="sub">${esc(list.slice(0,3).map(x=>arCoName(x.companyId)||x.payerName||'').filter(Boolean).join('、'))}${list.length>3?' ほか':''}</div>`:''}</div>`;
+  const fyOfYm2 = y => fyOf(y);
+  const closed = isClosedFy(fyOfYm2(ym));
+  const mgr = myRole()==='Admin'||myRole()==='Manager';
+  return pageShell({ title:'突合（会計との照合）',
+    sub:'この システムの売掛残高と、MF 会計の試算表の「売掛金」を突き合わせます。合っていればその期を締められます。',
+    tools:`<input type="month" value="${attr(ym)}" onchange="setReconYm(this.value)" style="padding:6px 9px;border:1px solid var(--border-strong);border-radius:8px;">
+      ${mgr?`<button class="btn secondary" onclick="openMfImport('trial-balance')">試算表を取り込む</button>`:''}
+      ${isAdmin()?`<button class="btn secondary" onclick="goto('settings')">期を締める（設定）</button>`:''}`,
+    body:`
+      <div class="kpi-grid">
+        <div class="kpi"><div class="lbl">この システムの売掛残高（${esc(ym)} 末）</div><div class="num">¥${arAmt(fin)}</div></div>
+        <div class="kpi"><div class="lbl">試算表の売掛金</div><div class="num">${mfAr==null?'<span class="zero">未取込</span>':'¥'+arAmt(mfAr)}</div>
+          <div class="sub">${tb.length? `${tb.length}科目を取込済み` : 'MF 会計の試算表を取り込んでください'}</div></div>
+        <div class="kpi"><div class="lbl">差</div><div class="num ${diff?'minus':(diff===0?'plus':'')}">${diff==null?'—':'¥'+arAmt(diff)}</div>
+          <div class="sub">${diff===0?'一致しています':(diff==null?'':'下の疑わしい伝票を確認してください')}</div></div>
+        <div class="kpi"><div class="lbl">この期</div><div class="num">${esc(fyShort(fyOfYm2(ym)))}</div>
+          <div class="sub">${closed?'締め済み':'まだ開いています'}</div></div>
+      </div>
+      <div class="form-section">差の原因になりやすいもの</div>
+      <div class="kpi-grid">
+        ${box('未確認の請求', sus.未確認の請求, "goto('arconfirm')")}
+        ${box('MF と差異', sus.MFと差異, "goto('arconfirm')")}
+        ${box('取引先が未対応', sus.取引先が未対応, "goto('arconfirm')")}
+        ${box('未消込の入金', sus.未消込の入金, "goto('receipts')")}
+      </div>
+      ${mfAr==null? `<div class="infobar">試算表を取り込むと差が出ます。API が未接続でも、MF 会計から出した CSV を読み込めます。</div>`:''}
+      ${tb.length? `<div class="form-section" style="margin-top:14px;">取り込んだ試算表（${esc(ym)}）</div>
+        <div class="table-wrap"><table><thead><tr><th>コード</th><th>勘定科目</th><th class="r">残高</th></tr></thead>
+        <tbody>${tb.slice(0,60).map(r=>`<tr><td>${esc(r.code||'')}</td><td>${esc(r.name)}</td><td class="r num">${moneyPlain(r.amount)}</td></tr>`).join('')}</tbody></table></div>`:''}` });
+}
+
+/* ---------- 経理へ渡す 消込一覧 CSV ---------- */
+async function mfSettlementCsv(ym){
+  ym = ym || defaultYmIn(CUR_FY);
+  try{
+    const r=await fetch(API_BASE+'/mf/settlement.csv?month='+encodeURIComponent(ym), { headers:headers() });
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.message||('HTTP '+r.status)); }
+    const b=await r.blob(), url=URL.createObjectURL(b), a=document.createElement('a');
+    a.href=url; a.download=`消込一覧_${ym}.csv`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    toast('消込一覧を保存しました。経理へお渡しください。','ok');
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+function openSettlementPick(){
+  const ym=defaultYmIn(CUR_FY);
+  openModal(`<h3>消込一覧を出す（経理へ）</h3>
+    <div class="mdsub">入金1件ごとに「どの請求書に充てたか・手数料はいくらか」を並べた CSV です。MF 会計で仕訳を入れるのは経理です。</div>
+    <div class="form-grid"><div><label>対象月（入金日）</label><input type="month" id="stlYm" value="${attr(ym)}"></div></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="mfSettlementCsv(document.getElementById('stlYm').value);closeModal()">CSVを保存</button></div>`);
 }
 
 function viewInvoices(){
@@ -4228,7 +4551,7 @@ function viewInvoices(){
       {cls:'r',html:''},{cls:'r',html:`<b class="num">${moneyPlain(bal)}</b>`},{html:''},{html:''},{html:''}] });
 
   const tools = `${searchBox(p,'請求番号・取引先で検索')}${filterClearBtn(p)}
-    ${canCreate('invoices')?`<button class="btn" onclick="openGenerate()">請求を作成（月まとめ）</button>`:''}
+    ${canCreate('invoices')?`<button class="btn secondary" onclick="openBillingGap()">請求もれチェック</button>`:''}
     ${toolsMenu(`
       ${canCreate('invoices')?`<button class="btn secondary" onclick="openForm('invoices')">＋ 個別に請求を作成</button>`:''}
       <hr>
@@ -4251,79 +4574,11 @@ function confirmInvoice(id){
 }
 
 /* ---------- 請求のまとめ作成（CRMの在籍者数 × 単価） ---------- */
-let GEN_CTX=null;
-function openGenerate(){
-  const ym = addMonths(thisMonth(),0);
-  openModal(`<h3>請求をまとめて作成</h3>
-    <div class="mdsub">請求ルールのある取引先について、その月の請求書（作成中）をまとめて作ります。</div>
-    <div class="form-grid">
-      <div class="full"><label>対象月（計上月）</label>
-        <input id="genYm" type="month" value="${attr(ym)}" onchange="genPreview()"></div>
-    </div>
-    <div id="genBox" style="margin-top:12px;"></div>
-    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
-      <button class="btn" id="genGoBtn" onclick="genGo()">この内容で作成</button></div>`,'lg');
-  genPreview();
-}
-function genPreview(){
-  const ym=document.getElementById('genYm').value;
-  const box=document.getElementById('genBox');
-  if(!ym){ box.innerHTML=''; return; }
-  const targets=[], noRule=[], already=[];
-  (DB.companies||[]).forEach(c=>{
-    if(c._gone) return;
-    if(c.kind==='仕入先') return;
-    const rules=rulesOfCompany(c.id).filter(r=>r.kind!=='spot');
-    const exists=(DB.invoices||[]).some(i=>String(i.companyId)===String(c.id)&&i.bookMonth===ym&&i.status!=='取消');
-    if(exists){ already.push(c); return; }
-    if(!rules.length){ if(arBalanceOf(c.id)>0||c.kind==='得意先') noRule.push(c); return; }
-    const {items,snapshot}=autoItemsFor(c.id,ym);
-    if(!items.length) return;
-    targets.push({company:c, items, snapshot, total:itemsSubtotal(items)+itemsTax(items)});
-  });
-  GEN_CTX={ ym, targets };
-  const rows=targets.map((t,i)=>`<tr>
-    <td><input type="checkbox" class="genck" data-i="${i}" checked></td>
-    <td><b>${esc(t.company.name)}</b>${genRisk(t.company.id)}</td>
-    <td style="white-space:normal;font-size:11.5px;" class="muted">${t.items.map(x=>esc(x.name)+(x.qty>1?` ${x.qty}名×${moneyPlain(x.price)}`:'')).join('<br>')}</td>
-    <td class="r num"><b>${moneyPlain(t.total)}</b></td>
-    <td>${esc(dueDateOf(t.ym||GEN_CTX.ym, t.company.closingDay, t.company.paySite, t.company.payDay))}</td></tr>`).join('');
-  box.innerHTML = `
-    ${targets.length? `<div class="table-wrap"><table>
-      <thead><tr><th style="width:34px;"><input type="checkbox" checked onchange="document.querySelectorAll('.genck').forEach(c=>c.checked=this.checked)"></th>
-        <th>取引先</th><th>内容</th><th class="r">請求額（税込）</th><th>入金期日</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
-      <div class="infobar" style="margin-top:8px;">合計 <b class="num">${moneyPlain(targets.reduce((s,t)=>s+t.total,0))}</b> 円 ／ ${targets.length}社。作成後は「作成中」です。内容を確認してから確定してください。</div>`
-      : `<div class="warnbar">この月に自動作成できる請求はありません。請求ルールが未設定か、すでに作成済みです。</div>`}
-    ${already.length? `<div class="infobar">すでに ${ym} の請求がある取引先（作成しません）：${already.map(c=>esc(c.name)).join('、')}</div>`:''}
-    ${noRule.length? `<div class="warnbar">請求ルールが未設定の取引先：${noRule.map(c=>`<a onclick="closeModal();openRules('${c.id}')" style="cursor:pointer;color:var(--primary);font-weight:600;">${esc(c.name)}</a>`).join('、')}
-      <div style="margin-top:4px;font-weight:400;">ルールを作ると翌月から自動で請求に入ります。単発の請求は「＋ 個別に請求を作成」から。</div></div>`:''}`;
-}
-/** 請求を作る前に知らせる危険: 長い延滞（評価D）・与信限度額超過 */
-function genRisk(companyId){
-  const g=payGrade(companyId,'ar'), over=creditOver(companyId);
-  if(g.g!=='D' && !over) return '';
-  const s=dunStatus(companyId);
-  return `<div style="font-size:11px;color:var(--danger);margin-top:2px;">${IC.warn}
-    ${g.g==='D'?`延滞 ${moneyPlain(s.amount)}円（最長${s.maxDays}日）`:''}${g.g==='D'&&over?' ・ ':''}${over?'与信限度額を超えています':''}</div>`;
-}
-function genGo(){
-  if(!GEN_CTX||!GEN_CTX.targets.length){ toast('作成する対象がありません。','err'); return; }
-  const picked=[...document.querySelectorAll('.genck:checked')].map(c=>GEN_CTX.targets[Number(c.dataset.i)]);
-  if(!picked.length){ toast('対象を選んでください。','err'); return; }
-  /* 止めはしない（請求するかは人が決める）。ただし、分かったうえで作ってもらう */
-  const risky=picked.filter(t=>payGrade(t.company.id,'ar').g==='D' || creditOver(t.company.id));
-  if(risky.length && !confirm(`次の取引先は 長い延滞 か 与信限度額超過 があります：\n\n${risky.map(t=>'・'+t.company.name).join('\n')}\n\nそれでも請求書を作りますか？`)) return;
-  let n=0;
-  picked.forEach(t=>{
-    const rec={ companyId:t.company.id, bookMonth:GEN_CTX.ym, issueDate:'', status:'作成中',
-      items:t.items, workerSnapshot:t.snapshot, note:'自動作成（請求ルール）' };
-    prepareDoc('invoices', rec, null);
-    rec.dueDate = dueDateOf(GEN_CTX.ym, t.company.closingDay, t.company.paySite, t.company.payDay);
-    commitRecord('invoices', rec, {}); n++;
-  });
-  closeModal(); renderPage('invoices'); toast(`${n}件の請求書（作成中）を作成しました。`,'ok');
-}
+/* ---------- 請求の自動作成は廃止（2026-09-18 利用者の指示）----------
+   ★ 請求書は Money Forward 請求書 で作ります。この システムが作ると MF と二重になり、
+     どちらが本物か分からなくなるためです。請求ルールは「今月ぶんが MF から入ってきたか」を
+     見張るためだけに残しました → openBillingGap()（請求もれチェック）。 */
+function openGenerate(){ openBillingGap(); }
 
 /* ---------- 入金・消込 ---------- */
 function viewReceipts(){
@@ -4348,7 +4603,12 @@ function viewReceipts(){
       if(num(r.feeShort)) return `<span class="badge b-red" title="振込手数料の差引き（先方負担）">手数料差引き −${moneyPlain(r.feeShort)}</span>`;
       if(num(r.fee)) return `<span class="badge b-gray" title="当社負担にした手数料">当社負担 ${moneyPlain(r.fee)}</span>`;
       return '<span class="zero">—</span>'; }},
+    {key:'payerName', label:'振込名義', val:r=>esc(r.payerName||'')},
     {key:'source', label:'取込元', raw:r=>PAY_SOURCE_LABEL[r.source||'manual']||r.source, val:r=>esc(PAY_SOURCE_LABEL[r.source||'manual']||r.source)},
+    {key:'match', label:'消込', noFilter:true, raw:r=>(r.allocations||[]).length?'消込済み':'未消込', val:r=>{
+      const n=(r.allocations||[]).length;
+      if(!n) return '<span class="mf-st s-open">未消込</span>';
+      return `<span class="mf-st s-ok">${n}件</span>${r.matchType?` <span class="muted" style="font-size:10.5px;">${esc(PAY_MATCH_LABEL[r.matchType]||r.matchType)}</span>`:''}`; }},
     {key:'att', label:'添付', noFilter:true, val:r=>attBtn('payments', r.id, r)},
     {key:'method', label:'方法', val:r=>esc(r.method||'')},
     {key:'note', label:'備考', noFilter:true, val:r=>esc(r.note||'')},
@@ -4367,6 +4627,8 @@ function viewReceipts(){
 /* 入金の出どころ。いまは手入力だけ。銀行・Money Forward などから取り込むときは
    payments に source（'bank' / 'mf' など）と 外部ID（extId）を付けて入れる — 計算は source を見ない。 */
 const PAY_SOURCE_LABEL = { manual:'手入力', mf:'Money Forward', bank:'銀行', api:'API', csv:'CSV' };
+/* 自動消込のやり方。どう当てたかを必ず残す（あとで人が追えるように） */
+const PAY_MATCH_LABEL = { exact:'自動（一致）', fee:'自動（手数料差引）', multi:'自動（まとめ払い）' };
 function unAllocated(){
   return (DB.payments||[]).filter(p=>p.status!=='取消')
     .reduce((s,p)=>s+Math.max(0, num(p.amount)-(p.allocations||[]).reduce((t,a)=>t+num(a.amount),0)),0);
@@ -7395,7 +7657,7 @@ function viewCoDetail(side, companyId){
 
   const next = nb? `<div class="panel"><div class="panel-hd"><b>次回の請求額（${esc(nb.ym)}分・繰越式）</b>
       <span class="sub">請求書にもこの形で載ります</span>
-      ${canCreate('invoices')?`<button class="btn sm" style="margin-left:auto;" onclick="openGenerate()">請求を作成</button>`:''}</div>
+      ${canCreate('invoices')?`<button class="btn sm" style="margin-left:auto;" onclick="openBillingGap()">請求もれチェック</button>`:''}</div>
     <div class="panel-bd"><table style="max-width:460px;font-size:13.5px;"><tbody>
       <tr><td>前回までの未回収</td><td class="r num">${moneyPlain(nb.unpaid)}</td></tr>
       <tr><td>過入金（差し引き）</td><td class="r num" style="color:var(--purple);">${nb.over?'− '+moneyPlain(nb.over):'0'}</td></tr>
@@ -9080,8 +9342,24 @@ function notifItems(){
     if(dd < Math.min(closing, daysInMonth(ym))) return false;          // まだ締めていない
     return !(DB.invoices||[]).some(i=>String(i.companyId)===String(c.id)&&i.bookMonth===ym&&i.status!=='取消');
   });
-  if(notBilled.length) out.push({ sev:'warn', key:'nobill', label:`${ym} の請求が未作成`,
-    n:notBilled.length, go:"openGenerate()", sub:notBilled.slice(0,4).map(c=>c.name).join('、')+(notBilled.length>4?' ほか':'') });
+  if(notBilled.length) out.push({ sev:'warn', key:'nobill', label:`${ym} の請求が Money Forward から入っていない`,
+    n:notBilled.length, go:"openBillingGap()", sub:notBilled.slice(0,4).map(c=>c.name).join('、')+(notBilled.length>4?' ほか':'') });
+
+  /* ── Money Forward 連携の見張り（2026-09-18） ── */
+  const needCheck=(DB.invoices||[]).filter(mfNeedsCheck);
+  if(needCheck.length) out.push({ sev:'warn', key:'arconfirm', label:'確認待ちの請求',
+    n:needCheck.length, go:"goto('arconfirm')", sub:'Money Forward から入った請求を見て確定してください' });
+  const notMatched=(DB.payments||[]).filter(p=>p.status!=='取消' && !(p.allocations||[]).length);
+  if(notMatched.length) out.push({ sev:'warn', key:'unmatched', label:'未消込の入金',
+    n:notMatched.length, amount:notMatched.reduce((s2,p)=>s2+num(p.amount),0), go:"goto('receipts')",
+    sub:'自動で消し込めなかった入金です' });
+  /* 銀行の明細が2日以上入っていない＝連携が切れている疑い（取り込んだ実績がある場合だけ言う） */
+  const imported=(DB.payments||[]).filter(p=>p.status!=='取消' && ['mf','bank','csv','api'].includes(p.source||''));
+  if(imported.length){
+    const last=imported.map(p=>String(p.date||'')).sort().slice(-1)[0]||'';
+    if(last && daysBetween(last, today())>2) out.push({ sev:'warn', key:'mfstale', label:'銀行の入出金明細が止まっています',
+      n:daysBetween(last, today()), go:"goto('apilink')", sub:`最後に入った明細は ${last}。銀行連携か同期をご確認ください` });
+  }
 
   /* ── 作成中のまま置き去りの請求 ── */
   const draft=(DB.invoices||[]).filter(i=>i.status==='作成中'&&i.updatedAt&&daysBetween(String(i.updatedAt).slice(0,10),t)>7);
@@ -9186,6 +9464,10 @@ function markNotifSeen(){ try{ localStorage.setItem(NOTIF_SEEN_KEY, today()); }c
 const PAGE_GUIDE = {
   dashboard:  { step:'', what:'（入力はありません）', effect:'今日の数字：売上・未回収・支払予定・目標' },
 
+  arconfirm:  { step:'③', what:'<b>請求を取り込む</b>（Money Forward）→ 中身を見て <b>確定</b>。取引先が未対応なら決める',
+                effect:'確定した請求だけが 売掛金 と 自動消込 の相手になります' },
+  arrecon:    { step:'⑦', what:'MF 会計の<b>試算表</b>を取り込み、売掛残高と突き合わせる',
+                effect:'差が 0 なら、その期を締められます（設定 › 基本設定）' },
   arbook:     { step:'③', what:'<b>Money Forward から取り込む</b>→ 入金を記録',
                 effect:'前月残高＋請求−入金＝月末残高。期日超過は赤' },
   invoices:   { step:'③', what:'<b>請求を作成（月まとめ）</b> → 内容を確認 → <b>確定</b>。単発は「＋ 個別に請求を作成」',
@@ -10136,7 +10418,7 @@ let API_META=null, API_KEYS=[], API_TAB='keys', API_FORM=null;
 function viewApiLink(){
   return pageShell({ title:'API・AI連携', 
     tools:`${isAdmin()?`<button class="btn" onclick="apiKeyForm()">＋ 鍵を発行</button>`:''}`,
-    body:`<div class="tabs">
+    body:`<div id="mfPanel"></div><div class="tabs">
       <button class="${API_TAB==='keys'?'on':''}" onclick="setApiTab('keys')">鍵の一覧</button>
       <button class="${API_TAB==='howto'?'on':''}" onclick="setApiTab('howto')">つなぎ方</button>
       <button class="${API_TAB==='logs'?'on':''}" onclick="setApiTab('logs')">連携ログ</button>
@@ -10144,6 +10426,7 @@ function viewApiLink(){
 }
 function setApiTab(t){ API_TAB=t; renderPage('apilink'); }
 async function loadApiLink(){
+  mfPanelLoad();
   const box=document.getElementById('apiBox'); if(!box) return;
   try{
     if(!API_META){ const m=await fetch(API_BASE+'/apimgmt/meta',{headers:headers()}); API_META=await m.json(); }
