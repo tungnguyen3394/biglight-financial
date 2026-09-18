@@ -301,9 +301,27 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
 
 /** 計画どおりに state を書き換える（冪等: 同じ入力を何度流しても同じ結果）
     ① 何も似ていない取引先は 得意先 を作る → ② 請求を入れる → ③ 似ている取引先は 待ち行列（mfPartnerQueue）に置く */
-export function applyBillings(state: any, items: Billing[], opts: { map?: Record<string, string>; actor?: string; source?: string; autoCreate?: boolean } = {}) {
+export function applyBillings(state: any, items: Billing[], opts: { map?: Record<string, string>; actor?: string; source?: string; autoCreate?: boolean; linkOnly?: boolean } = {}) {
   const now = new Date().toISOString(), actor = opts.actor || 'mf-sync'
   const stamp = { updatedAt: now, updatedBy: actor }
+  /* ★ 2026-09-19 利用者の指示: 請求書 API から請求を作らない（正は MF 会計 の元帳）。linkOnly ＝ 元帳から入った請求に
+     番号が同じ 請求書 の PDF・リンク・期日 を付けるだけ。新規・更新・取引先の作成・待ち行列 は何もしない。 */
+  if (opts.linkOnly) {
+    const plan = planBillings(state, items, undefined, { autoCreate: false })
+    const out = { ...state, invoices: arr(state, 'invoices').slice() }
+    const byId = new Map<string, number>(out.invoices.map((r: any, i: number) => [String(r.id), i] as [string, number]))
+    let n = 0
+    for (const a of plan.adopt) {
+      if (!a.ledger) continue
+      const i = byId.get(String(a.ex.id)); if (i == null) continue
+      out.invoices[i] = { ...out.invoices[i], mfId: String(a.b.mfId), mfUpdatedAt: a.b.updatedAt || '', mfStatus: a.b.mfStatus || '', mfPdfUrl: a.b.pdfUrl || '', mfWebUrl: a.b.webUrl || '', mfPartnerId: a.b.partnerId || '',
+        no: out.invoices[i].no || a.rec.no, dueDate: out.invoices[i].dueDate || a.rec.dueDate, taxCat: out.invoices[i].taxCat || a.rec.taxCat, ...stamp }; n++
+    }
+    for (const x of plan.same) { const i = byId.get(String(x.ex.id)); if (i == null) continue
+      if (x.b.pdfUrl && !out.invoices[i].mfPdfUrl) out.invoices[i] = { ...out.invoices[i], mfPdfUrl: x.b.pdfUrl }
+      if (x.b.webUrl && !out.invoices[i].mfWebUrl) out.invoices[i] = { ...out.invoices[i], mfWebUrl: x.b.webUrl } }
+    return { state: out, plan, made: [], stats: { リンクを付けた: n, 変更なし: plan.same.length, 元帳に無い請求書: plan.create.length + plan.newPartners.reduce((t, g) => t + g.n, 0) + plan.unmapped.reduce((t, g) => t + g.n, 0) } }
+  }
   let base = state
   /* ① 自動で作る取引先（作ってから計画を立て直すと、その会社に 取引先ID で当たる） */
   const first = planBillings(state, items, opts.map, { autoCreate: opts.autoCreate })

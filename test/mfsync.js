@@ -313,6 +313,15 @@ console.log('\n― MF 会計 の仕訳 → 請求（借方 売掛金。2026-09-1
   eq('あとから来た 請求書 API は 同じ行にリンクを付けるだけ（金額は元帳）', [r3.state.invoices.length, r3.state.invoices[0].mfId, r3.state.invoices[0].mfPdfUrl, r3.state.invoices[0].total, r3.stats['CSVの請求と同じ']], [1, 'm327', 'https://x/a.pdf', 82500, 1]);
 }
 
+{
+  /* linkOnly: 請求書 API は 請求を作らず、元帳の請求に PDF・リンクを付けるだけ */
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  const B = { extId: 'ji:J9:0', journalId: 'J9', date: '2026-08-16', amount: 82500, invoiceNo: '327', subAccount: '株式会社高山', remark: 'No.327', against: '売上高' };
+  const led = S.applyJournalBills(st, [B], {}).state;
+  const r = S.applyBillings(led, [bill({ mfId: 'm327', number: '327', partnerId: 'p1', total: 82500, pdfUrl: 'https://x/327.pdf' }), bill({ mfId: 'm999', number: '999', partnerId: 'p9', partnerName: '新しい会社', total: 5000 })], { linkOnly: true });
+  eq('linkOnly: 元帳の請求にリンクを付け、無い請求は作らず 会社も作らない', [r.state.invoices.length, r.state.invoices[0].mfPdfUrl, r.state.companies.length, r.stats['リンクを付けた'], r.stats['元帳に無い請求書']], [1, 'https://x/327.pdf', 3, 1, 1]);
+}
+
 console.log('\n― 入金の二重取り込み（指紋）―');
 {
   const st = baseState();

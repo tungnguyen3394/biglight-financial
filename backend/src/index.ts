@@ -622,8 +622,8 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       const plan = MFS.planBillings(await loadState(), items, args?.map)
       if (dry) return { ok: true, dryRun: true, plan: slimPlan(plan), count: items.length }
       let report: any[] = []
-      const out = await mutateState(me.email, 'mf-billings', (st) => {
-        const r = MFS.applyBillings(st, items, { map: args?.map, actor: me.email, source: csvText ? 'csv' : 'api' })
+      const out = await mutateState(me.email, args?.linkOnly ? 'mf-billing-links' : 'mf-billings', (st) => {
+        const r = MFS.applyBillings(st, items, { map: args?.map, actor: me.email, source: csvText ? 'csv' : 'api', linkOnly: !!args?.linkOnly })
         report = MFS.partnerReport(r.state, items, args?.map)
         return { state: r.state, stats: r.stats }
       })
@@ -716,14 +716,16 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       const to = args?.to || new Date().toISOString().slice(0, 10)
       const stats: any = {}
       /* ★ 2026-09-19: 正は MF 会計。請求（MF 請求書）→ 入金（MF 会計 の仕訳）→ 自動消込。銀行の生の明細は 自動では取らない（手で「仮」として取れる） */
-      stats.billings = (await mfSync('billings', { from, to }, me)).stats
-      try { stats.journals = (await mfSync('journals', { from, to }, me)).stats }
-      catch (e: any) { stats.journals = { エラー: String(e?.message || e) } }
+      /* ★ 2026-09-19 利用者の指示: 請求書 API からは請求を作らない。順: 元帳（請求・入金）→ 請求書のリンクを付ける → 自動消込 → 損益 */
+      stats.ledger = (await mfSync('journals', { from, to }, me)).stats
+      try { stats.links = (await mfSync('billings', { from, to, linkOnly: true }, me)).stats }
+      catch (e: any) { stats.links = { エラー: String(e?.message || e) } }
       stats.reconcile = (await mfSync('reconcile', {}, me)).stats
-      /* 予実の実績（試算表・損益）は 直近2か月ぶんを毎朝写す（経理が仕訳を足すと前月も動くため）。古い月は 手で期間を指定して取る */
+      /* 予実の実績（試算表・損益）: まだ一度も取っていなければ 全部の期、取ってあれば 直近2か月（経理が仕訳を足すと前月も動くため） */
       try { const t2 = new Date(Date.now() + 9 * 3600_000); const y = t2.getUTCFullYear(), m = t2.getUTCMonth() + 1
         const prev = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0')
-        stats.pl = (await mfSync('pl', { from: prev, to: y + '-' + String(m).padStart(2, '0') }, me)).stats }
+        const st2 = await loadState(); const hasPl = (Array.isArray(st2.actuals) ? st2.actuals : []).some((a: any) => a.source === 'mf')
+        stats.pl = (await mfSync('pl', { from: hasPl ? prev : from.slice(0, 7), to: y + '-' + String(m).padStart(2, '0') }, me)).stats }
       catch (e: any) { stats.pl = { エラー: String(e?.message || e) } }
       await mfRemember('ok', stats)
       return { ok: true, stats }

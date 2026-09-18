@@ -507,6 +507,10 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .mfp .panel-bd{font-size:13px;}
   .mfp-key{display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--surface-2);}
   .mfp-cards{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;}
+  .mfp-zones{grid-template-columns:repeat(4,1fr);}
+  .mfp-conn{display:flex; gap:8px 24px; flex-wrap:wrap; align-items:center; margin-top:10px; padding:8px 10px; border:1px solid var(--border); border-radius:10px;}
+  .mfp-conn .mfp-st{min-height:0;} .mfp-conn .mfp-btns{min-height:0; display:inline-flex;}
+  @media(max-width:1200px){ .mfp-zones{grid-template-columns:1fr 1fr;} }
   .mfp-card{display:flex; flex-direction:column; gap:8px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; min-width:0;}
   .mfp-hd{font-weight:700; font-size:14px; display:flex; align-items:center; gap:6px;}
   .mfp-hd svg{width:16px; height:16px;}
@@ -520,7 +524,7 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .mfp-auto svg{width:14px; height:14px; vertical-align:-2px;}
   .mfp-more{margin-top:8px;} .mfp-more summary{cursor:pointer; font-size:12px; color:var(--text-muted);}
   .btn.danger-t{color:var(--danger);}
-  @media(max-width:760px){ .mfp-cards{grid-template-columns:1fr;} .mfp-auto,.mfp-key{align-items:flex-start;} }
+  @media(max-width:760px){ .mfp-cards,.mfp-zones{grid-template-columns:1fr;} .mfp-auto,.mfp-key{align-items:flex-start;} }
 
   /* ===== 回収（売掛金）: 取引先 × 月 の残高表 ===== */
   .ar-kpis .num{font-size:21px;}
@@ -3286,7 +3290,9 @@ function arYmOfInv(inv){ return ymOfDoc(inv) || ymNorm(inv.issueDate) || ymNorm(
 const arCoName = id => String(companyName(id)).replace(/<[^>]+>/g,'') || '-';
 let AR_FILT = { open:false, over:false, owner:'', sort:'over' };
 /* ★ 2026-09-17: 並び順と担当の絞り込み。ツールのパネルで選ぶ */
-const AR_SORTS = [['over','期限超過が上'],['bal','残高が大きい順'],['name','取引先名順'],['owner','担当者順']];
+/* ★ 2026-09-19 利用者の指示: 並び順を増やす。既定は 期限超過が上、同じなら 取引の古い会社が上（新しく始まった会社は下） */
+const AR_SORTS = [['over','期限超過が上（新しい取引先は下）'],['bal','残高が大きい順'],['bal_asc','残高が小さい順'],['slow','入金が遅い順（最終入金が古い）'],
+  ['billed','請求累計が多い順'],['paid','入金累計が多い順'],['newest','取引が新しい順'],['oldest','取引が古い順'],['name','取引先名順'],['owner','担当者順']];
 let TOOLS_KEEP=false;          // 選んだあと ツールのパネルを開いたままにする
 
 /** 回収（売掛金）のデータ点検。「同期したのに数字が出ない」ときに、どの行が なぜ数えられていないかを見せる。
@@ -3524,7 +3530,7 @@ function viewArBook(){
   const p='arbook', fy=CUR_FY, months=fyMonths(fy), tm=thisMonth(), A=bookAnchor(fy);
   const all=arCompanyIds().map(id=>{
     const f=arFacts(id), m=arMonthly(id, months, f), now=arMonthly(id,[A.ym],f)[0];
-    return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:arStatus(now.closing, now.overdue) };
+    return { id, name:arCoName(id), m, bal:now.closing, over:now.overdue, st:arStatus(now.closing, now.overdue), ...arProfile(id, f) };
   });
   const q=(SEARCH[p]||'').trim().toLowerCase();
   all.forEach(r=>{ const c=findById('companies',r.id)||{}; r.staff=staffOf(c.owner); });
@@ -3559,7 +3565,7 @@ function viewArBook(){
     badge:arStatusBadge, flow:['＋ 請求額','− 入金額'], prevOf:(id,pm)=>arMonthly(id,pm), good:{ billed:true, payment:true, closing:false } });
   const table = all.length
     ? `<div class="table-wrap ar-wrap"><table class="ar-tbl"><thead>${G.head}</thead><tbody>${G.body||`<tr><td colspan="${G.ncol}" class="empty">条件に合う取引先はありません。</td></tr>`}${G.foot}</tbody></table></div>`
-    : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「Money Forward から取り込む」で請求を取り込むか、入金を記録してください。</div></div>`;
+    : `<div class="table-wrap"><div class="empty">まだ請求も入金もありません。<br>「MF 会計 の元帳から取り込む」で請求・入金を取り込んでください。</div></div>`;
 
   const mgr = myRole()==='Admin' || myRole()==='Manager';
   /* ★ 2026-09-17 利用者の指示: 表示・請求の入れ方・出力を ツール に集める。外は「入金を記録」だけ */
@@ -3577,7 +3583,7 @@ function viewArBook(){
       <button class="btn secondary" onclick="openArBillBulk()">＋ 請求を手入力（複数行）</button>
       <button class="btn secondary" onclick="arCsvTemplate()">${IC.doc} CSVテンプレート</button>
       <label class="btn secondary tp-file">${IC.doc} CSVを取り込む<input type="file" accept=".csv,text/csv" onchange="arCsvUpload(this.files[0]);this.value=''"></label>
-      ${mgr? `<button class="btn secondary" onclick="openMfImport('billings')">Money Forward から取り込む</button>` : ''}` : ''}
+      ${mgr? `<button class="btn secondary" onclick="openMfImport('journals')">MF 会計 の元帳から取り込む</button>` : ''}` : ''}
       <div class="tp-h">出力・点検</div>
       <div class="tp-two"><button class="btn secondary" onclick="exportArBookCsv()">${IC.doc} CSV出力</button>
         <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button></div>
@@ -3628,10 +3634,23 @@ function mfImportAlert(){
 function arFilt(k, v){ AR_FILT[k] = (k==='open'||k==='over')? !!v : String(v||''); TOOLS_KEEP=(k!=='chip'); renderPage('arbook'); }
 function arFiltClear(k){ AR_FILT[k] = (k==='open'||k==='over')? false : ''; renderPage('arbook'); }
 function arSorter(k){
-  if(k==='bal')   return (a,b)=>(b.bal-a.bal)||a.name.localeCompare(b.name,'ja');
+  const nm=(a,b)=>a.name.localeCompare(b.name,'ja');
+  if(k==='bal')     return (a,b)=>(b.bal-a.bal)||nm(a,b);
+  if(k==='bal_asc') return (a,b)=>(a.bal-b.bal)||nm(a,b);
+  if(k==='slow')    return (a,b)=>((a.lastPay||'')<(b.lastPay||'')?-1:(a.lastPay||'')>(b.lastPay||'')?1:0)||(b.bal-a.bal)||nm(a,b);
+  if(k==='billed')  return (a,b)=>(b.billed-a.billed)||nm(a,b);
+  if(k==='paid')    return (a,b)=>(b.paid-a.paid)||nm(a,b);
+  if(k==='newest')  return (a,b)=>((b.firstYm||'')<(a.firstYm||'')?-1:(b.firstYm||'')>(a.firstYm||'')?1:0)||nm(a,b);
+  if(k==='oldest')  return (a,b)=>((a.firstYm||'')<(b.firstYm||'')?-1:(a.firstYm||'')>(b.firstYm||'')?1:0)||nm(a,b);
   if(k==='name')  return (a,b)=>a.name.localeCompare(b.name,'ja');
   if(k==='owner') return (a,b)=>(a.staff.key? 0:1)-(b.staff.key? 0:1) || a.staff.name.localeCompare(b.staff.name,'ja') || (b.bal-a.bal);
-  return (a,b)=>(b.over-a.over)||(b.bal-a.bal)||a.name.localeCompare(b.name,'ja');
+  return (a,b)=>(b.over-a.over)||(b.bal-a.bal)||((a.firstYm||'')<(b.firstYm||'')?-1:(a.firstYm||'')>(b.firstYm||'')?1:0)||nm(a,b);
+}
+/** 会社の取引の「輪郭」: 最初の請求月・最終入金日・請求累計・入金累計（並び順と 取引先 の列に使う） */
+function arProfile(companyId, f){
+  f=f||arFacts(companyId);
+  const firstYm=f.bills.map(b=>b.ym).sort()[0]||'', lastPay=f.pays.map(p=>p.date).sort().slice(-1)[0]||'';
+  return { firstYm, lastPay, billed:f.bills.reduce((s,b)=>s+b.amount,0), paid:f.pays.reduce((s,p)=>s+p.amount,0) };
 }
 /** 今かかっている絞り込み・並び順（押すと外れる） */
 function arFiltChips(all){
@@ -4492,33 +4511,41 @@ async function mfPanelLoad(){
       <span class="sub">読むだけ。MF には何も書きません（仕訳は経理が MF 会計で入れます）</span></div>
     <div class="panel-bd">
       <div class="mfp-key"><div>${keyLine}</div><div class="mfp-btns">${keyBtn}</div></div>
-      <div class="mfp-cards">
+      <!-- ★ 2026-09-19 利用者の指示: 何をどこから取るかが一目で分かるように「区分」ごとに分ける。正は MF 会計。
+           請求書 API は 請求を作らない（元帳の請求に PDF・リンクを付けるだけ）。 -->
+      <div class="mfp-conn">
+        <div><b>接続</b></div>
+        <div class="mfp-st">会計 ${accSt} <span class="mfp-btns">${accBtn}</span></div>
+        <div class="mfp-st">請求書（PDF・リンク用） ${invSt} <span class="mfp-btns">${invBtn}</span></div>
+      </div>
+      <div class="mfp-cards mfp-zones">
         <section class="mfp-card">
-          <div class="mfp-hd">${IC.invoice||''} 請求書 <span class="muted">MF クラウド請求書</span></div>
-          <div class="mfp-what">読むもの：請求（取引先・日付・金額）</div>
-          <div class="mfp-st">${invSt}</div>
-          <div class="mfp-btns">${invBtn}</div>
-          <div class="mfp-ops">
-            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('billings')">請求を取り込む</button></div>`:''}
-            <div class="fhelp">${bsTxt? '最後：'+esc(bsTxt) : 'まだ取り込んでいません'}</div>
-          </div>
+          <div class="mfp-hd">① 回収（売掛金）</div>
+          <div class="mfp-what">MF 会計 の <b>売掛金の元帳</b>：借方＝請求、貸方＝入金。取引先は 補助科目・摘要。番号が同じ 請求書 に PDF・リンク</div>
+          <div class="mfp-ops">${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('journals')">元帳を取り込む</button></div>`:''}
+            <div class="fhelp">${mfStatsText(st.lastStats&&st.lastStats.ledger)||'まだ取り込んでいません'}</div></div>
         </section>
         <section class="mfp-card">
-          <div class="mfp-hd">${IC.yen||''} 会計 <span class="muted">MF クラウド会計</span></div>
-          <div class="mfp-what">読むもの：仕訳（取引先つきの入金）・試算表（損益＝予実の実績）・銀行明細</div>
-          <div class="mfp-st">${accSt}</div>
-          <div class="mfp-btns">${accBtn}</div>
-          <div class="mfp-ops">
-            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('journals')">売掛金の元帳（請求・入金）</button>
-              <button class="btn secondary sm" onclick="openMfImport('pl')">予実の実績（損益）</button>
-              <button class="btn secondary sm" onclick="openMfImport('trial-balance')">突合用の試算表</button>
-              <button class="btn secondary sm" onclick="openMfImport('transactions')" title="まだ仕訳していない銀行の明細を仮で入れる">銀行明細（仮）</button></div>`:''}
-            <div class="fhelp">${accOn? '使う口座：<span id="mfBankSel">読み込み中…</span>' : 'API が無くても CSV で取り込めます'}</div>
-          </div>
+          <div class="mfp-hd">② 予実管理（実績）</div>
+          <div class="mfp-what">MF 会計 の <b>試算表（損益）</b>：売上〜費用（販管費・営業外）を月ごとに。予算は こちらで入力、実績は MF か手入力</div>
+          <div class="mfp-ops">${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('pl')">損益を取り込む</button></div>`:''}
+            <div class="fhelp">${mfStatsText(st.lastStats&&st.lastStats.pl)||'まだ取り込んでいません'}</div></div>
+        </section>
+        <section class="mfp-card">
+          <div class="mfp-hd">③ 突合</div>
+          <div class="mfp-what">MF 会計 の <b>試算表（貸借）</b> の 売掛金 と こちらの売掛残 を突き合わせる（回収 › 突合）</div>
+          <div class="mfp-ops">${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('trial-balance')">貸借を取り込む</button></div>`:''}
+            <div class="fhelp">&nbsp;</div></div>
+        </section>
+        <section class="mfp-card">
+          <div class="mfp-hd">④ 仮（仕訳前の銀行明細）</div>
+          <div class="mfp-what">まだ仕訳していない銀行の入金を <b>仮</b> で見る。仕訳が来たら同じ入金は元帳の方に付け替わる</div>
+          <div class="mfp-ops">${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('transactions')">銀行明細（仮）</button></div>`:''}
+            <div class="fhelp">${accOn? '使う口座：<span id="mfBankSel">読み込み中…</span>' : '&nbsp;'}</div></div>
         </section>
       </div>
       <div class="mfp-auto">
-        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）MF 会計 の元帳（請求・入金）→ 請求書のリンク → 自動消込 → 予実の実績` : '<b class="minus">止めています</b>（押したときだけ）'}
+        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）① 元帳 → 請求書のリンク → 自動消込 → ② 損益` : '<b class="minus">止めています</b>（押したときだけ）'}
           ${adm?` <a onclick="mfSchedForm()" style="cursor:pointer;">設定を変える</a>`:''}</div>
         <div class="mfp-btns">
           ${mgr?`<button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button>`:''}
@@ -4754,7 +4781,7 @@ function viewArConfirm(){
   ];
   const mgr=myRole()==='Admin'||myRole()==='Manager';
   const tools=`${searchBox(p,'取引先・請求番号で検索')}
-    ${mgr&&canCreate('invoices')?`<button class="btn" onclick="openMfImport('billings')">請求を取り込む</button>`:''}
+    ${mgr&&canCreate('invoices')?`<button class="btn" onclick="openMfImport('journals')">MF 会計 の元帳から取り込む</button>`:''}
     ${canEdit('invoices')?`<button class="btn secondary" onclick="mfConfirmChecked()">選んだものを確定</button>`:''}
     ${toolsMenu(`<button class="btn secondary" onclick="openBillingGap()">請求もれチェック</button>`)}`;
   return pageShell({ title:'請求の確認', count:all.length, shown:rows.length,
@@ -9005,6 +9032,7 @@ function viewCompanies(mode){
   const tab = ['ar','ap','all'].includes(COLIST_TAB)? COLIST_TAB : 'ar';
   const p = tab==='ap'? 'vendors' : (tab==='all'? 'companiesAll' : 'companies');
   const act = coActivity();
+  const _prof={}; const prof=id=>_prof[id]||(_prof[id]=arProfile(id));
   const every=(DB.companies||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
   const n={ ar:every.filter(coIsAr).length, ap:every.filter(coIsAp).length, all:every.length };
   const all = tab==='ar'? every.filter(coIsAr) : tab==='ap'? every.filter(coIsAp) : every;
@@ -9022,6 +9050,9 @@ function viewCompanies(mode){
       return coKindBadge(r.kind) + (why? `<div style="font-size:10.5px;margin-top:2px;"><span class="minus">${esc(why)}</span>${canEdit('companies')?` <a onclick="event.stopPropagation();coMakeBoth('${attr(r.id)}')" style="cursor:pointer;color:var(--primary);">両方にする</a>`:''}</div>`:''); }},
     owner:{key:'owner', label:'BIGLIGHT担当', raw:r=>staffOf(r.owner).name, val:r=>r.owner? esc(staffOf(r.owner).name) : '<span class="zero">未設定</span>'},
     ar:{key:'ar', label:'売掛残', cls:'r', noFilter:true, val:r=>{const v=arBalanceOf(r.id); return v?`<b class="num minus">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
+    billed:{key:'billed', label:'請求累計', cls:'r', raw:r=>prof(r.id).billed, val:r=>{const v=prof(r.id).billed; return v?`<span class="num">${moneyPlain(v)}</span>`:'<span class="zero">0</span>';}},
+    paid:{key:'paid', label:'入金累計', cls:'r', raw:r=>prof(r.id).paid, val:r=>{const v=prof(r.id).paid; return v?`<span class="num plus">${moneyPlain(v)}</span>`:'<span class="zero">0</span>';}},
+    first:{key:'first', label:'取引開始', raw:r=>prof(r.id).firstYm, val:r=>prof(r.id).firstYm? esc(prof(r.id).firstYm) : '<span class="zero">—</span>'},
     ap:{key:'ap', label:'買掛残', cls:'r', noFilter:true, val:r=>{const v=apBalanceOf(r.id); return v?`<b class="num">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
     rules:{key:'rules', label:'請求ルール', noFilter:true, val:r=>{
       const rl=rulesOfCompany(r.id);
@@ -9043,9 +9074,9 @@ function viewCompanies(mode){
         ${prs.length?`<div class="muted" style="font-size:10.5px;">物件 ${prs.length}件</div>`:''}`; }},
     att:{key:'att', label:'添付', noFilter:true, val:r=>attBtn('companies', r.id)},
   };
-  const cols = tab==='ar'? [C.name, C.kind, C.owner, C.ar, C.rules, C.arSite, C.lastPay, C.arPerf, C.att]
+  const cols = tab==='ar'? [C.name, C.kind, C.owner, C.ar, C.billed, C.paid, C.first, C.rules, C.arSite, C.lastPay, C.arPerf, C.att]
     : tab==='ap'? [C.name, C.kind, C.ap, C.apSite, C.lastOut, C.buys, C.apPerf, C.att]
-    : [C.name, C.kind, C.owner, C.ar, C.ap, C.site, C.att];
+    : [C.name, C.kind, C.owner, C.ar, C.billed, C.paid, C.ap, C.site, C.att];
 
   const newKind = tab==='ap'? '仕入先' : '得意先';
   const tabs=`<div class="co-tabs" role="tablist">
@@ -9138,7 +9169,7 @@ function viewCoReview(){
   setTimeout(crPartnersLoad, 0);
   return pageShell({ title:'取引先の確認', count:queue.length+auto.length,
     tools: (isAdmin()? `<button class="btn secondary" onclick="openCleanupOld()">取り込みの点検（前の期・重複）</button>` : '')
-      + (mgr? `<button class="btn secondary" onclick="openMfImport('billings')">請求を取り込む</button>` : ''),
+      + (mgr? `<button class="btn secondary" onclick="openMfImport('journals')">MF 会計 の元帳から取り込む</button>` : ''),
     body: s4 + s1 + s2 + s3 + `<section class="cr-sec" id="crPartners">${crPartnersHtml()}</section>` });
 }
 /* ── MF の取引先の行き先（2026-09-18 利用者の指示:「奥田スチール が 取引先 に無いのはなぜ?」に画面で答える）──

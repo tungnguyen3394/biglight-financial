@@ -429,6 +429,18 @@ try{
   _db.actuals=keep;
 }catch(e){ console.log('  NG  予実の実績  →  '+e.message); fail++; }
 
+console.log('\n― 回収の並び順・取引先の累計（2026-09-19）―');
+try{
+  const cos=(_db.companies||[]).filter(c=>c.kind!=='仕入先');
+  const p=ctx.arProfile(cos[0].id);
+  eq('会社の輪郭（最初の請求月・最終入金・請求累計・入金累計）', [/^\d{4}-\d{2}$/.test(p.firstYm)||p.firstYm==='', p.billed>=0, p.paid>=0], [true, true, true]);
+  const rows=[{name:'b',bal:10,over:0,firstYm:'2026-01',lastPay:'2026-02-01',billed:5,paid:1},{name:'a',bal:10,over:0,firstYm:'2025-01',lastPay:'',billed:9,paid:9},{name:'c',bal:3,over:0,firstYm:'2024-01',lastPay:'2026-03-01',billed:1,paid:0}];
+  const by=k=>rows.slice().sort(ctx.arSorter(k)).map(r=>r.name).join('');
+  eq('並び順: 既定は 残高→取引の古い順、残高小、入金が遅い、請求累計、入金累計、新しい、古い', [by('over'),by('bal_asc'),by('slow'),by('billed'),by('paid'),by('newest'),by('oldest')], ['abc','cab','abc','abc','abc','bac','cab']);
+  const h=ctx.viewCompanies('');
+  eq('取引先（得意先）に 請求累計・入金累計・取引開始 の列', ['請求累計','入金累計','取引開始'].every(x=>h.includes(x)), true);
+}catch(e){ console.log('  NG  並び順  →  '+e.message); fail++; }
+
 console.log('\n― 取引先の3タブ・取引先の確認（2026-09-18）―');
 {
   const keepCo=_db.companies.slice(), keepQ=_db.mfPartnerQueue, keepInv=_db.invoices.slice();
@@ -822,7 +834,7 @@ console.log('\n― 回収のツール・請求の手入力（複数行）・CSV�
   const cos=(_db.companies||[]).filter(c=>c.kind!=='仕入先');
   const c1=cos[0], before=_db.invoices.length;
   el.innerHTML=''; const h=ctx.viewArBook();
-  eq('ツール: 並び順・絞り込み・担当・手入力・CSV・MF・出力', ['並び順','未回収のみ','期限超過のみ','担当','請求を手入力（複数行）','CSVテンプレート','CSVを取り込む','Money Forward から取り込む','CSV出力'].every(x=>h.includes(x)), true);
+  eq('ツール: 並び順・絞り込み・担当・手入力・CSV・MF・出力', ['並び順','未回収のみ','期限超過のみ','担当','請求を手入力（複数行）','CSVテンプレート','CSVを取り込む','MF 会計 の元帳から取り込む','CSV出力'].every(x=>h.includes(x)), true);
   eq('ツールの外に Money Forward のボタンは無い', /<\/summary>/.test(h) && h.split('<details')[0].includes('openMfImport'), false);
   const r=ctx.abBlank(); r.companyId=c1.id; r.total=110000; ctx.abFill(r);
   eq('手入力: 取引先の税区分・期日が入り、税抜は自動', [r.taxCat, r.net, !!r.dueDate], [c1.taxCat||'課税10%', 100000, true]);
