@@ -2007,7 +2007,14 @@ function autoItemsFor(companyId, ym){
 }
 
 /* ---------- 予実: 実績はここで「計算」される ---------- */
-function ymOfDoc(d){ return (d.bookMonth||'').slice(0,7); }
+/** 月の書き方をそろえる → 'YYYY-MM'。2026-09 / 2026/9 / 2026年9月 / 2026-09-30T… を受け付け、読めなければ '' */
+function ymNorm(v){
+  const t=String(v==null?'':v).trim(); if(!t) return '';
+  const m=t.match(/^(\d{4})\D?(\d{1,2})(?:\D|$)/); if(!m) return '';
+  const mo=Number(m[2]); if(mo<1||mo>12) return '';
+  return m[1]+'-'+String(mo).padStart(2,'0');
+}
+function ymOfDoc(d){ return ymNorm(d&&d.bookMonth); }
 /** 請求書1枚の売上（税抜）。明細があれば 収益科目の行だけ、無ければ税抜の合計。
     予実（actualSeries）と 担当者別の売上 は必ずこの1つの式を使う（合計が1円も違わないように）。 */
 function invRevenue(inv){
@@ -3189,7 +3196,7 @@ function viewMikomi(){
    ========================================================================== */
 const AR_LIVE = inv => !!inv && inv.status!=='取消' && inv.status!=='作成中';
 /** 請求の「月」: 計上月 → 請求日 → 期日 → 作った日。★ どれも無い請求は 回収に出ない（データ点検で見つける） */
-function arYmOfInv(inv){ return ymOfDoc(inv) || String(inv.issueDate||'').slice(0,7) || String(inv.dueDate||'').slice(0,7) || String(inv.createdAt||'').slice(0,7); }
+function arYmOfInv(inv){ return ymOfDoc(inv) || ymNorm(inv.issueDate) || ymNorm(inv.dueDate) || ymNorm(inv.createdAt); }
 const arCoName = id => String(companyName(id)).replace(/<[^>]+>/g,'') || '-';
 let AR_FILT = { open:false, over:false, owner:'', sort:'over' };
 /* ★ 2026-09-17: 並び順と担当の絞り込み。ツールのパネルで選ぶ */
@@ -3208,6 +3215,8 @@ function arDataCheckFacts(){
     fromCsv: live.filter(i=>i.source==='csv').length,
     draftOrCancel: inv.length-live.length,
     noDate: live.filter(i=>!arYmOfInv(i)),
+    future: live.filter(i=>arYmOfInv(i) && arYmOfInv(i)>thisMonth()),
+    badYm: live.filter(i=>i.bookMonth && !ymNorm(i.bookMonth)),
     zeroTotal: live.filter(i=>!docTotal(i)),
     noCompany: live.filter(i=>!i.companyId),
     lostCompany: live.filter(i=>i.companyId && !co(i.companyId)),
@@ -3240,6 +3249,8 @@ function arDataCheck(){
     </div>
     <div class="form-section">回収から外れている・ゼロになる原因</div>
     <div class="table-wrap" style="max-height:34vh;"><table><thead><tr><th>原因</th><th class="r">件数</th><th>例</th></tr></thead><tbody>
+      ${row('請求の月が 未来（今月より先）。表では「—」の列に隠れ、残高にもまだ入りません', f.future, i=>invF(i)+'／'+esc(arYmOfInv(i)))}
+      ${row('計上月の書き方が読めない', f.badYm, i=>invF(i)+'／「'+esc(String(i.bookMonth))+'」')}
       ${row('請求に日付が無い（計上月・請求日・期日・作成日 すべて無し）', f.noDate, invF)}
       ${row('請求の金額が 0', f.zeroTotal, invF)}
       ${row('請求に取引先が無い', f.noCompany, invF)}
@@ -3467,9 +3478,29 @@ function viewArBook(){
         <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button></div>
       <button class="btn secondary" onclick="arDataCheck()">データ点検（回収に出てこない理由）</button>
     </div>`)}`;
+  /* ★ 数字が何も出ないときは、黙って 0 を並べず「なぜ 0 か」を先に言う */
+  let why='';
+  if(all.length && all.every(r=>!r.bal && r.m.every(x=>!x.billed && !x.payment))){
+    const f=arDataCheckFacts();
+    const parts=[];
+    if(f.future.length)  parts.push(`未来の月の請求 ${f.future.length}件（例: ${esc(arYmOfInv(f.future[0]))}）`);
+    if(f.badYm.length)   parts.push(`計上月が読めない請求 ${f.badYm.length}件（例:「${esc(String(f.badYm[0].bookMonth))}」）`);
+    if(f.noDate.length)  parts.push(`日付の無い請求 ${f.noDate.length}件`);
+    if(f.zeroTotal.length) parts.push(`金額 0 の請求 ${f.zeroTotal.length}件`);
+    if(f.lostCompany.length) parts.push(`取引先が存在しない請求 ${f.lostCompany.length}件`);
+    if(f.noCompany.length) parts.push(`取引先の無い請求 ${f.noCompany.length}件`);
+    const months=Object.keys(f.byMonth).sort();
+    const inFy=months.filter(m=>m>=fyMonths(fy)[0] && m<=fyMonths(fy)[11]);
+    why=`<div class="alertbar" style="margin-bottom:10px;display:block;">${IC.warn} <b>この期（${esc(fyShort(fy))}）に数えられる請求・入金がありません。</b>
+      請求は全部で ${f.live}件（MF ${f.fromMf}・CSV ${f.fromCsv}）あり、月ごとの内訳は
+      ${months.length? months.map(m=>`${esc(m)}: ${f.byMonth[m].n}件`).join('・') : 'なし'}。
+      ${inFy.length? '' : ' この期の月（'+esc(fyMonths(fy)[0])+'〜'+esc(fyMonths(fy)[11])+'）に入る請求が1件もありません。'}
+      ${parts.length? '<br>原因の候補: '+parts.join('／') : ''}
+      <br><a onclick="arDataCheck()" style="cursor:pointer;">データ点検を開く</a>
+      ${mgr? ' ・ <a onclick="openMfImport(\'billings\')" style="cursor:pointer;">Money Forward から取り込み直す</a>' : ''}</div>`;
+  }
   return pageShell({ title:'回収（売掛金）', count:all.length, shown:rows.length,
-    
-    tools, body: kpis+filters+table });
+    tools, body: why+kpis+filters+table });
 }
 function arFilt(k, v){ AR_FILT[k] = (k==='open'||k==='over')? !!v : String(v||''); TOOLS_KEEP=(k!=='chip'); renderPage('arbook'); }
 function arFiltClear(k){ AR_FILT[k] = (k==='open'||k==='over')? false : ''; renderPage('arbook'); }

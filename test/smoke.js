@@ -631,6 +631,19 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   /* 売掛残高は どこで見ても 回収（売掛金）の式（前月残高＋請求−入金） */
   eq('取引先の売掛残 ＝ 回収の表の今月末残高', ctx.arBalanceOf('C1'), ctx.arMonthly('C1',[ctx.thisMonth()])[0].closing);
   eq('売掛残高の合計 ＝ 会社ごとの今月末残高の合計', ctx.arTotal(), ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[ctx.thisMonth()])[0].closing,0));
+  /* 月の書き方の揺れ（旧データ・CSV・MF）を同じ月として読む */
+  eq('月の書き方をそろえる', ['2026-09','2026/9','2026年9月','2026-09-30T00:00:00+09:00','2026-9-1','2026-13','あ',''].map(ctx.ymNorm),
+    ['2026-09','2026-09','2026-09','2026-09','2026-09','','','']);
+  eq('計上月が 2026/9 でも 9月の列に入る', ctx.arYmOfInv({ bookMonth:'2026/9' }), '2026-09');
+  {
+    /* 全部 0 のときは 表の上に理由が出る */
+    const d=ctx.__x.DB(); const keepInv=d.invoices, keepPay=d.payments;
+    d.invoices=[{ id:'FUT', companyId:'C1', status:'確定', total:99000, bookMonth:'2099-01' }]; d.payments=[];
+    const h=ctx.viewArBook();
+    eq('請求はあるのに この期に何も無いときは「なぜ 0 か」を先に言う', ['数えられる請求・入金がありません','未来の月の請求 1件','データ点検を開く'].every(x=>h.includes(x)), true);
+    d.invoices=keepInv; d.payments=keepPay;
+    eq('普段は その帯は出ない', ctx.viewArBook().includes('数えられる請求・入金がありません'), false);
+  }
   /* 間違えた入金は「取消」で直す（削除はサーバーが断る） */
   {
     const d=ctx.__x.DB(); const nInv=d.invoices.length, nPay=d.payments.length;

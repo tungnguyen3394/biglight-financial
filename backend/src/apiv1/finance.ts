@@ -136,7 +136,14 @@ export function docNet(doc: any, st?: any): number {
   /* ★ 2026-09-16: 以前は いつも ÷1.1。非課税・対象外の請求まで税を抜いていた → 税区分で割る */
   return Math.round(num(doc.total) / (1 + (TAX_RATE[docTaxCat(doc, st)] || 0)))
 }
-export const ymOfDoc = (d: any) => String((d && d.bookMonth) || '').slice(0, 7)
+/** 月の書き方をそろえる → 'YYYY-MM'（web/index.html の ymNorm と同じ）。2026/9・2026年9月・ISO日時 も受け付ける */
+export const ymNorm = (v: any): string => {
+  const t = String(v == null ? '' : v).trim(); if (!t) return ''
+  const m = t.match(/^(\d{4})\D?(\d{1,2})(?:\D|$)/); if (!m) return ''
+  const mo = Number(m[2]); if (mo < 1 || mo > 12) return ''
+  return m[1] + '-' + String(mo).padStart(2, '0')
+}
+export const ymOfDoc = (d: any) => ymNorm(d && d.bookMonth)
 
 /* ───────── 債権（売掛金）— 回収 ───────── */
 export function paidOfInvoice(st: any, inv: any): number {
@@ -164,7 +171,7 @@ export const openInvoices = (st: any) => arr(st, 'invoices').filter((i: any) => 
    画面の表と連携の数字が食い違っていた。openInvoices は 期日別の資金繰り・年齢表にだけ使う。 */
 export const AR_LIVE = (i: any) => !!i && i.status !== '取消' && i.status !== '作成中'
 /** 請求の「月」: 計上月 → 請求日 → 期日 → 作った日（web/index.html の arYmOfInv と同じ） */
-export const arYmOfInv = (i: any) => ymOfDoc(i) || String((i && i.issueDate) || '').slice(0, 7) || String((i && i.dueDate) || '').slice(0, 7) || String((i && i.createdAt) || '').slice(0, 7)
+export const arYmOfInv = (i: any) => ymOfDoc(i) || ymNorm(i && i.issueDate) || ymNorm(i && i.dueDate) || ymNorm(i && i.createdAt)
 /** 入金1件の受取額（振込手数料・調整を含む。web/index.html の received と同じ） */
 export const received = (p: any) => num(p.amount) + num(p.fee) + (Array.isArray(p.adjust) ? p.adjust : []).reduce((s: number, a: any) => s + num(a.amount), 0)
 /** 会社の月末残高（ym 末時点） */
