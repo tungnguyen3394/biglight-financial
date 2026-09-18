@@ -590,6 +590,7 @@ const slimPlan = (p: any) => ({
   新規: p.create.length, 更新: p.update.length, 変更なし: p.same.length, MF差異: p.diff.length,
   下書き除外: p.drafts, 締め済みで見送り: p.closed.length, 二重の疑い: p.dupWarn.length,
   取引先を自動作成: (p.newPartners || []).length, 古いデータで見送り: (p.stale || []).length,
+  前の期で見送り: (p.old || []).length, CSVの請求と同じ: (p.adopt || []).length,
   updateSample: p.update.slice(0, 80).map((x: any) => ({ id: x.ex.id, no: x.ex.no, companyId: x.ex.companyId, changed: x.changed,
     before: Object.fromEntries(x.changed.map((k: string) => [k, x.ex[k] ?? null])), after: Object.fromEntries(x.changed.map((k: string) => [k, x.rec[k] ?? null])) })),
   unmapped: p.unmapped.map((g: any) => ({ key: g.key, partnerId: g.partnerId, partnerName: g.partnerName, n: g.n, total: g.total, candidates: g.candidates })),
@@ -636,7 +637,7 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       if (csvText) { const p = MFS.parseBankCsv(csvText); if (p.error) throw new Error(p.error); items = p.items! }
       else items = await MF.fetchTransactions(String(args.from), String(args.to), (await cfgGet('mf_bank_account')) || '', mfDeps)
       const plan = MFS.planTransactions(await loadState(), items)
-      if (dry) return { ok: true, dryRun: true, plan: { 新規: plan.create.length, 取込済み: plan.dup.length + plan.fingerprint.length, 同じ入金が別の道で入り済み: plan.fingerprint.length, 締め済みで見送り: plan.closed.length, items: plan.create.slice(0, 80) }, count: items.length }
+      if (dry) return { ok: true, dryRun: true, plan: { 新規: plan.create.length, 取込済み: plan.dup.length + plan.fingerprint.length, 同じ入金が別の道で入り済み: plan.fingerprint.length, 締め済みで見送り: plan.closed.length, 前の期で見送り: plan.old.length, items: plan.create.slice(0, 80) }, count: items.length }
       const out = await mutateState(me.email, 'mf-transactions', (st) => {
         const r = MFS.applyTransactions(st, items, { actor: me.email, source: csvText ? 'csv' : 'mf' })
         return { state: r.state, stats: r.stats }
@@ -673,12 +674,11 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       if (busy) throw Object.assign(new Error(`いま同期中です（${busy.by.split('@')[0]} が ${busy.since.slice(11, 16)} に開始）。終わってからもう一度押してください。`), { busy: true })
       MF_RUN = { since: new Date().toISOString(), by: me.email, at: Date.now() }
       try {
-      /* ★ 2026-09-18: 以前は「60日前から」だけ見ていたため、それより前の請求しか無い取引先（例: 奥田スチール）は
-         自動同期では永久に入らず、古い請求を MF で直しても こちらに届かなかった。
-         いまは「前の期の初め（8月1日）から」見る。締めた期は mfsync 側で動かさない。 */
-      const jst = new Date(Date.now() + 9 * 3600_000)
-      const fy = jst.getUTCMonth() + 1 >= MFS.FY_START_MONTH ? jst.getUTCFullYear() : jst.getUTCFullYear() - 1
-      const from = args?.from || `${fy - 1}-${String(MFS.FY_START_MONTH).padStart(2, '0')}-01`
+      /* ★ 2026-09-19 利用者の指示: 前の期のものは 絶対に 新しい期に入れない。
+         （09-18 に「前の期の初めから」にしたのは誤り: 第5期の請求が全部入り、入金の無い 売掛残 に見えた）
+         いまは「取り込んでよい期の初め」（mfsync.importFromYm ＝ この期の 8月1日）から。
+         MF に聞く期間をこうしても、規則そのものは mfsync.ts が 請求1件ずつ もう一度確かめる。 */
+      const from = args?.from || (MFS.importFromYm(await loadState()) + '-01')
       const to = args?.to || new Date().toISOString().slice(0, 10)
       const stats: any = {}
       stats.billings = (await mfSync('billings', { from, to }, me)).stats
@@ -728,6 +728,20 @@ app.get('/mf/partners', async (req, res) => {
     return { ...p, companyId: String(m.companyId), companyName: String(c?.name || ''), result: c && c.source === 'mf' && c.needsReview ? 'created' : 'matched' }
   })
   res.json(d)
+})
+/* 前の期の取り込みを片づける（管理者だけ・dryRun で中身を見てから） */
+app.post('/mf/cleanup-old', async (req, res) => {
+  const me = await requireActive(req, res); if (!me) return
+  if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only', message: '片づけられるのは管理者だけです。' })
+  const since = String(req.body?.since || '')
+  if (!/^\d{4}-\d{2}-\d{2}/.test(since)) return res.status(400).json({ error: 'bad-since', message: 'いつ以降に取り込んだ分か（YYYY-MM-DD）を指定してください。' })
+  try {
+    if (req.body?.dryRun) { const r = MFS.cleanupBeforeImport(await loadState(), { since }); return res.json({ ok: true, dryRun: true, stats: r.stats, byDay: r.byDay, sample: r.sample, companies: r.companies }) }
+    let extra: any = {}
+    const out = await mutateState(me.email, 'mf-cleanup-old', (st) => { const r = MFS.cleanupBeforeImport(st, { since }); extra = { byDay: r.byDay, companies: r.companies }; return { state: r.state, stats: r.stats } })
+    mfAudit(me.email, 'mf-cleanup-old', { since, stats: out.stats, ...extra })
+    res.json({ ok: true, stats: out.stats, ...extra })
+  } catch (e: any) { res.status(400).json({ error: 'bad-request', message: String(e?.message || e) }) }
 })
 mfReview('/mf/partners/resolve', 'mf-partner-resolve', (st, b, me) => MFS.resolvePartnerQueue(st, String(b.id || ''), String(b.action || ''), String(b.companyId || ''), me.email))
 mfReview('/mf/partners/merge', 'mf-partner-merge', (st, b, me) => MFS.mergeCompanies(st, String(b.fromId || ''), String(b.toId || ''), me.email))

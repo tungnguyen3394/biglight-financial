@@ -46,6 +46,24 @@ export const closedFys = (state: any): number[] => ((state?.settings?.closedFy) 
 /** 締めた期に属する月か（画面の isClosedFy と同じ意味。authz.checkClosedPeriods とも揃えています） */
 export const isClosedYm = (state: any, ym: any) => { const f = fyOfYm(ym); return f != null && closedFys(state).includes(f) }
 
+/* ---------- 取り込んでよい期（2026-09-19 利用者の指示）----------
+   ★「前の期のものを 絶対に 新しい期に入れない」。MF 会計 では新しい期をまだ開いていない。
+     以前 自動同期を「前の期の初めから」にしたため 第5期の請求が全部入り、入金の無い 売掛残 として
+     第6期に繰り越されて見えてしまった（データの誤り）。
+   ★ 取り込むのは「計上月（入金なら入金日）が この期（今日の日本時間で決まる期）の初め 以降」だけ。
+     settings.mfImportFrom（YYYY-MM）があれば そちらを使う。
+     人が期間を選んでも、自動同期でも、CSV でも同じ（ここ1か所で決める）。 */
+export function currentFy(now = Date.now()): number {
+  const jst = new Date(now + 9 * 3600_000)
+  return jst.getUTCMonth() + 1 >= FY_START_MONTH ? jst.getUTCFullYear() : jst.getUTCFullYear() - 1
+}
+export function importFromYm(state: any, now = Date.now()): string {
+  const s = String(state?.settings?.mfImportFrom || '')
+  if (/^\d{4}-\d{2}$/.test(s)) return s
+  return currentFy(now) + '-' + String(FY_START_MONTH).padStart(2, '0')
+}
+export const isBeforeImport = (state: any, ym: any) => { const y = ymOf(ym); return !!y && y < importFromYm(state) }
+
 /* ---------- 取引先の対応づけ ----------
    ★ 2026-09-18 利用者の指示（MF で作った新しいお客さんが 回収 に出てこない問題）:
      ① MF の取引先ID で当たる            → そのまま使う
@@ -203,23 +221,26 @@ export type BillingPlan = {
   unmapped: { key: string; partnerId: string; partnerName: string; n: number; total: number; candidates: string[]; items: Billing[] }[]
   newPartners: { key: string; partnerId: string; partnerName: string; n: number; total: number }[]
   learn: { companyId: string; partnerId: string; partnerName: string }[]
-  drafts: number; closed: any[]; dupWarn: any[]; stale: any[]
+  drafts: number; closed: any[]; dupWarn: any[]; stale: any[]; old: any[]; adopt: any[]
 }
 
 /** 取り込みの計画を立てる（画面の確認・cron・テストが同じものを見る）
     opts.autoCreate=false のときは、何も似ていない取引先も 待ち行列（unmapped）に回す。 */
 export function planBillings(state: any, items: Billing[], map?: Record<string, string>, opts: { autoCreate?: boolean } = {}): BillingPlan {
   const autoCreate = opts.autoCreate !== false
-  const out: BillingPlan = { create: [], update: [], diff: [], same: [], unmapped: [], newPartners: [], learn: [], drafts: 0, closed: [], dupWarn: [], stale: [] }
+  const out: BillingPlan = { create: [], update: [], diff: [], same: [], unmapped: [], newPartners: [], learn: [], drafts: 0, closed: [], dupWarn: [], stale: [], old: [], adopt: [] }
   const invoices = arr(state, 'invoices')
   const byMf = new Map(invoices.filter((i: any) => i.mfId).map((i: any) => [String(i.mfId), i]))
   const unmapped = new Map<string, BillingPlan['unmapped'][number]>()
   const fresh = new Map<string, BillingPlan['newPartners'][number]>()
   const learned = new Set<string>()
+  const taken = new Set<string>()
 
   for (const b of items) {
     if (!b || !b.mfId) continue
     if (isDraft(b)) { out.drafts++; continue }
+    /* 前の期の請求は 取引先を作る前に落とす（前の期にしか請求の無い会社を 自動で作らない） */
+    if (isBeforeImport(state, billingYm(b))) { out.old.push(b); continue }
     const m = matchCompany(state, b, map)
     if (m.companyId === '__skip') continue
     if (!m.companyId) {
@@ -240,6 +261,12 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
     const ex: any = byMf.get(String(b.mfId))
     if (isClosedYm(state, rec.bookMonth) && (!ex || String(ex.bookMonth) !== rec.bookMonth)) { out.closed.push({ b, rec }); continue }
     if (!ex) {
+      /* ★ 2026-09-19: 以前 CSV で入れた請求（mfId が csv:…）と 同じもの（取引先・計上月・金額、番号があれば番号も同じ）を
+         API が持ってきたら、新しく作らずに その行を API の id に付け替える（同じ請求が2つになって 売掛金が倍にならないように）。 */
+      const twin = invoices.find((i: any) => /^csv/.test(String(i.mfId || '')) && i.status !== '取消' && !taken.has(String(i.id))
+        && String(i.companyId) === m.companyId && ymOf(i.bookMonth) === rec.bookMonth && num(i.total) === rec.total
+        && (!i.no || !rec.no || String(i.no) === String(rec.no)))
+      if (twin && !/^csv/.test(String(b.mfId))) { taken.add(String(twin.id)); out.adopt.push({ b, rec, ex: twin }); continue }
       const ruleAmt = ruleAmountOf(state, m.companyId)
       const auto = ruleAmt == null || ruleAmt === rec.total
       /* 二重の疑い: 同じ取引先・同じ計上月に この システムで作った（MF 以外の）請求がある */
@@ -290,6 +317,11 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
       confirmStatus: c.auto ? '確定' : '未確認', confirmedAt: c.auto ? now : '', confirmedBy: c.auto ? actor : '',
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     })
+  }
+  for (const a of plan.adopt) {
+    const i = byId.get(String(a.ex.id)); if (i == null) continue
+    out.invoices[i] = { ...out.invoices[i], mfId: String(a.b.mfId), source: 'mf', mfUpdatedAt: a.b.updatedAt || '', mfStatus: a.b.mfStatus || '',
+      mfPdfUrl: a.b.pdfUrl || '', mfWebUrl: a.b.webUrl || '', mfPartnerId: a.b.partnerId || '', csvMfId: out.invoices[i].mfId, updatedAt: now, updatedBy: actor }
   }
   let overPaid = 0
   for (const u of plan.update) {
@@ -359,7 +391,7 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
     if (touched) out.mfPartnerQueue = kept
   }
   const stats = { 新規: plan.create.length, 更新: plan.update.length, 変更なし: plan.same.length, MF差異: plan.diff.length,
-    古いデータで見送り: plan.stale.length, 入金が請求額を超過: overPaid,
+    古いデータで見送り: plan.stale.length, 入金が請求額を超過: overPaid, 前の期で見送り: plan.old.length, CSVの請求と同じ: plan.adopt.length,
     取引先を自動作成: made.length, 取引先未対応: plan.unmapped.reduce((s, g) => s + g.n, 0), 二重の疑い: plan.dupWarn.length,
     下書き除外: plan.drafts, 締め済みで見送り: plan.closed.length }
   return { state: out, plan, made, stats }
@@ -383,20 +415,21 @@ export function planTransactions(state: any, txns: Txn[]) {
   /* 手で入れた入金（振込名義なし）は 入金日・金額・取引先 で数える */
   const manual = new Map<string, number>()
   for (const p of pays) if (!normPayer(p.payerName) && p.companyId) bump(manual, dateOnly(p.date) + '|' + num(p.amount) + '|' + p.companyId)
-  const create: Txn[] = [], dup: Txn[] = [], closed: Txn[] = [], fingerprint: Txn[] = []
+  const create: Txn[] = [], dup: Txn[] = [], closed: Txn[] = [], fingerprint: Txn[] = [], old: Txn[] = []
   for (const t of txns) {
     if (!t || !t.extId || !t.date || !num(t.amount)) continue
     const fp = payFingerprint(t.date, t.amount, t.payerName)
     /* すでに入っている明細は、その1件ぶん 指紋の数を使い切る（本当の二重振込の2件目を 取りこぼさないため） */
     if (seen.has(String(t.extId))) { dup.push(t); if ((have.get(fp) || 0) > 0) have.set(fp, have.get(fp)! - 1); continue }
     if (isClosedYm(state, ymOf(t.date))) { closed.push(t); continue }
+    if (isBeforeImport(state, ymOf(t.date))) { old.push(t); continue }
     if (normPayer(t.payerName) && (have.get(fp) || 0) > 0) { have.set(fp, have.get(fp)! - 1); fingerprint.push(t); continue }
     const cid = matchCompanyByPayer(state, t.payerName).companyId
     const mk = dateOnly(t.date) + '|' + num(t.amount) + '|' + cid
     if (cid && (manual.get(mk) || 0) > 0) { manual.set(mk, manual.get(mk)! - 1); fingerprint.push(t); continue }
     seen.add(String(t.extId)); create.push(t)
   }
-  return { create, dup, closed, fingerprint }
+  return { create, dup, closed, fingerprint, old }
 }
 export function applyTransactions(state: any, txns: Txn[], opts: { actor?: string; source?: string } = {}) {
   const plan = planTransactions(state, txns)
@@ -411,7 +444,7 @@ export function applyTransactions(state: any, txns: Txn[], opts: { actor?: strin
       matchType: '', createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     })
   }
-  return { state: out, plan, stats: { 新規: plan.create.length, 取込済み: plan.dup.length + plan.fingerprint.length, 同じ入金が別の道で入り済み: plan.fingerprint.length, 締め済みで見送り: plan.closed.length } }
+  return { state: out, plan, stats: { 新規: plan.create.length, 取込済み: plan.dup.length + plan.fingerprint.length, 同じ入金が別の道で入り済み: plan.fingerprint.length, 締め済みで見送り: plan.closed.length, 前の期で見送り: plan.old.length } }
 }
 
 /** 振込名義 → 取引先。companies.bankPayerNames[] に覚えた名義、無ければ会社名で当てる */
@@ -795,6 +828,7 @@ export function partnerReport(state: any, items: Billing[], map?: Record<string,
     if (d && (!r.first || d < r.first)) r.first = d
     if (d && d > r.last) r.last = d
     if (isDraft(b)) { r.drafts++; g.set(key, r); continue }
+    if (isBeforeImport(state, billingYm(b))) { r.old = (r.old || 0) + 1; g.set(key, r); continue }
     r.n++; r.total += num(b.total)
     if (!r.result) {
       const m = matchCompany(state, b, map)
@@ -807,6 +841,50 @@ export function partnerReport(state: any, items: Billing[], map?: Record<string,
     }
     g.set(key, r)
   }
-  for (const r of g.values()) if (!r.result) r.result = 'draft'
+  for (const r of g.values()) if (!r.result) r.result = r.old ? 'old' : 'draft'
   return [...g.values()].sort((a, b) => String(a.partnerName).localeCompare(String(b.partnerName), 'ja'))
+}
+
+/* ---------- 前の期の取り込みを片づける（2026-09-19 利用者の指示）----------
+   09-19 朝の自動同期で 第5期 の MF 請求が 第6期 に入ってしまった分を消す。
+   消すのは次の条件を すべて満たすものだけ（人が入れたもの・入金を充てたものは 絶対に消さない）:
+     請求: MF から来た（mfId が csv: ではない・source 'mf'）／ 計上月が 取り込んでよい期より前 ／ since 以降に作られた ／ 充てた入金が無い
+     入金: MF・CSV から来た（extId あり）／ 入金日が 前 ／ since 以降 ／ 充当なし
+     取引先: MF から自動で作った（source 'mf'）で、上を消したら 何も残らない会社
+     待ち行列: 前の期の請求を落とし、空になったら消す */
+export function cleanupBeforeImport(state: any, opts: { since: string; actor?: string }) {
+  const since = String(opts.since || '')
+  const from = importFromYm(state)
+  const allocated = new Set<string>()
+  for (const p of arr(state, 'payments')) if (p.status !== '取消') for (const a of (p.allocations || [])) if (num(a.amount)) allocated.add(String(a.invoiceId))
+  const newer = (r: any) => String(r.createdAt || '') >= since
+  const invKill = arr(state, 'invoices').filter((i: any) => i.mfId && !/^csv/.test(String(i.mfId)) && i.source === 'mf'
+    && isBeforeImport(state, i.bookMonth) && newer(i))
+  const invKeep = invKill.filter((i: any) => allocated.has(String(i.id)))
+  const invDel = new Set(invKill.filter((i: any) => !allocated.has(String(i.id))).map((i: any) => String(i.id)))
+  const payDel = new Set(arr(state, 'payments').filter((p: any) => p.extId && !(p.allocations || []).length
+    && isBeforeImport(state, ymOf(p.date)) && newer(p)).map((p: any) => String(p.id)))
+  const invoices = arr(state, 'invoices').filter((i: any) => !invDel.has(String(i.id)))
+  const payments = arr(state, 'payments').filter((p: any) => !payDel.has(String(p.id)))
+  /* 残った行が1つでも その会社を指していれば 会社は消さない */
+  const used = new Set<string>()
+  for (const k of Object.keys(state)) {
+    if (k === 'companies' || !Array.isArray(state[k])) continue
+    const list = k === 'invoices' ? invoices : k === 'payments' ? payments : state[k]
+    for (const r of list) if (r && r.companyId) used.add(String(r.companyId))
+  }
+  const coDel = new Set(arr(state, 'companies').filter((c: any) => c.source === 'mf' && !c.crmId && !used.has(String(c.id))).map((c: any) => String(c.id)))
+  const queue = arr(state, 'mfPartnerQueue').map((q: any) => {
+    const items = (q.items || []).filter((b: Billing) => !isBeforeImport(state, billingYm(b)))
+    return { ...q, items, n: items.length, total: items.reduce((s: number, b: Billing) => s + num(b.total), 0) }
+  }).filter((q: any) => q.items.length || q.status === 'skipped')
+  const byDay: Record<string, number> = {}
+  for (const i of invKill) { const d = String(i.createdAt || '').slice(0, 10); byDay[d] = (byDay[d] || 0) + 1 }
+  const sample = invKill.slice(0, 200).map((i: any) => ({ id: i.id, companyId: i.companyId, bookMonth: i.bookMonth, total: num(i.total), no: i.no || '', createdAt: i.createdAt || '', kept: allocated.has(String(i.id)) }))
+  return {
+    state: { ...state, invoices, payments, companies: arr(state, 'companies').filter((c: any) => !coDel.has(String(c.id))), mfPartnerQueue: queue },
+    stats: { 取り込んでよい期の初め: from, 請求を消す: invDel.size, 請求の合計: invKill.filter((i: any) => invDel.has(String(i.id))).reduce((s: number, i: any) => s + num(i.total), 0),
+      入金が充ててあり残す: invKeep.length, 入金を消す: payDel.size, 取引先を消す: coDel.size },
+    byDay, sample, companies: [...coDel].map(id => String((arr(state, 'companies').find((c: any) => String(c.id) === id) || {}).name || id)),
+  }
 }

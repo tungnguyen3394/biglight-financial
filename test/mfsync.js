@@ -22,7 +22,7 @@ const eq = (name, a, b) => { const ok = JSON.stringify(a) === JSON.stringify(b);
   ok ? pass++ : fail++; console.log((ok ? '  ok  ' : '  NG  ') + name + (ok ? '' : `  → ${JSON.stringify(a)} (期待 ${JSON.stringify(b)})`)); };
 
 const baseState = () => ({
-  settings: {},
+  settings: { mfImportFrom: '2020-01' },   // 日付に左右されないように（前の期の規則は 専用のテストで見る）
   companies: [
     { id: 'C1', name: '株式会社高山', kana: 'タカヤマ', kind: '得意先', mfPartnerId: 'p1' },
     { id: 'C2', name: 'テスト物流株式会社', kana: 'テストブツリュウ', kind: '得意先' },
@@ -198,6 +198,43 @@ console.log('\n― MF の取引先の行き先（なぜ 取引先 に無いか�
   const by = n => rep.find(x => x.partnerName.includes(n)) || {};
   eq('当たった／自動で作った／似ていて待ち／下書きだけ が分かる',
     [by('高山').result, by('奥田').result, by('高山建設').result, by('島田').result], ['matched', 'created', 'queued', 'draft']);
+}
+
+console.log('\n― 前の期は 絶対に入れない・CSV と API の同じ請求・片づけ（2026-09-19）―');
+{
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  const items = [bill({ mfId: 'o1', salesDate: '2026-07-31', billingDate: '2026-07-31' }),
+    bill({ mfId: 'o2', partnerId: 'p70', partnerName: '前の期だけの会社', salesDate: '2026-06-30', billingDate: '2026-06-30' }),
+    bill({ mfId: 'n1' })];
+  const r = S.applyBillings(st, items);
+  eq('前の期の請求は入らない（今の期の分だけ）', [r.state.invoices.map(i => i.mfId), r.stats['前の期で見送り']], [['n1'], 2]);
+  eq('前の期にしか請求の無い会社は 作らない', r.state.companies.some(c => c.name === '前の期だけの会社'), false);
+  eq('行き先には「前の期だけ」と出る', S.partnerReport(r.state, items).find(x => x.partnerName === '前の期だけの会社').result, 'old');
+  const tx = S.applyTransactions(st, [{ extId: 't1', date: '2026-07-31', amount: 1000, payerName: 'x' }, { extId: 't2', date: '2026-08-01', amount: 1000, payerName: 'y' }]);
+  eq('前の期の入金も入らない', [tx.stats['新規'], tx.stats['前の期で見送り']], [1, 1]);
+  eq('既定は 今日の期の8月から', /^\d{4}-08$/.test(S.importFromYm({})), true);
+}
+{
+  /* CSV で入れた請求を API が持ってきた → 2つにしない */
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  const c = S.applyBillings(st, S.parseBillingCsv('取引先名,請求日,合計金額,請求書番号\n株式会社高山,2026/08/31,110000,B-1\n').items).state;
+  eq('CSV で1件', [c.invoices.length, /^csv/.test(c.invoices[0].mfId)], [1, true]);
+  const r = S.applyBillings(c, [bill({})]);
+  eq('API の同じ請求は 新しく作らず 同じ行に MF の id を付ける', [r.state.invoices.length, r.state.invoices[0].mfId, r.stats['CSVの請求と同じ']], [1, 'm1', 1]);
+  eq('そのあと何度同期しても 1件', S.applyBillings(r.state, [bill({})]).state.invoices.length, 1);
+}
+{
+  /* 片づけ: 前の期に入ってしまった MF の請求・自動の会社 */
+  const st = baseState(); st.settings.mfImportFrom = '2026-08';
+  st.companies.push({ id: 'CO-x', name: '自動の会社', source: 'mf', needsReview: true });
+  const mk = (id, co, ym, created, src) => ({ id, companyId: co, bookMonth: ym, total: 1000, status: '確定', source: src || 'mf', mfId: 'mf-' + id, createdAt: created });
+  st.invoices = [mk('A', 'CO-x', '2026-05', '2026-09-18T21:00:00Z'), mk('B', 'C1', '2026-06', '2026-09-18T21:00:00Z'),
+    mk('C', 'C1', '2026-06', '2026-09-18T21:00:00Z'), mk('D', 'C1', '2026-06', '2026-09-01T00:00:00Z'), mk('E', 'C1', '2026-08', '2026-09-18T21:00:00Z'),
+    { ...mk('F', 'C1', '2026-06', '2026-09-18T21:00:00Z', 'manual'), mfId: '' }];
+  st.payments = [{ id: 'P', companyId: 'C1', date: '2026-07-01', amount: 1000, allocations: [{ invoiceId: 'C', amount: 1000 }] }];
+  const r = S.cleanupBeforeImport(st, { since: '2026-09-18' });
+  eq('消すのは 前の期・MF・その日以降・入金なし だけ（手入力・今の期・前から有るもの・入金済みは残す）',
+    [r.state.invoices.map(i => i.id), r.stats['入金が充ててあり残す'], r.stats['取引先を消す'], r.state.companies.some(c => c.id === 'CO-x')], [['C', 'D', 'E', 'F'], 1, 1, false]);
 }
 
 console.log('\n― 入金の二重取り込み（指紋）―');

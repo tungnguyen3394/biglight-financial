@@ -4203,7 +4203,7 @@ function mfReadFile(file){
 let MFI = null;   // { kind, status, from, to, month, csv, csvName, plan, map, busy }
 const MF_KINDS = {
   billings:       { title:'請求を取り込む（Money Forward 請求書）', path:'/mf/sync/billings',
-                    sub:'請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。下書きは入りません。',
+                    sub:'請求書の中身（明細・税・PDF）は取り込みません。取引先・請求日・計上日・期日・金額 だけを 売掛金 に入れます。下書きは入りません。前の期（計上月が この期の8月より前）の請求は、期間に入れても 入りません。',
                     csvHelp:'MF 請求書の一覧から出力した CSV（見出しで列を判断します）' },
   transactions:   { title:'入金を取り込む（銀行の入出金明細）', path:'/mf/sync/transactions',
                     sub:'入金だけを取り込みます。同じ明細は二度入りません（取引ID で判断）。',
@@ -4286,7 +4286,7 @@ function mfPlanHtml(){
   if(MFI.kind==='transactions'){
     const items=(p.items||[]);
     return `<div class="mf-sum"><span>読み込み <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>
-        <span class="muted">取込済み ${p['取込済み']||0}</span>${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}</div>
+        <span class="muted">取込済み ${p['取込済み']||0}</span>${p['前の期で見送り']?`<span class="muted">前の期で見送り ${p['前の期で見送り']}</span>`:''}${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}</div>
       ${items.length?`<div class="table-wrap" style="max-height:44vh;"><table><thead><tr><th>入金日</th><th>振込名義</th><th class="r">金額</th><th>取引先（自動）</th></tr></thead>
         <tbody>${items.map(t=>{ const c=mfPayerCompany(t.payerName);
           return `<tr><td>${esc(t.date)}</td><td>${esc(t.payerName||'')}</td><td class="r num">${moneyPlain(t.amount)}</td>
@@ -4307,6 +4307,8 @@ function mfBillingPlanHtml(p){
       ${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}
       ${(p.newPartners||[]).length?`<span>取引先を自動作成 <b>${p.newPartners.length}</b>社</span>`:''}
       ${p['古いデータで見送り']?`<span class="muted">古いデータで見送り ${p['古いデータで見送り']}</span>`:''}
+      ${p['前の期で見送り']?`<span class="muted">前の期で見送り ${p['前の期で見送り']}</span>`:''}
+      ${p['CSVの請求と同じ']?`<span class="muted">CSV で入れた請求と同じ ${p['CSVの請求と同じ']}（1件にまとめます）</span>`:''}
       ${unmapped.length?`<span class="minus">似た会社があり止める ${unmapped.reduce((s,g)=>s+g.n,0)}件</span>`:''}</div>
     ${p['二重の疑い']?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に この システムで作った請求がすでにある分が ${p['二重の疑い']}件あります。二重計上にならないか確認してください。</div>`:''}
     ${(p.newPartners||[]).length?`<div class="form-section" style="margin-top:10px;">新しく作る得意先（この システムに似た会社がないため）</div>
@@ -9060,14 +9062,15 @@ function viewCoReview(){
 
   setTimeout(crPartnersLoad, 0);
   return pageShell({ title:'取引先の確認', count:queue.length+auto.length,
-    tools: mgr? `<button class="btn secondary" onclick="openMfImport('billings')">請求を取り込む</button>` : '',
+    tools: (isAdmin()? `<button class="btn secondary" onclick="openCleanupOld()">前の期の取り込みを片づける</button>` : '')
+      + (mgr? `<button class="btn secondary" onclick="openMfImport('billings')">請求を取り込む</button>` : ''),
     body: s4 + s1 + s2 + s3 + `<section class="cr-sec" id="crPartners">${crPartnersHtml()}</section>` });
 }
 /* ── MF の取引先の行き先（2026-09-18 利用者の指示:「奥田スチール が 取引先 に無いのはなぜ?」に画面で答える）──
    最後に 請求を取り込んだとき、MF の取引先ごとに 何件来て どこへ行ったか。サーバーが いまの取引先で当て直して返します。 */
 let CR_PARTNERS=null, CR_Q='';
 const CR_RESULT={ matched:['b-green','既存の取引先に入った'], created:['b-amber','自動で作った（②）'], queued:['b-amber','似た会社があり待ち（①）'],
-  skipped:['b-gray','取り込まない にした'], draft:['b-gray','下書きしか無い（取り込まない）'] };
+  skipped:['b-gray','取り込まない にした'], draft:['b-gray','下書きしか無い（取り込まない）'], old:['b-gray','前の期の請求だけ（取り込まない）'] };
 async function crPartnersLoad(){
   try{ CR_PARTNERS=await mfGet('/mf/partners'); }catch(e){ CR_PARTNERS={ error:String(e.message||e), partners:[] }; }
   const el=document.getElementById('crPartners'); if(el) el.innerHTML=crPartnersHtml();
@@ -9097,6 +9100,43 @@ function crPartnersHtml(){
           <td><span class="badge ${c}">${esc(l)}</span></td>
           <td>${p.companyId? coLink(p.companyId,'ar') : '<span class="zero">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">見つかりません。この期間の MF の請求に その会社はありません。</td></tr>'}
     </tbody></table></div>`;
+}
+/* ── 前の期の取り込みを片づける（2026-09-19 利用者の指示: 第5期の請求が 第6期に入ってしまった）──
+   サーバー（mfsync.cleanupBeforeImport）が「前の期・MF から来た・指定日以降に取り込んだ・入金を充てていない」ものだけ消す。
+   まず 何が消えるかを見せてから。消した行は 操作履歴 に丸ごと残る（戻せる）。 */
+let CLN=null;
+function openCleanupOld(){ CLN={ since:'2026-09-18', res:null, busy:false }; clnDraw(); clnFetch(); }
+function clnDraw(){
+  const r=CLN.res, st=r&&r.stats||{};
+  openModal(`<h3>前の期の取り込みを片づける</h3>
+    <div class="mdsub">Money Forward から入ってしまった <b>前の期（${esc(st['取り込んでよい期の初め']||'')} より前）</b> の請求・入金と、そのために自動で作った取引先を消します。
+      手で入れたもの・入金を充てたもの・この日より前から有ったものは <b>消しません</b>。消した行は 操作履歴 に残ります。</div>
+    <div class="mf-row">この日以降に取り込んだ分 <input type="date" value="${attr(CLN.since)}" onchange="CLN.since=this.value;clnFetch()"></div>
+    <div id="clnBody" style="margin-top:10px;">${!r? '<div class="empty">調べています…</div>' : r.error? `<div class="alertbar">${esc(r.error)}</div>` : `
+      <div class="mf-sum"><span>請求を消す <b>${st['請求を消す']||0}</b>件（${moneyPlain(st['請求の合計']||0)}円）</span><span>入金を消す <b>${st['入金を消す']||0}</b>件</span>
+        <span>取引先を消す <b>${st['取引先を消す']||0}</b>社</span>${st['入金が充ててあり残す']?`<span class="minus">入金が充ててあり残す ${st['入金が充ててあり残す']}件</span>`:''}</div>
+      ${(r.companies||[]).length?`<div class="fhelp">消す取引先：${esc(r.companies.join('、'))}</div>`:''}
+      <div class="table-wrap" style="max-height:40vh;margin-top:6px;"><table><thead><tr><th>取引先</th><th>計上月</th><th>請求番号</th><th class="r">金額</th><th>取り込んだ日</th><th></th></tr></thead><tbody>
+        ${(r.sample||[]).map(x=>`<tr><td>${esc(arCoName(x.companyId))}</td><td>${esc(x.bookMonth||'')}</td><td>${esc(x.no)}</td><td class="r num">${moneyPlain(x.total)}</td>
+          <td>${esc(String(x.createdAt).slice(0,16).replace('T',' '))}</td><td>${x.kept?'<span class="badge b-amber">入金あり・残す</span>':''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">消すものはありません。</td></tr>'}
+      </tbody></table></div>`}</div>
+    <div class="modal-actions"><button class="btn secondary" onclick="CLN=null;closeModal()">閉じる</button>
+      ${r&&!r.error&&((st['請求を消す']||0)+(st['入金を消す']||0)+(st['取引先を消す']||0))?`<button class="btn danger" onclick="clnRun(this)">この内容で消す</button>`:''}</div>`,'xl');
+}
+async function clnFetch(){
+  if(!CLN) return; CLN.res=null; clnDraw();
+  try{ CLN.res=await mfCall('/mf/cleanup-old',{ since:CLN.since, dryRun:true }); }catch(e){ CLN.res={ error:String(e.message||e) }; }
+  if(CLN) clnDraw();
+}
+async function clnRun(btn){
+  if(!CLN||CLN.busy) return;
+  if(!confirm('表の内容を消します。よろしいですか？（操作履歴 から戻せます）')) return;
+  CLN.busy=true; if(btn){ btn.disabled=true; btn.textContent='消しています…'; }
+  try{
+    const d=await mfCall('/mf/cleanup-old',{ since:CLN.since });
+    await pullState(); CLN=null; closeModal(); renderPage(CURRENT_PAGE);
+    toast('片づけました：'+(mfStatsText(d.stats)||'変更なし'),'ok');
+  }catch(e){ CLN.busy=false; toast(String(e.message||e),'err'); clnDraw(); }
 }
 async function crResolve(id, action){
   const q=(DB.mfPartnerQueue||[]).find(x=>x.id===id); if(!q) return;
