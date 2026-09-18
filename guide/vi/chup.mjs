@@ -14,6 +14,16 @@ const ev = src => async page => { await page.evaluate(src); await page.waitForTi
 const nav = label => `#navList button:has-text("${label}")`
 const tab = label => `.sectabs button:has-text("${label}")`
 const tool = label => `.toolbar-left :is(button,summary):has-text("${label}")`
+/* 取引先の確認 の見本: MF から自動で作った会社 1社 ＋ 似た会社があって止めている取引先 1件（何度呼んでも同じ） */
+const seedReview = async page => { await page.evaluate(() => {
+  if (!DB.companies.some(c => c.id === 'CO-mfdemo')) {
+    DB.companies.push({ id: 'CO-mfdemo', name: '【デモ】株式会社ひかり物産', kind: '得意先', source: 'mf', needsReview: true, autoCreatedAt: '2026-09-18T06:00:00Z', mfPartnerId: 'p77', closingDay: 31, paySite: 1, payDay: 31, taxCat: '課税10%' })
+    DB.invoices.push({ id: 'INV-mfdemo', companyId: 'CO-mfdemo', bookMonth: '2026-07', issueDate: '2026-07-31', dueDate: '2026-08-31', total: 165000, subtotal: 150000, taxCat: '課税10%', status: '確定', source: 'mf', mfId: 'mf-demo-1', confirmStatus: '確定', items: [] })
+  }
+  const base = DB.companies.find(c => c.name.includes('東和フーズ'))
+  DB.mfPartnerQueue = [{ id: 'MPQ-demo', key: 'id:p88', partnerId: 'p88', partnerName: '東和フーズ販売 株式会社', n: 2, total: 330000, candidates: base ? [base.id] : [], items: [], status: 'open' }]
+  renderPage(CURRENT_PAGE)
+}); await page.waitForTimeout(400) }
 
 export default {
   fy: 2025,
@@ -134,7 +144,7 @@ export default {
     },
     mf: {
       page: 'arbook', run: ev(`openMfImport()`), clip: '#modal',
-      marks: { api: '#modal :text("① API で取得")', fetch: '#modal button:has-text("請求書を取得")', csv: '#modal :text("② CSV を読み込む")' },
+      marks: { api: '#modal :text("① API から取得")', fetch: '#modal button:has-text("取得する")', csv: '#modal :text("② CSV を読み込む")' },
     },
     arbill: {
       page: 'arbook', run: async p => { await p.click('.toolbar-left summary'); await p.waitForTimeout(200) },
@@ -256,7 +266,10 @@ export default {
     properties: { page: 'properties', marks: { add: tool('物件を追加'), alert: '#main .alertbar, #main .warnbar' } },
 
     /* ── 7. 取引先 ── */
-    companies: { page: 'companies', marks: { tabs: '.sectabs', add: tool('取引先を追加'), filter: '#main th >> nth=1' } },
+    companies: { page: 'companies', run: seedReview,
+      marks: { menu: '.sectabs', tabs: '.co-tabs', review: '#main .warnbar >> nth=0', add: tool('を追加'), kind: '#main th >> nth=1' } },
+    coreview: { page: 'coreview', run: seedReview,
+      marks: { queue: '.cr-sec >> nth=0', qact: '.cr-act >> nth=0', auto: '.cr-sec >> nth=1', aact: '.cr-act >> nth=1' } },
     company_form: {
       page: 'companies', run: ev(`openForm('companies',null,{kind:'得意先',closingDay:31,paySite:1,payDay:31,taxCat:'課税10%'})`), clip: '#modal',
       marks: { kind: '#modal label:has-text("区分") >> ..', terms: '#modal :text("② ") >> ..', owner: '#modal label:has-text("BIGLIGHT担当者") >> ..' },
@@ -265,6 +278,9 @@ export default {
     /* ── 8. 設定 ── */
     accounts: { page: 'accounts', marks: { add: tool('大分類を追加'), row: '#main tbody tr >> nth=1' } },
     settings: { page: 'settings', height: 1100, marks: { cash: '#main :text("資金繰りの開始残高") >> ..', demo: '#main button:has-text("デモデータを作り直す")', cache: '#main button:has-text("キャッシュを消して")' } },
+    mfpanel: { page: 'apilink', run: async p => { await seedReview(p); await p.evaluate(() => mfPanelLoad()); await p.waitForSelector('.mfp-cards'); await p.waitForTimeout(500) },
+      clip: '#mfPanel', clipPad: 6,
+      marks: { key: '.mfp-key', inv: '.mfp-card >> nth=0', acc: '.mfp-card >> nth=1', auto: '.mfp-auto', review: '#mfPanel .warnbar' } },
     users: { page: 'users', marks: { pending: '#main :text("承認待ち（1人）") >> ..' } },
   },
 }

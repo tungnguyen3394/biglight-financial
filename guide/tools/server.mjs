@@ -63,7 +63,12 @@ export function startServer(port = 4790) {
       if (req.method === 'DELETE') { f.gone = true; return json({ ok: true }) }
       res.writeHead(200, { 'content-type': f.mime }); return res.end(f.data)
     }
-    if (u.startsWith('/api/mf/status')) return json({ configured: true, connected: true, office: 'BIGLIGHT株式会社（見本）' })
+    if (u.startsWith('/api/mf/status')) return json({ configured: true, connected: true, office: 'BIGLIGHT株式会社（見本）',
+      credSource: 'db', clientIdPeek: '6612…', clientSecretLen: 86, tokenAuth: 'basic', connectedBy: 'tanaka@example.jp',
+      lastSyncAt: '2026-09-18T06:00:00', lastResult: 'ok', accounting: true, accountingScopeOk: true,
+      lastStats: { billings: { 新規: 3, 取引先を自動作成: 1, 取引先未対応: 2 }, transactions: { 新規: 4 }, reconcile: { 自動消込: 3 } },
+      schedule: { enabled: true, hour: 6 }, redirectUri: 'https://finance.biglight.jp/api/mf/callback', scopes: 'mfc/invoice/data.read mfc/accounting/data.read', running: null })
+    if (u.startsWith('/api/mf/accounting/accounts')) return json({ items: [{ id: 'A1', name: 'あいち銀行 本店（見本）' }], selected: '' })
     if (u.startsWith('/api/')) return json({})
     const f = path.join(WEB, u === '/' ? 'index.html' : u)
     if (!f.startsWith(WEB) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) {

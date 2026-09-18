@@ -517,9 +517,10 @@ export default {
             ] },
           ],
           blocks: [
+            { p: '**Công ty trên hoá đơn MF**: khớp được thì dùng luôn; không có công ty nào giống thì **tự tạo 得意先** (hoá đơn vào 回収 ngay); có công ty na ná thì hoá đơn **chờ** ở `取引先` › `取引先の確認` (xem chương 取引先).' },
             { p: 'Hoá đơn lấy từ MF được **tự gắn loại thuế**: nếu 税込 = 税抜 thì là `対象外` (hoặc `非課税` theo 取引先), tỉ lệ 10% → `課税10%`, 8% → `軽減8%`, lẫn nhiều loại → `混在`.' },
           ],
-          note: 'Hoá đơn đã có trong MF thì **luôn lấy từ MF**, đừng gõ tay — sẽ bị tính hai lần. File PDF của hoá đơn MF **không tự lấy về** — đính tay bằng 📎.',
+          note: 'Hoá đơn đã có trong MF thì **luôn lấy từ MF**, đừng gõ tay — sẽ bị tính hai lần. Nếu lỡ có cả hai (cùng công ty, cùng tháng), `請求の確認` sẽ báo `二重の疑い`: bấm `置き換える` (huỷ hoá đơn gõ tay, giữ bản MF) hoặc `別物` (hai hoá đơn khác nhau). File PDF của hoá đơn MF **không tự lấy về** — đính tay bằng 📎.',
         },
         {
           title: 'Ghi tiền vào (入金を記録)',
@@ -831,22 +832,42 @@ export default {
     /* ================================================================== */
     {
       title: '取引先 — khách hàng và nhà cung cấp',
-      summary: 'Danh sách · thêm mới · điều kiện thanh toán',
+      summary: 'Danh sách 3 tab · thêm mới · điều kiện thanh toán · 取引先の確認 (đối tác đến từ Money Forward)',
       pages: [
         {
           title: 'Danh sách đối tác',
           screens: [{
             shot: 'companies', maxH: 124,
             steps: [
-              { mark: 'tabs', text: '`一覧（すべて）`: tất cả · `支払先`: chỉ nhà cung cấp (BIGLIGHT trả tiền cho họ).' },
-              { mark: 'add', text: '`＋ 取引先を追加`: thêm đối tác.' },
-              { mark: 'filter', text: 'Bấm ▼ ở tiêu đề cột để lọc. Cột `支払いぶり` cho biết họ trả / nhận tiền đúng hạn đến đâu.' },
+              { mark: 'menu', text: '`取引先`: danh sách · `取引先の確認`: xử lý đối tác mà Money Forward mang vào (trang sau).' },
+              { mark: 'tabs', text: '`得意先` (khách hàng — BIGLIGHT **nhận** tiền) · `支払先` (nhà cung cấp — BIGLIGHT **trả** tiền) · `すべて` (tất cả). Số bên cạnh là số công ty. Công ty `両方` có mặt ở cả hai tab. **Cột đổi theo tab**: 得意先 có `売掛残`, `入金サイト`, `最終入金`; 支払先 có `買掛残`, `支払条件`, `最終支払`.' },
+              { mark: 'review', text: 'Khi Money Forward mang vào đối tác cần xem lại, thanh vàng này hiện ra — bấm `確認する`.' },
+              { mark: 'add', text: 'Nút `＋` tạo đối tác **theo tab đang mở** (đang ở tab 支払先 thì tạo 支払先).' },
+              { mark: 'kind', text: 'Nếu `区分` không khớp thực tế (vd ghi 得意先 nhưng có 支払請求), dưới ô sẽ ghi lý do màu đỏ và link `両方にする`. Hệ thống **không tự đổi** — người bấm mới đổi.' },
             ],
           }],
           blocks: [
             { p: 'Khách hàng (所属機関) được **đồng bộ từ CRM** (`設定` › `CRM連携`): tên, địa chỉ, người liên hệ. Các mục kế toán như ngày chốt, hạn trả, tài khoản ngân hàng **chỉ nhập ở đây** và không bị CRM ghi đè.' },
           ],
           note: 'Cột `請求ルール` và lời nhắc “chưa có 請求ルール” là của chức năng **tự tạo hoá đơn**, hiện không dùng vì hoá đơn làm ở Money Forward. **Không cần thiết lập.**',
+        },
+        {
+          title: 'Xử lý đối tác từ Money Forward (取引先の確認)',
+          lead: 'Khi lấy hoá đơn từ Money Forward, hệ thống tự tìm công ty tương ứng. **Không có gì giống** → tự tạo 得意先 mới (hoá đơn vào 回収 ngay). **Có công ty na ná** → không tạo, hoá đơn **chờ ở đây** cho người quyết.',
+          screens: [{
+            shot: 'coreview', maxH: 110,
+            steps: [
+              { mark: 'queue', text: '① **Đang chờ vì có công ty na ná** (tên chứa nhau, trùng 法人番号 hoặc kana). Hoá đơn của dòng này **chưa** vào 回収.' },
+              { mark: 'qact', text: 'Cùng một công ty → chọn công ty ở ô chọn (★ = công ty na ná) rồi `統合`. Công ty khác → `新規`. Không muốn lấy → `取り込まない` (sáng nào cũng bỏ qua; mở lại được ở cuối trang). Bấm xong là hoá đơn vào ngay.' },
+              { mark: 'auto', text: '② **Công ty tự tạo** từ Money Forward (nhãn `MF`). Hoá đơn đã nằm trong 回収.' },
+              { mark: 'aact', text: 'Thật ra là công ty đã có → chọn công ty rồi `統合`: hoá đơn, tiền vào, 請求ルール chuyển sang công ty đó, công ty tự tạo bị xoá (**không hoàn tác được**). Là khách mới thật → `このままでよい`.' },
+            ],
+          }],
+          blocks: [
+            { p: '**CRM là gốc**: nếu sau này CRM đồng bộ một công ty trùng tên (hoặc trùng 法人番号) với công ty tự tạo, hệ thống **tự biến công ty tự tạo thành công ty CRM** — hoá đơn giữ nguyên, không cần 統合.' },
+            { p: 'Sau khi 統合 hoặc chọn công ty, lần lấy hoá đơn sau Money Forward sẽ **tự khớp** vào đúng công ty đó.' },
+          ],
+          note: 'Chỉ `管理者` và `マネージャー` bấm được các nút ở trang này.',
         },
         {
           title: 'Thêm / sửa đối tác',
@@ -890,6 +911,21 @@ export default {
             ],
           }],
           note: 'Trên hệ thống thật, **không** bấm `デモデータを作り直す` nếu không có mục đích — màn hình sẽ lẫn dữ liệu mẫu.',
+        },
+        {
+          title: 'Kết nối Money Forward (API・AI連携)',
+          lead: 'Ở `設定` › `API・AI連携`. Hệ thống chỉ **đọc** từ Money Forward, không ghi gì vào MF.',
+          screens: [{
+            shot: 'mfpanel', modal: true, maxH: 118,
+            steps: [
+              { mark: 'key', text: 'Khoá (ClientID / Secret) của ứng dụng MF. Chỉ `管理者` đổi được.' },
+              { mark: 'inv', text: '**請求書**: đọc hoá đơn (công ty, ngày, số tiền). Trạng thái → nút kết nối/ngắt → `請求を取り込む` và kết quả lần lấy gần nhất.' },
+              { mark: 'acc', text: '**会計**: đọc sao kê ngân hàng và 試算表. Cùng bố cục với thẻ bên trái; chọn tài khoản ngân hàng dùng để lấy tiền vào.' },
+              { mark: 'auto', text: '**Tự đồng bộ** mỗi sáng (mặc định 06:00): hoá đơn → tiền vào → tự khớp. `今すぐ同期` chạy ngay (đang chạy thì nút bị khoá, không chạy hai lần).' },
+              { mark: 'review', text: 'Có đối tác hoặc hoá đơn cần xem lại → bấm `確認する`.' },
+            ],
+          }],
+          note: 'Tiền vào lấy **cả từ MF lẫn file CSV ngân hàng** cũng không bị tính hai lần: hệ thống so ngày + số tiền + tên người chuyển. Hai lần chuyển thật giống hệt nhau trong cùng ngày vẫn được giữ đủ hai.',
         },
         {
           title: 'Người dùng (ユーザー)',
