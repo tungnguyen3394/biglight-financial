@@ -4260,10 +4260,10 @@ function mfDraw(){
     <div class="mdsub">${esc(K.sub)}</div>
     <div class="mf-src">
       <div><div class="form-section" style="margin:0 0 6px;">① API から取得</div>${api}</div>
-      ${K.noCsv?'<div class="muted">CSV はありません（正は MF 会計 の仕訳です）。</div>':`<div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>`}
+      ${K.noCsv?'<div class="muted" style="align-self:center;">CSV はありません（正は MF 会計 の仕訳です）。</div>':`<div><div class="form-section" style="margin:0 0 6px;">② CSV を読み込む</div>
         <input type="file" accept=".csv,text/csv" onchange="mfPickCsv(this.files&&this.files[0])">
         <div class="fhelp">${esc(K.csvHelp)}${MFI.csvName?` ／ いま読み込んでいるファイル: <b>${esc(MFI.csvName)}</b>`:''}</div>
-        ${MFI.kind==='trial-balance'?`<div style="margin-top:6px;">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value"></div>`:''}</div>${K.noCsv?'':'</div>'}
+        ${MFI.kind==='trial-balance'?`<div style="margin-top:6px;">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value"></div>`:''}</div>`}
     </div>
     <div id="mfPrev" style="margin-top:12px;">${MFI.plan? mfPlanHtml() : (MFI.busy?'<div class="empty">取得しています…</div>':'')}</div>
     <div class="modal-actions">

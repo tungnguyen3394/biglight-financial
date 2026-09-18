@@ -40,9 +40,10 @@ function makeDeps(opts = {}) {
       return { ok: true, status: 200, json: async () => ({ data: [{ id: 'acc1', name: '【法人】あいち銀行', connected_sub_accounts: [{ id: 'sub1', name: '山田支店 普通', last_synced_at: '2026-09-14T06:00:00+09:00' }] }] }) };
     }
     if (u.pathname.endsWith('/accounts')) {
-      return { ok: true, status: 200, json: async () => ({ accounts: [{ id: 'acc-cash', name: '現金' }, { id: 'acc-ar', name: '売掛金' }] }) };
+      return { ok: true, status: 200, json: async () => ({ accounts: [{ id: 'acc-cash', name: '現金' }, { id: 'OwMh%2B3QQ%3D%3D', name: '売掛金' }] }) };
     }
     if (u.pathname.endsWith('/journals')) {
+      if (u.search.includes('account_id=') && u.search.includes('%252B')) return { ok: false, status: 400, json: async () => ({ errors: [{ code: 'invalid_query_parameter_value', message: 'Target: account_id' }] }) };
       const mk = (id, date, v, fee, name, code) => ({ id, number: 7, transaction_date: date, update_time: '2026-09-19T01:00:00Z', is_realized: true, branches: [
         { remark: '振込', debitor: { account_name: '普通預金', value: v - fee }, creditor: { account_name: '売掛金', value: v, trade_partner_code: code, trade_partner_name: name } },
         ...(fee ? [{ remark: '', debitor: { account_name: '支払手数料', value: fee }, creditor: null }] : []) ] });
@@ -184,7 +185,7 @@ function makeDeps(opts = {}) {
     eq('仕訳の 売掛金（貸方）だけが入金になる（手数料つき・売上の仕訳は入らない）',
       jp.map(x => [x.extId, x.date, x.amount, x.fee, x.partnerName, x.partnerCode]), [['j:J1:0', '2026-09-10', 110000, 660, '株式会社高山', 'T-1'], ['j:J2:0', '2026-09-11', 5000, 0, '', '']]);
     const jq = new URL(t.calls.filter(c => c.url.includes('/journals')).pop().url).searchParams;
-    eq('仕訳は 売掛金 の科目IDで絞り、期間つき', [jq.get('account_id'), jq.get('start_date'), jq.get('end_date')], ['acc-ar', '2026-09-01', '2026-09-30']);
+    eq('仕訳は 売掛金 の科目IDで絞り（MF の ID は二重にエンコードしない）、期間つき', [jq.get('account_id'), jq.get('start_date'), jq.get('end_date')], ['OwMh+3QQ==', '2026-09-01', '2026-09-30']);
     const tb = await MF.fetchTrialBalance('2026-09', t.deps);
     eq('試算表は 科目と残高', tb, [{ code: '1130', name: '売掛金', amount: 264000 }]);
     const tq = new URL(t.calls.filter(c => c.url.includes('/reports/trial_balance')).pop().url).searchParams;

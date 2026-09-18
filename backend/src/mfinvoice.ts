@@ -369,7 +369,7 @@ export async function fetchTransactions(from: string, to: string, subAccountId: 
          side=INCOME で入金だけ・connected_sub_account_id で口座・per_page 最大 500 */
       const q = new URLSearchParams({ start_date: s0, end_date: e0, page: String(page), per_page: '500' })
       if (!opts.all) q.set('side', 'INCOME')
-      if (subAccountId) q.set('connected_sub_account_id', String(subAccountId))
+      if (subAccountId) q.set('connected_sub_account_id', rawId(subAccountId))
       const j = await getJson(`${c.acctBase}/transactions?${q}`, token, d, '入出金明細')
       const list = listOf(j, 'transactions', 'items')
       for (const t of list) { const n = normalizeTransaction(t); if (!n.extId || seen.has(n.extId)) continue; seen.add(n.extId); out.push(n) }
@@ -655,17 +655,27 @@ export function journalToPays(j: any): JournalPay[] {
   })
   return out
 }
+/** MF の ID は もともと %2B / %3D のように URL エンコード済みで返ってくる。URLSearchParams に入れると二重にエンコードされ
+    「invalid_query_parameter_value: account_id」になる（2026-09-19 本番で発覚）。一度ほどいてから入れる。 */
+export const rawId = (id: any) => { const t = String(id || ''); try { return decodeURIComponent(t) } catch { return t } }
 export async function fetchJournalPays(from: string, to: string, d: MfDeps): Promise<JournalPay[]> {
   const c = mfConfig(d.env)
   const token = await accessToken(d)
-  const acct = await arAccountId(d)
+  let acct = await arAccountId(d)
   const out: JournalPay[] = []
   const seen = new Set<string>()
   for (const [s0, e0] of monthChunks(from, to)) {
     for (let page = 1; page <= 500; page++) {
       const q = new URLSearchParams({ start_date: s0, end_date: e0, page: String(page), per_page: '1000' })
-      if (acct) q.set('account_id', acct)
-      const j = await getJson(`${c.acctBase}/journals?${q}`, token, d, '仕訳')
+      if (acct) q.set('account_id', rawId(acct))
+      let j: any
+      try { j = await getJson(`${c.acctBase}/journals?${q}`, token, d, '仕訳') }
+      catch (e: any) {
+        /* 科目IDで絞れない版 → 絞らずに取って、売掛金 の行は journalToPays が選ぶ。覚えた ID も捨てる */
+        if (!acct || !/account_id/.test(String(e?.message || ''))) throw e
+        acct = ''; await d.cfgSet('mf_ar_account', '').catch(() => {})
+        q.delete('account_id'); j = await getJson(`${c.acctBase}/journals?${q}`, token, d, '仕訳')
+      }
       const list = listOf(j, 'journals', 'items')
       for (const x of list) for (const p of journalToPays(x)) { if (seen.has(p.extId)) continue; seen.add(p.extId); out.push(p) }
       if (!list.length || !mfHasNextPage(j, page)) break
