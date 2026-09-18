@@ -560,19 +560,24 @@ async function mutateState(actor: string, reason: string, fn: (state: any) => { 
     const r = await client.query('SELECT data FROM app_state WHERE id=1 FOR UPDATE')
     const base = r.rows[0]?.data || {}
     const { state, stats } = fn(base)
-    const changed: any = {}
+    const changed: any = {}, deleted: any = {}
     for (const k of Object.keys(state)) {
       if (!Array.isArray(state[k])) continue
       const old = new Map((Array.isArray(base[k]) ? base[k] : []).map((x: any) => [String(x?.id), JSON.stringify(x)]))
       const list = state[k].filter((x: any) => x && JSON.stringify(x) !== old.get(String(x.id)))
       if (list.length) changed[k] = list
+      /* 消えた行（統合で消した取引先・片づけた待ち行列）も 変更として配る。配らないと画面に残り続ける */
+      const now = new Set(state[k].map((x: any) => String(x?.id)))
+      const gone = (Array.isArray(base[k]) ? base[k] : []).filter((x: any) => x && !now.has(String(x.id))).map((x: any) => String(x.id))
+      if (gone.length) deleted[k] = gone
     }
-    if (!Object.keys(changed).length) { await client.query('ROLLBACK'); return { ok: true, stats, changed: {} } }
+    const keys = [...new Set([...Object.keys(changed), ...Object.keys(deleted)])]
+    if (!keys.length) { await client.query('ROLLBACK'); return { ok: true, stats, changed: {} } }
     await client.query('UPDATE app_state SET data=$1::jsonb, updated_at=now() WHERE id=1', [JSON.stringify(state)])
     await client.query('COMMIT')
-    bumpRevs(Object.keys(changed))
+    bumpRevs(keys)
     saveHistory(state, actor, reason)
-    writeAudit(actor, reason, base, changed, {})
+    writeAudit(actor, reason, base, changed, deleted)
     sseBroadcast(actor)
     return { ok: true, stats, changed: Object.fromEntries(Object.entries(changed).map(([k, v]: any) => [k, v.length])) }
   } catch (e) {
@@ -584,7 +589,9 @@ async function mutateState(actor: string, reason: string, fn: (state: any) => { 
 const slimPlan = (p: any) => ({
   新規: p.create.length, 更新: p.update.length, 変更なし: p.same.length, MF差異: p.diff.length,
   下書き除外: p.drafts, 締め済みで見送り: p.closed.length, 二重の疑い: p.dupWarn.length,
-  unmapped: p.unmapped,
+  取引先を自動作成: (p.newPartners || []).length,
+  unmapped: p.unmapped.map((g: any) => ({ key: g.key, partnerId: g.partnerId, partnerName: g.partnerName, n: g.n, total: g.total, candidates: g.candidates })),
+  newPartners: p.newPartners || [],
   createSample: p.create.slice(0, 80).map((x: any) => ({ ...x.rec, mfId: x.b.mfId, partnerName: x.b.partnerName, auto: x.auto })),
   diffSample: p.diff.slice(0, 80).map((x: any) => ({ id: x.ex.id, no: x.ex.no, companyId: x.ex.companyId, changed: x.changed,
     mf: { total: x.rec.total, dueDate: x.rec.dueDate, bookMonth: x.rec.bookMonth }, finance: { total: x.ex.total, dueDate: x.ex.dueDate, bookMonth: x.ex.bookMonth } })),
@@ -594,6 +601,10 @@ const slimMatch = (r: any) => ({
   自動消込: r.matched.length, 要確認: r.none.length, 振込名義が未対応: r.unknownPayer.length,
   matched: r.matched.slice(0, 200), none: r.none.slice(0, 200), unknownPayer: r.unknownPayer.slice(0, 200),
 })
+
+/** 同期の実行中の印（このプロセスは1つだけなので メモリで足ります）。20分たっても消えなければ 固まったとみなす */
+let MF_RUN: { since: string; by: string; at: number } | null = null
+const mfRunning = () => (MF_RUN && Date.now() - MF_RUN.at < 20 * 60_000) ? MF_RUN : null
 
 /** 取り込みの本体。API から取るか CSV を読むかだけが違い、そのあとの規則は mfsync.ts で共通。 */
 async function mfSync(kind: string, args: any, me: { email: string; role: string }): Promise<any> {
@@ -618,7 +629,7 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       if (csvText) { const p = MFS.parseBankCsv(csvText); if (p.error) throw new Error(p.error); items = p.items! }
       else items = await MF.fetchTransactions(String(args.from), String(args.to), (await cfgGet('mf_bank_account')) || '', mfDeps)
       const plan = MFS.planTransactions(await loadState(), items)
-      if (dry) return { ok: true, dryRun: true, plan: { 新規: plan.create.length, 取込済み: plan.dup.length, 締め済みで見送り: plan.closed.length, items: plan.create.slice(0, 80) }, count: items.length }
+      if (dry) return { ok: true, dryRun: true, plan: { 新規: plan.create.length, 取込済み: plan.dup.length + plan.fingerprint.length, 同じ入金が別の道で入り済み: plan.fingerprint.length, 締め済みで見送り: plan.closed.length, items: plan.create.slice(0, 80) }, count: items.length }
       const out = await mutateState(me.email, 'mf-transactions', (st) => {
         const r = MFS.applyTransactions(st, items, { actor: me.email, source: csvText ? 'csv' : 'mf' })
         return { state: r.state, stats: r.stats }
@@ -648,7 +659,13 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       return { ok: true, stats: out.stats, count: items.length }
     }
     if (kind === 'run') {
-      /* 毎朝の自動同期: 請求書 → 入出金明細 → 自動消込 */
+      /* 毎朝の自動同期: 請求書 → 入出金明細 → 自動消込
+         ★ 2026-09-18: 同時に2本走らせない（朝の自動と「今すぐ同期」が重なると、同じ明細を2回見に行く）。
+           書き込みは1行ロックで守られていますが、MF への問い合わせと結果の記録が二重になるため。 */
+      const busy = mfRunning()
+      if (busy) throw Object.assign(new Error(`いま同期中です（${busy.by.split('@')[0]} が ${busy.since.slice(11, 16)} に開始）。終わってからもう一度押してください。`), { busy: true })
+      MF_RUN = { since: new Date().toISOString(), by: me.email, at: Date.now() }
+      try {
       const from = args?.from || new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10)
       const to = args?.to || new Date().toISOString().slice(0, 10)
       const stats: any = {}
@@ -658,15 +675,34 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       stats.reconcile = (await mfSync('reconcile', {}, me)).stats
       await mfRemember('ok', stats)
       return { ok: true, stats }
+      } finally { MF_RUN = null }
     }
     throw new Error('unknown kind: ' + kind)
   } catch (e: any) {
-    await mfRemember('error', null, MF.scrub(e?.message || e))
+    if (!e?.busy) await mfRemember('error', null, MF.scrub(e?.message || e))   // 「同期中」は失敗ではない
     throw e
   }
 }
 
-app.use(mfRouter({ ...mfDeps, verify: requireActive, audit: mfAudit, sync: mfSync, state: loadState }))
+app.use(mfRouter({ ...mfDeps, verify: requireActive, audit: mfAudit, sync: mfSync, state: loadState, running: () => mfRunning() }))
+
+/* ===================== 取引先の確認・二重の疑い（2026-09-18）=====================
+   規則は mfsync.ts（resolvePartnerQueue / mergeCompanies / markCompanyReviewed / resolveDuplicate）。
+   ここは「誰が押してよいか」と「1行ロックで書く」だけ。 */
+const mfReview = (path: string, reason: string, fn: (st: any, body: any, me: any) => { state: any; stats?: any }) =>
+  app.post(path, async (req, res) => {
+    const me = await requireActive(req, res); if (!me) return
+    if (me.role !== 'Admin' && me.role !== 'Manager') return res.status(403).json({ error: 'admin-or-manager', message: '確認できるのは 管理者・マネージャー だけです。' })
+    try {
+      const out = await mutateState(me.email, reason, (st) => fn(st, req.body || {}, me))
+      mfAudit(me.email, reason, { body: { ...(req.body || {}) }, stats: out.stats })
+      res.json(out)
+    } catch (e: any) { res.status(400).json({ error: 'bad-request', message: String(e?.message || e) }) }
+  })
+mfReview('/mf/partners/resolve', 'mf-partner-resolve', (st, b, me) => MFS.resolvePartnerQueue(st, String(b.id || ''), String(b.action || ''), String(b.companyId || ''), me.email))
+mfReview('/mf/partners/merge', 'mf-partner-merge', (st, b, me) => MFS.mergeCompanies(st, String(b.fromId || ''), String(b.toId || ''), me.email))
+mfReview('/mf/partners/ok', 'mf-partner-ok', (st, b, me) => MFS.markCompanyReviewed(st, String(b.id || ''), me.email))
+mfReview('/mf/dup/resolve', 'mf-dup-resolve', (st, b, me) => MFS.resolveDuplicate(st, String(b.invoiceId || ''), String(b.action || ''), me.email))
 
 /** 経理へ渡す「消込一覧」CSV（MF 会計で仕訳を入れるのは人） */
 app.get('/mf/settlement.csv', async (req, res) => {

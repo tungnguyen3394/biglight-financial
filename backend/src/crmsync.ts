@@ -17,6 +17,24 @@
      · Bản ghi CRM biến mất → đánh dấu _gone, KHÔNG xoá (hoá đơn cũ phải tra được).
    ========================================================================== */
 import { pool } from './db'
+import { normName, companyNames } from './mfsync'
+
+/** ★ 2026-09-18 利用者の指示: 取引先の正（master）は CRM。
+    Money Forward から自動で作った会社（source:'mf'・crmId なし）と 同じ会社が あとから CRM に来たら、
+    新しく作らずに その会社を CRM の会社にする（id はそのまま ⇒ 請求・入金・MF の取引先ID は 付け替え不要）。
+    同じかどうかは 法人番号（13桁）か、表記ゆれを畳んだ名前が ぴったり同じ（1社だけ）のとき。 */
+export function adoptMfCompany(base: any[], src: any): number {
+  const cand = (c: any) => c && !c.crmId && c.source === 'mf'
+  const corp = String(src.corpNo || '').replace(/\D/g, '')
+  if (corp.length === 13) {
+    const hits = base.map((c, i) => [c, i] as [any, number]).filter(([c]) => cand(c) && String(c.corpNo || '').replace(/\D/g, '') === corp)
+    if (hits.length === 1) return hits[0][1]
+  }
+  const n = normName(src.name)
+  if (!n) return -1
+  const hits = base.map((c, i) => [c, i] as [any, number]).filter(([c]) => cand(c) && companyNames(c).includes(n))
+  return hits.length === 1 ? hits[0][1] : -1
+}
 
 // Trường do CRM sở hữu — đúng danh sách này, không hơn.
 const CRM_COMPANY_FIELDS = ['code', 'name', 'kana', 'corpNo', 'zip', 'address', 'phone', 'fax',
@@ -73,7 +91,7 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
   {
     const base: any[] = Array.isArray(out.companies) ? out.companies.slice() : []
     const byCrm = new Map(base.map((c, i) => [String(c?.crmId ?? ''), i]))
-    let added = 0, updated = 0, diff = 0, staffChanged = 0
+    let added = 0, updated = 0, diff = 0, staffChanged = 0, adopted = 0
     const seen = new Set<string>()
 
     for (const src of (payload.companies || [])) {
@@ -85,7 +103,15 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
          CRM の値は ユーザーの「名前」。空欄のときは上書きしない（予実で入れた担当を消さない）。 */
       const staff = String(src.biglightStaff ?? '').trim()
       if (staff) incoming.owner = staff
-      const at = byCrm.get(crmId)
+      let at = byCrm.get(crmId)
+      if (at == null) {
+        const mf = adoptMfCompany(base, incoming)
+        if (mf >= 0) {
+          /* MF から来た会社を CRM の会社にする。会計の項目（締日・サイト・MF の取引先ID）はそのまま */
+          base[mf] = { ...base[mf], crmId, needsReview: false, adoptedFromMfAt: new Date().toISOString() }
+          byCrm.set(crmId, mf); at = mf; adopted++
+        }
+      }
       if (at == null) {
         base.push({
           id: newId('CO'), crmId, source: 'crm', kind: '得意先',
@@ -115,7 +141,7 @@ export function applyCrmPayload(state: any, payload: CrmPayload) {
       if (c?.source === 'crm' && c.crmId && !seen.has(String(c.crmId)) && !c._gone) { c._gone = true; gone++ }
     }
     out.companies = base
-    stats.companies = `+${added} ~${updated}${gone ? ` 消失${gone}` : ''}${diff ? ` ⚠相違${diff}` : ''}${staffChanged ? ` 担当変更${staffChanged}` : ''}`
+    stats.companies = `+${added} ~${updated}${gone ? ` 消失${gone}` : ''}${diff ? ` ⚠相違${diff}` : ''}${staffChanged ? ` 担当変更${staffChanged}` : ''}${adopted ? ` MF統合${adopted}` : ''}`
   }
 
   /* ---------- 特定技能者 → workers (chỉ đọc) ---------- */

@@ -222,6 +222,21 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
     border:1px solid var(--border-strong);color:var(--muted);background:var(--surface-2);}
   .tag.crm{color:var(--primary);border-color:#bcd8ff;background:var(--primary-soft);}
   .tag.manual{color:#6941c6;border-color:#ded0ff;background:#f4efff;}
+  .tag.mf{color:#b54708;border-color:#fedf89;background:#fffaeb;}
+  html.dark .tag.mf{background:#3a2a0e;border-color:#6b4a12;color:#fdb022;}
+  /* 取引先の3タブ（得意先／支払先／すべて） */
+  .co-tabs{display:flex; gap:6px; flex-wrap:wrap; margin:0 0 10px;}
+  .co-tab{display:inline-flex; align-items:center; gap:4px; padding:7px 12px; border:1px solid var(--border-strong); border-radius:999px; background:var(--surface); color:var(--text); font:inherit; font-size:13px; cursor:pointer;}
+  .co-tab .muted{font-size:11px;}
+  .co-tab.on{border-color:var(--primary); background:var(--primary-soft); color:var(--primary);}
+  .co-tabn{font-size:11px; font-weight:700; padding:0 6px; border-radius:999px; background:var(--surface-2); color:var(--text-muted);}
+  .co-tab.on .co-tabn{background:var(--primary); color:#fff;}
+  .cr-sec{margin-bottom:16px;}
+  .cr-sec h4{margin:0 0 6px; font-size:14px; display:flex; align-items:center; gap:8px;}
+  .cr-cands{display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;}
+  .cr-act{display:flex; gap:6px; flex-wrap:wrap; align-items:center;}
+  .cr-act select{max-width:220px; font-size:12px; padding:4px 6px;}
+  @media(max-width:760px){ .co-tab .muted{display:none;} }
   html.dark .tag.manual{background:#241b3a;border-color:#3d3163;color:#c4b5fd;}
 
   /* ===== Bảng ===== */
@@ -488,6 +503,24 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .mf-st.s-open{color:var(--warning); background:var(--warning-soft);}
   .mf-src-tag{font-size:9.5px; font-weight:700; padding:0 4px; border-radius:4px; background:var(--primary-soft); color:var(--primary);}
   @media(max-width:980px){ .mf-src{grid-template-columns:1fr;} }
+  /* Money Forward 連携: 請求書・会計 の2枚カード（2026-09-18） */
+  .mfp .panel-bd{font-size:13px;}
+  .mfp-key{display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--surface-2);}
+  .mfp-cards{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;}
+  .mfp-card{display:flex; flex-direction:column; gap:8px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; min-width:0;}
+  .mfp-hd{font-weight:700; font-size:14px; display:flex; align-items:center; gap:6px;}
+  .mfp-hd svg{width:16px; height:16px;}
+  .mfp-hd .muted{font-weight:400; font-size:11px;}
+  .mfp-what{font-size:12px; color:var(--text-muted);}
+  .mfp-st{min-height:22px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+  .mfp-btns{display:flex; gap:6px; flex-wrap:wrap; align-items:center; min-height:30px;}
+  .mfp-ops{margin-top:auto; padding-top:8px; border-top:1px dashed var(--border); display:flex; flex-direction:column; gap:6px;}
+  .mfp-ops select{font-size:12px; max-width:100%;}
+  .mfp-auto{display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-top:12px; padding:8px 10px; border:1px solid var(--border); border-radius:10px;}
+  .mfp-auto svg{width:14px; height:14px; vertical-align:-2px;}
+  .mfp-more{margin-top:8px;} .mfp-more summary{cursor:pointer; font-size:12px; color:var(--text-muted);}
+  .btn.danger-t{color:var(--danger);}
+  @media(max-width:760px){ .mfp-cards{grid-template-columns:1fr;} .mfp-auto,.mfp-key{align-items:flex-start;} }
 
   /* ===== 回収（売掛金）: 取引先 × 月 の残高表 ===== */
   .ar-kpis .num{font-size:21px;}
@@ -1329,9 +1362,12 @@ const SECTIONS = [
   { id:'sec-cost', label:'費用', icon:'expense', tabs:[
     {id:'expenses',   label:'費用表'},
     {id:'properties', label:'物件（建物）'} ]},
+  /* ★ 2026-09-18 利用者の指示: 取引先は1枚（得意先／支払先／すべて をページの中のタブで切り替え）。
+       旧「支払先」（vendors）は PAGE_REDIRECT で このページの 支払先 タブに案内します。
+       「取引先の確認」＝ Money Forward から自動で作った会社・似た会社があって止めている取引先 を片づける所。 */
   { id:'sec-co', label:'取引先', icon:'company', tabs:[
-    {id:'companies', label:'一覧（すべて）'},
-    {id:'vendors',   label:'支払先'} ]},
+    {id:'companies', label:'取引先'},
+    {id:'coreview',  label:'取引先の確認'} ]},
     /* ★ 2026-09-14: 台帳（1社の履歴・タイムライン）は 回収 › 取引先別 と 支払 › 支払先別 に
        まとめました（同じものを2か所に置かない）。openLedger() はそちらへ案内します。 */
     /* ★ 2026-09-13 利用者の指示でメニューから外しました:
@@ -1350,7 +1386,9 @@ const ALL_PAGES  = SECTIONS.flatMap(s=>s.tabs.map(t=>t.id));
 /* メニューから外した画面への古いリンク（ベル・ダッシュボード・ブックマーク）は ここで案内し直す */
 const PAGE_REDIRECT = { invoices:'arbook', aging:'arbook', arco:'arbook', apaging:'apbook', apco:'apbook',
   /* ★ 2026-09-16 にメニューから外した画面 */
-  apsuii:'expenses', kbunrui:'expenses' };
+  apsuii:'expenses', kbunrui:'expenses',
+  /* ★ 2026-09-18: 支払先 は 取引先 の中のタブになりました（goto が 支払先 タブを開きます） */
+  vendors:'companies' };
 const SECTION_OF = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ SECTION_OF[t.id]=sec; }));
 const PAGE_LABEL = {}; SECTIONS.forEach(sec=>sec.tabs.forEach(t=>{ PAGE_LABEL[t.id]=t.label; }));
 
@@ -1428,6 +1466,7 @@ function statusBadge(s){
 function sourceTag(r){
   if(!r) return '';
   if(r._gone) return '<span class="tag" style="color:var(--danger);border-color:#f3b6b1;">CRM消失</span>';
+  if(r.source==='mf') return '<span class="tag mf" title="Money Forward の請求から自動で作った取引先">MF</span>';
   return r.source==='crm' ? '<span class="tag crm">CRM連携</span>' : '<span class="tag manual">手入力</span>';
 }
 
@@ -1768,6 +1807,7 @@ function navBadges(){
   return b;
 }
 function goto(page){
+  if(page==='vendors'){ COLIST_TAB='ap'; }
   if(PAGE_REDIRECT[page]) page=PAGE_REDIRECT[page];
   if(!ALL_PAGES.includes(page)) page='dashboard';
   if(!canSee(page)){ toast('この画面を見る権限がありません。','err'); page='dashboard'; }
@@ -1809,6 +1849,7 @@ function renderPage(page){
       case 'cashflow':  html=viewCashflow();  break;
       case 'okr':       html=viewOkr();       break;
       case 'companies': html=viewCompanies('');       break;
+      case 'coreview':  html=viewCoReview();          break;
       case 'vendors':   html=viewCompanies('vendor'); break;
       case 'ledger':    html=viewLedger();    break;
       case 'dunning':   html=viewDunning();   break;
@@ -4250,17 +4291,24 @@ function mfBillingPlanHtml(p){
       <span class="muted">変更なし ${p['変更なし']||0}</span>${p['下書き除外']?`<span class="muted">下書き除外 ${p['下書き除外']}</span>`:''}
       ${p['MF差異']?`<span class="minus">確定済みとの差異 ${p['MF差異']}</span>`:''}
       ${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}
-      ${unmapped.length?`<span class="minus">取引先が未対応 ${unmapped.reduce((s,g)=>s+g.n,0)}件</span>`:''}</div>
+      ${(p.newPartners||[]).length?`<span>取引先を自動作成 <b>${p.newPartners.length}</b>社</span>`:''}
+      ${unmapped.length?`<span class="minus">似た会社があり止める ${unmapped.reduce((s,g)=>s+g.n,0)}件</span>`:''}</div>
     ${p['二重の疑い']?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に この システムで作った請求がすでにある分が ${p['二重の疑い']}件あります。二重計上にならないか確認してください。</div>`:''}
-    ${unmapped.length?`<div class="form-section" style="margin-top:10px;">取引先の対応づけ（選ぶと取り込めます）</div>
+    ${(p.newPartners||[]).length?`<div class="form-section" style="margin-top:10px;">新しく作る得意先（この システムに似た会社がないため）</div>
+      <div class="fhelp" style="margin:-4px 0 6px;">得意先として作り、請求は そのまま 回収 に入ります。あとで「取引先 › 取引先の確認」で 統合 か このまま を選べます。</div>
+      <div class="table-wrap" style="max-height:20vh;"><table><thead><tr><th>MF の取引先</th><th class="r">件数</th><th class="r">合計</th></tr></thead>
+        <tbody>${p.newPartners.map(g=>`<tr><td>${esc(g.partnerName)}</td><td class="r num">${g.n}</td><td class="r num">${moneyPlain(g.total)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${unmapped.length?`<div class="form-section" style="margin-top:10px;">似た会社がある取引先（選ぶと取り込めます。選ばなければ「取引先の確認」で待ちます）</div>
       <div class="table-wrap" style="max-height:30vh;"><table>
         <thead><tr><th>MF の取引先</th><th class="r">件数</th><th class="r">合計</th><th>この システムの取引先</th></tr></thead>
         <tbody>${unmapped.map(g=>`<tr><td>${esc(g.partnerName)}</td><td class="r num">${g.n}</td><td class="r num">${moneyPlain(g.total)}</td>
-          <td><select onchange="mfMap('${attr(g.key)}',this.value)" style="min-width:230px;${MFI.map[g.key]?'':'border-color:var(--danger);'}">
-            <option value="">— 選んでください —</option>
+          <td><select onchange="mfMap('${attr(g.key)}',this.value)" style="min-width:230px;">
+            <option value="">— あとで確認する —</option>
             <option value="__new" ${MFI.map[g.key]==='__new'?'selected':''}>＋ 新しい得意先として作る（${esc(g.partnerName)}）</option>
             <option value="__skip" ${MFI.map[g.key]==='__skip'?'selected':''}>取り込まない</option>
+            ${(g.candidates||[]).length?`<optgroup label="似ている会社">${g.candidates.map(id=>`<option value="${attr(id)}" ${String(MFI.map[g.key])===String(id)?'selected':''}>★ ${esc(arCoName(id))}</option>`).join('')}</optgroup><optgroup label="すべての得意先">`:''}
             ${cos.map(c=>`<option value="${attr(c.id)}" ${String(MFI.map[g.key])===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}
+            ${(g.candidates||[]).length?'</optgroup>':''}
           </select></td></tr>`).join('')}</tbody></table></div>`:''}
     ${(p.createSample||[]).length?`<div class="form-section" style="margin-top:10px;">新しく入る請求</div>
       <div class="table-wrap" style="max-height:30vh;"><table><thead><tr><th>取引先</th><th>計上月</th><th>請求日</th><th>期日</th><th class="r">金額</th><th>確定</th></tr></thead>
@@ -4297,68 +4345,105 @@ async function mfApply(){
 }
 
 /* ---------- 設定 › API・AI連携 に出す Money Forward の箱 ---------- */
+/* ★ 2026-09-18 利用者の指示: 請求書 と 会計 を「同じ形の2枚のカード」に。
+     状態 → 接続ボタン → 取り込みボタン が、どちらのカードでも同じ位置・同じ大きさ（btn sm）。
+     スマホでは縦に並べる（.mfp-cards は 760px 以下で1列）。 */
 async function mfPanelLoad(){
   const box=document.getElementById('mfPanel'); if(!box) return;
   let st=null;
   try{ st=await mfGet('/mf/status'); }catch(e){ return; }
   const b=document.getElementById('mfPanel');
   if(!b || b.id!=='mfPanel') return;
-  const mgr = myRole()==='Admin'||myRole()==='Manager';
+  const mgr = myRole()==='Admin'||myRole()==='Manager', adm=isAdmin();
   MF_PANEL_ST = st;
   if(st.accounting && st.accountingScopeOk) setTimeout(mfBankAccounts, 0);
   const sch = st.schedule || { enabled:true, hour:6 };
   const statsTxt = mfStatsText(st.lastStats);
-  const unmapped = mfUnmappedCount(st.lastStats);
-  const line = st.lastSyncAt? `最後の同期 ${esc(String(st.lastSyncAt).slice(0,16).replace('T',' '))}${st.lastResult==='error'?' <span class="minus">失敗</span>':''}` : 'まだ同期していません';
+  const last = st.lastSyncAt? String(st.lastSyncAt).slice(5,16).replace('T',' ').replace('-','/') : '';
+  const who = String(st.connectedBy||'').split('@')[0];
+  const bs = (st.lastStats && (st.lastStats.billings || (('取引先未対応' in st.lastStats||'取引先を自動作成' in st.lastStats)? st.lastStats : null))) || null;
+  const bsTxt = bs && typeof bs==='object' && !bs['エラー']
+    ? ['新規','取引先を自動作成','取引先未対応','二重の疑い'].filter(k=>Number(bs[k])).map(k=>`${k==='取引先未対応'?'取引先の確認':k} ${bs[k]}`).join('・') || '変更なし' : '';
+  const review = coReviewCounts();
+  const run = st.running;
+
   const keyLine = st.configured
-    ? `<span class="badge b-green">鍵あり</span> ClientID ${esc(st.clientIdPeek||'')} ・ Secret ${st.clientSecretLen||0}文字 ・ ${esc(st.tokenAuth==='post'?'CLIENT_SECRET_POST':'CLIENT_SECRET_BASIC')}
-        <span class="muted">（${st.credSource==='env'? 'サーバーの .env から' : '画面から入れた分'}）</span>`
+    ? `<span class="badge b-green">鍵あり</span> ClientID ${esc(st.clientIdPeek||'')}・Secret ${st.clientSecretLen||0}文字・${esc(st.tokenAuth==='post'?'POST':'BASIC')}
+        <span class="muted">（${st.credSource==='env'? '.env' : '画面から入れた鍵'}）</span>`
     : '<span class="badge b-amber">鍵なし</span> <span class="muted">MF アプリポータルの ClientID / ClientSecret を貼り付けてください</span>';
-  b.innerHTML=`<div class="panel"><div class="panel-hd"><b>Money Forward 連携</b>
-      <span class="sub">請求書と入出金明細を「読むだけ」。仕訳は経理が MF 会計で入れます</span>
-      ${mgr&&st.connected?`<button class="btn sm" style="margin-left:auto;" onclick="mfSyncNow()">今すぐ同期</button>`:''}</div>
-    <div class="panel-bd" style="font-size:13px;line-height:1.9;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:6px;">
-        ${keyLine}
-        ${isAdmin()&&st.credSource!=='env'?`<button class="btn secondary sm" onclick="mfKeyForm()">${st.configured?'鍵を変える':'鍵を入れる'}</button>`:''}
-        ${isAdmin()&&st.credSource==='env'?'<span class="fhelp">.env に入っているため、画面からは変えられません（サーバーで vps/enable-mf.sh）。</span>':''}
+  const keyBtn = adm&&st.credSource!=='env'
+    ? `<button class="btn secondary sm" onclick="mfKeyForm()">${st.configured?'鍵を変える':'鍵を入れる'}</button>${st.configured&&st.credSource==='db'?` <button class="btn secondary sm danger-t" onclick="mfKeyClear()">鍵を消す</button>`:''}`
+    : (adm&&st.credSource==='env'? '<span class="fhelp">.env の鍵は画面から変えられません</span>' : '');
+
+  /* ─ 請求書カード ─ */
+  const invSt = !st.configured? '<span class="badge b-gray">鍵が必要</span>'
+    : st.connected? `<span class="badge b-green">接続中</span> <span class="muted">${esc(who)}${last?` ・ ${esc(last)}`:''}</span>`
+    : '<span class="badge b-amber">未接続</span>';
+  const invBtn = !st.configured? '' : st.connected
+    ? (adm? `<button class="btn secondary sm" onclick="mfDisconnect()">切断</button>` : '')
+    : (adm? `<button class="btn sm" onclick="mfConnect()">接続する</button>` : '<span class="muted">管理者に接続を依頼してください</span>');
+  /* ─ 会計カード ─ */
+  const accOn = st.accounting && st.accountingScopeOk;
+  const accSt = !st.connected? '<span class="badge b-gray">請求書の接続が先</span>'
+    : accOn? '<span class="badge b-green">接続中</span>'
+    : st.accounting? '<span class="badge b-amber">認可待ち</span> <span class="muted">会計の許可がまだです</span>'
+    : '<span class="badge b-amber">未接続</span>';
+  const accBtn = !st.connected? '' : accOn
+    ? (adm? `<button class="btn secondary sm" onclick="mfBankOff()">切断</button>` : '')
+    : (adm? `<button class="btn sm" onclick="${st.accounting?'mfConnect()':'mfBankConnect()'}">接続する</button>` : '<span class="muted">管理者に依頼してください</span>');
+
+  b.innerHTML=`<div class="panel mfp"><div class="panel-hd"><b>Money Forward 連携</b>
+      <span class="sub">読むだけ。MF には何も書きません（仕訳は経理が MF 会計で入れます）</span></div>
+    <div class="panel-bd">
+      <div class="mfp-key"><div>${keyLine}</div><div class="mfp-btns">${keyBtn}</div></div>
+      <div class="mfp-cards">
+        <section class="mfp-card">
+          <div class="mfp-hd">${IC.invoice||''} 請求書 <span class="muted">MF クラウド請求書</span></div>
+          <div class="mfp-what">読むもの：請求（取引先・日付・金額）</div>
+          <div class="mfp-st">${invSt}</div>
+          <div class="mfp-btns">${invBtn}</div>
+          <div class="mfp-ops">
+            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('billings')">請求を取り込む</button></div>`:''}
+            <div class="fhelp">${bsTxt? '最後：'+esc(bsTxt) : 'まだ取り込んでいません'}</div>
+          </div>
+        </section>
+        <section class="mfp-card">
+          <div class="mfp-hd">${IC.yen||''} 会計 <span class="muted">MF クラウド会計</span></div>
+          <div class="mfp-what">読むもの：銀行の入出金明細・試算表</div>
+          <div class="mfp-st">${accSt}</div>
+          <div class="mfp-btns">${accBtn}</div>
+          <div class="mfp-ops">
+            ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('transactions')">入金を取り込む</button>
+              <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button></div>`:''}
+            <div class="fhelp">${accOn? '使う口座：<span id="mfBankSel">読み込み中…</span>' : 'API が無くても CSV で取り込めます'}</div>
+          </div>
+        </section>
       </div>
-      ${!st.configured? '<span class="muted">鍵を入れると接続できます。入れなくても、各画面の「取り込む」から CSV で運用できます。</span>'
-        : (st.connected? `<span class="badge b-green">接続中</span> ${esc(String(st.connectedBy||'').split('@')[0])} ・ ${line}
-            ${isAdmin()?` <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}${isAdmin()&&st.credSource==='db'?` ・ <a onclick="mfKeyClear()" style="cursor:pointer;color:var(--danger);">鍵を消す</a>`:''}`
-          : `<span class="badge b-amber">未接続</span> ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}`)}
-      ${st.configured && st.connected? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
-        <b>Money Forward 会計</b> <span class="muted">— 銀行の入出金明細（あいち銀行 など MF 会計に連携済みの口座）と 試算表 を MF 会計 API で読みます（読むだけ・仕訳は書きません）</span><br>
-        ${st.accounting && st.accountingScopeOk
-          ? `<span class="badge b-green">接続中</span> <span class="muted">「入金を取り込む」「試算表を取り込む」と 毎日の自動同期で MF 会計 を使います</span>
-             <span id="mfBankSel" class="muted"></span>
-             ${isAdmin()?` ・ <a onclick="mfBankOff()" style="cursor:pointer;color:var(--danger);">MF 会計 を切る</a>`:''}`
-          : st.accounting
-            ? `<span class="badge b-amber">認可待ち</span> <span class="muted">会計のスコープがまだトークンに入っていません。</span>
-               ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">もう一度「接続する」</button>`:''}`
-            : `<span class="badge b-amber">未接続</span>
-               ${isAdmin()?`<button class="btn sm" onclick="mfBankConnect()">Money Forward 会計と接続する</button>`:'<span class="muted">管理者に依頼してください。</span>'}
-               <span class="fhelp" style="display:inline;">押すと MF に戻って「許可」をもう一度求められます（請求書 ＋ 会計）。</span>`}
-      </div>`:''}
-      ${!st.connected && st.connectLast? `<div class="fhelp" style="margin-top:4px;">最後の戻り：${esc(st.connectLast.at||'')} ${st.connectLast.ok?'成功':'失敗'}${st.connectLast.why? ' ／ '+esc(st.connectLast.why):''}</div>`:''}
-      ${!st.connected && st.configured && !st.connectLast? '<div class="fhelp" style="margin-top:4px;">まだ一度も Money Forward から戻ってきていません（ブラウザで「許可」がまだです）。</div>':''}
+      <div class="mfp-auto">
+        <div>${IC.clock||''} <b>自動同期</b> ${sch.enabled? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）請求 → 入金 → 自動消込` : '<b class="minus">止めています</b>（押したときだけ）'}
+          ${adm?` <a onclick="mfSchedForm()" style="cursor:pointer;">設定を変える</a>`:''}</div>
+        <div class="mfp-btns">
+          ${mgr?`<button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button>`:''}
+          ${mgr&&st.connected? (run? `<button class="btn sm" disabled title="${attr(String(run.by||'').split('@')[0])} が ${attr(String(run.since||'').slice(11,16))} に開始">同期中…</button>`
+            : `<button class="btn sm" onclick="mfSyncNow(this)">今すぐ同期</button>`):''}
+        </div>
+      </div>
+      ${review.total? `<div class="warnbar" style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${IC.warn}
+          <span><b>取引先の確認 ${review.total}件</b>：${[review.queue?`似た会社があって止めている ${review.queue}社`:'', review.auto?`自動で作った ${review.auto}社`:'', review.dup?`二重の疑い ${review.dup}件`:''].filter(Boolean).join('・')}</span>
+          <button class="btn sm" style="margin-left:auto;" onclick="goto('${review.queue||review.auto?'coreview':'arconfirm'}')">確認する</button></div>`:''}
       ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
-      ${statsTxt? `<div class="fhelp" style="margin-top:4px;">最後の同期の中身：${esc(statsTxt)}</div>`:''}
-      ${unmapped? `<div class="alertbar" style="margin-top:8px;">${IC.warn} <b>取引先未対応 ${unmapped}件</b>：MF の取引先が この システムの取引先と結びついていないため、その請求は取り込んでいません。
-        一度だけ対応づければ、次からは自動で当たります。
-        ${mgr?`<button class="btn sm" style="margin-left:auto;" onclick="openMfImport('billings')">対応づける</button>`:''}</div>`:''}
-      <div class="fhelp">${sch.enabled
-          ? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）に「請求 → 入金 → 自動消込」を自動で行います。`
-          : '<b>自動同期は止まっています。</b>「今すぐ同期」を押したときだけ取り込みます。'}
-        ${isAdmin()?` <a onclick="mfSchedForm()" style="cursor:pointer;">設定を変える</a>`:''} ／ 手順は docs/MONEYFORWARD.md<br>
-        戻り先URL：${esc(st.redirectUri||'')} ／ スコープ：${esc(st.scopes||'')}</div>
-      ${mgr?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-        ${st.connected?`<button class="btn sm" onclick="mfSyncNow()">今すぐ同期（請求→入金→消込）</button>`:''}
-        <button class="btn secondary sm" onclick="openMfImport('billings')">請求を取り込む</button>
-        <button class="btn secondary sm" onclick="openMfImport('transactions')">入金を取り込む</button>
-        <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button>
-        <button class="btn secondary sm" onclick="openSettlementPick()">消込一覧CSV</button></div>`:''}
+      ${!st.connected && st.connectLast? `<div class="fhelp" style="margin-top:4px;">最後の戻り：${esc(st.connectLast.at||'')} ${st.connectLast.ok?'成功':'失敗'}${st.connectLast.why? ' ／ '+esc(st.connectLast.why):''}</div>`:''}
+      <details class="mfp-more"><summary>詳しく</summary><div class="fhelp">
+        ${statsTxt? `最後の同期の中身：${esc(statsTxt)}<br>`:''}
+        戻り先URL：${esc(st.redirectUri||'')}<br>スコープ：${esc(st.scopes||'')}<br>手順は docs/MONEYFORWARD.md</div></details>
     </div></div>`;
+}
+/** 「取引先の確認」に出す件数（待ち行列・自動で作った会社・二重の疑い） */
+function coReviewCounts(){
+  const queue=(DB.mfPartnerQueue||[]).filter(q=>q.status!=='skipped').length;
+  const auto=(DB.companies||[]).filter(c=>c.needsReview && !c._gone).length;
+  const dup=(DB.invoices||[]).filter(i=>(i.dupOf||[]).length && i.status!=='取消').length;
+  return { queue, auto, dup, total:queue+auto+dup };
 }
 /** 鍵（ClientID / ClientSecret）を画面から入れる。サーバーに預けるだけで、二度と表示しません。 */
 function mfKeyForm(){
@@ -4455,9 +4540,9 @@ async function mfBankAccounts(){
   try{
     const d=await mfGet('/mf/accounting/accounts');
     const opts=[]; (d.items||[]).forEach(a=>{ if((a.subAccounts||[]).length) a.subAccounts.forEach(x=>opts.push([x.id, a.name+' ／ '+x.name])); else opts.push([a.id, a.name]); });
-    if(!opts.length){ el.innerHTML=' ・ <span class="minus">MF 会計 に連携している口座が見つかりません（MF 会計 › 連携サービス で銀行をつないでください）</span>'; return; }
-    el.innerHTML=` ・ 使う口座: <select onchange="mfBankPick(this.value)" style="font-size:12px;"><option value="">すべて</option>${opts.map(([id,n])=>`<option value="${attr(id)}" ${String(d.selected)===String(id)?'selected':''}>${esc(n)}</option>`).join('')}</select>`;
-  }catch(e){ el.innerHTML=' ・ <span class="minus">口座を取れませんでした：'+esc(String(e.message||e))+'</span>'; }
+    if(!opts.length){ el.innerHTML='<span class="minus">MF 会計 に連携している口座が見つかりません（MF 会計 › 連携サービス で銀行をつないでください）</span>'; return; }
+    el.innerHTML=`<select onchange="mfBankPick(this.value)"><option value="">すべて</option>${opts.map(([id,n])=>`<option value="${attr(id)}" ${String(d.selected)===String(id)?'selected':''}>${esc(n)}</option>`).join('')}</select>`;
+  }catch(e){ el.innerHTML='<span class="minus">口座を取れませんでした：'+esc(String(e.message||e))+'</span>'; }
 }
 async function mfBankPick(id){
   try{ await mfCall('/mf/accounting/account',{ id }); toast(id? 'この口座の入金だけを取り込みます。' : 'すべての口座を取り込みます。','ok'); }
@@ -4492,22 +4577,24 @@ async function mfSchedSave(){
     renderPage(CURRENT_PAGE);
   }catch(e){ toast(String(e.message||e),'err'); }
 }
-async function mfSyncNow(){
+async function mfSyncNow(btn){
+  /* 二度押しで2本走らせない（サーバーも 実行中なら断ります） */
+  if(btn){ btn.disabled=true; btn.textContent='同期中…'; }
   toast('Money Forward と同期しています…','ok');
   try{
     const d=await mfCall('/mf/sync/run',{});
     await pullState(); renderPage(CURRENT_PAGE);
-    const s=d.stats||{};
-    toast(`同期しました：請求 ${JSON.stringify(s.billings||{})} ／ 入金 ${JSON.stringify(s.transactions||{})} ／ 消込 ${JSON.stringify(s.reconcile||{})}`,'ok');
+    toast('同期しました：'+(mfStatsText(d.stats)||'変更なし'),'ok');
   }catch(e){ toast(String(e.message||e),'err'); renderPage(CURRENT_PAGE); }
 }
 
 /* ---------- 請求の確認（未確認・MF差異・取引先未対応）---------- */
-const mfNeedsCheck = i => AR_LIVE(i) && (i.confirmStatus==='未確認' || i.mfDiff || !i.companyId);
+const mfIsDup = i => (i.dupOf||[]).length>0;
+const mfNeedsCheck = i => AR_LIVE(i) && (i.confirmStatus==='未確認' || i.mfDiff || !i.companyId || mfIsDup(i));
 function mfCheckCounts(){
   const list=(DB.invoices||[]).filter(AR_LIVE);
   return { 未確認:list.filter(i=>i.confirmStatus==='未確認').length, MF差異:list.filter(i=>i.mfDiff).length,
-    取引先未対応:list.filter(i=>!i.companyId).length, 確定:list.filter(i=>i.confirmStatus==='確定').length, all:list.length };
+    取引先未対応:list.filter(i=>!i.companyId).length, 二重の疑い:list.filter(mfIsDup).length, 確定:list.filter(i=>i.confirmStatus==='確定').length, all:list.length };
 }
 let ARCF_FILT='要対応';
 function arcfFilt(v){ ARCF_FILT=v; renderPage('arconfirm'); }
@@ -4522,6 +4609,7 @@ function viewArConfirm(){
     if(ARCF_FILT==='確定' && i.confirmStatus!=='確定') return false;
     if(ARCF_FILT==='MF差異' && !i.mfDiff) return false;
     if(ARCF_FILT==='取引先未対応' && i.companyId) return false;
+    if(ARCF_FILT==='二重の疑い' && !mfIsDup(i)) return false;
     if(q && !((arCoName(i.companyId)+(i.no||'')+(i.note||'')).toLowerCase().includes(q))) return false;
     return true;
   });
@@ -4529,7 +4617,7 @@ function viewArConfirm(){
   const kpis=`<div class="kpi-grid">
     <div class="kpi"><div class="lbl">確認待ち</div><div class="num ${C['未確認']?'minus':''}">${C['未確認']}</div><div class="sub">MF から入った請求のうち、まだ見ていないもの</div></div>
     <div class="kpi"><div class="lbl">MF と差異</div><div class="num ${C['MF差異']?'minus':''}">${C['MF差異']}</div><div class="sub">確定後に MF 側が変わった</div></div>
-    <div class="kpi"><div class="lbl">取引先が未対応</div><div class="num ${C['取引先未対応']?'minus':''}">${C['取引先未対応']}</div></div>
+    <div class="kpi"><div class="lbl">二重の疑い</div><div class="num ${C['二重の疑い']?'minus':''}">${C['二重の疑い']}</div><div class="sub">同じ取引先・同じ月に 手で作った請求もある</div></div>
     <div class="kpi"><div class="lbl">確定済み</div><div class="num">${C['確定']}</div><div class="sub">売掛金・予実に入っています</div></div>
   </div>`;
   const cols=[
@@ -4544,7 +4632,8 @@ function viewArConfirm(){
     {key:'confirmStatus', label:'確定', raw:r=>r.confirmStatus||'未確認', val:r=>r.confirmStatus==='確定'
       ? `<span class="mf-st s-ok">確定</span>${r.confirmedBy?`<div class="muted" style="font-size:10.5px;">${esc(String(r.confirmedBy).split('@')[0])}</div>`:''}`
       : '<span class="mf-st s-open">未確認</span>'},
-    {key:'mfDiff', label:'MF差異', noFilter:true, val:r=>r.mfDiff? `<a class="pillbtn pill-del" onclick="event.stopPropagation();mfDiffOpen('${attr(r.id)}')">差異を見る</a>`:''},
+    {key:'mfDiff', label:'MF差異', noFilter:true, val:r=>(r.mfDiff? `<a class="pillbtn pill-del" onclick="event.stopPropagation();mfDiffOpen('${attr(r.id)}')">差異を見る</a>`:'')
+      + (mfIsDup(r)? ` <a class="pillbtn pill-del" onclick="event.stopPropagation();mfDupOpen('${attr(r.id)}')">二重の疑い</a>`:'')},
     {key:'act', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'||!canEdit('invoices')? '' :
       `<a class="pillbtn pill-save" onclick="event.stopPropagation();mfConfirm(['${attr(r.id)}'])">確定</a>`},
   ];
@@ -4556,7 +4645,7 @@ function viewArConfirm(){
   return pageShell({ title:'請求の確認', count:all.length, shown:rows.length,
     sub:'Money Forward から入った請求を確認して確定します。確定した請求だけが 自動消込 の相手になります。',
     tools, body: kpis
-      + `<div class="mf-chips">${['要対応','未確認','確定','MF差異','取引先未対応','すべて'].map(k=>chip(k, k==='すべて'?all.length:(k==='要対応'?all.filter(mfNeedsCheck).length:C[k]))).join(' ')}</div>`
+      + `<div class="mf-chips">${['要対応','未確認','確定','MF差異','二重の疑い','取引先未対応','すべて'].map(k=>chip(k, k==='すべて'?all.length:(k==='要対応'?all.filter(mfNeedsCheck).length:C[k]))).join(' ')}</div>`
       + dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('invoices','${r.id}')` }) });
 }
 function mfConfirmChecked(){
@@ -4594,10 +4683,37 @@ function mfSetCompanyGo(id){
   if(!periodGuard([inv.bookMonth||inv.issueDate], '請求')) return;
   inv.companyId=cid; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
   if(inv.mfPartnerId){
-    const c=findById('companies',cid);
-    if(c && String(c.mfPartnerId||'')!==String(inv.mfPartnerId)) commitRecord('companies',{ mfPartnerId:inv.mfPartnerId, mfPartnerName:inv.mfPartnerName||'' },{ existingId:cid });
+    /* 1社が MF の取引先を2つ持つこともある（上書きすると前の ID の請求が迷子になるので 足す） */
+    const c=findById('companies',cid), pid=String(inv.mfPartnerId);
+    const has=c? [c.mfPartnerId, ...(c.mfPartnerIds||[])].map(String) : [];
+    if(c && !has.includes(pid)) commitRecord('companies', c.mfPartnerId? { mfPartnerIds:[...(c.mfPartnerIds||[]), pid] } : { mfPartnerId:pid, mfPartnerName:inv.mfPartnerName||'' },{ existingId:cid });
   }
   closeModal(); renderPage(CURRENT_PAGE); toast('取引先を設定しました。','ok');
+}
+/** 二重の疑い: MF の請求 と この システムで作った請求（同じ取引先・同じ計上月）を並べて、どちらを残すか決める */
+function mfDupOpen(id){
+  const inv=findById('invoices',id); if(!inv||!mfIsDup(inv)) return;
+  const olds=(inv.dupOf||[]).map(x=>findById('invoices',x)).filter(Boolean);
+  const paid=i=>(DB.payments||[]).filter(p=>p.status!=='取消').reduce((s,p)=>s+(p.allocations||[]).filter(a=>String(a.invoiceId)===String(i.id)).reduce((t,a)=>t+num(a.amount),0),0);
+  const row=(i,tag)=>`<tr><td>${tag}</td><td>${esc(i.no||'-')}</td><td>${esc(i.bookMonth||'')}</td><td>${esc(i.issueDate||'')}</td>
+    <td class="r num">${moneyPlain(docTotal(i))}</td><td class="r num">${moneyPlain(paid(i))}</td><td>${esc(i.status||'')}</td></tr>`;
+  const mgr=myRole()==='Admin'||myRole()==='Manager';
+  openModal(`<h3>二重の疑い — ${esc(arCoName(inv.companyId))} ${esc(inv.bookMonth||'')}</h3>
+    <div class="mdsub">同じ取引先・同じ計上月に、Money Forward の請求と この システムで作った請求があります。両方あると 売掛金が二重になります。</div>
+    <div class="table-wrap"><table><thead><tr><th></th><th>請求番号</th><th>計上月</th><th>請求日</th><th class="r">請求額</th><th class="r">入金済み</th><th>状態</th></tr></thead>
+      <tbody>${row(inv,'<span class="mf-src-tag">MF</span>')}${olds.map(o=>row(o,'<span class="mf-src-tag" style="background:var(--surface-2);color:var(--text-muted);">手入力</span>')).join('')}</tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;"><b>置き換える</b>＝手入力の請求を 取消 にして MF の請求を残します（充てた入金は MF の請求へ付け替え）。<b>別物</b>＝両方とも正しい請求として残します。</div>
+    <div class="modal-actions split">
+      ${mgr?`<button class="btn secondary" onclick="mfDupGo('${attr(id)}','separate')">別物（両方残す）</button>`:'<span></span>'}
+      <div style="display:flex;gap:8px;"><button class="btn secondary" onclick="closeModal()">あとで</button>
+        ${mgr?`<button class="btn" onclick="mfDupGo('${attr(id)}','replace')">置き換える</button>`:''}</div></div>`,'lg');
+}
+async function mfDupGo(id, action){
+  try{
+    await mfCall('/mf/dup/resolve',{ invoiceId:id, action });
+    await pullState(); closeModal(); renderPage(CURRENT_PAGE);
+    toast(action==='replace'? '手入力の請求を取消にして、MF の請求を残しました。' : '別物として両方残しました。','ok');
+  }catch(e){ toast(String(e.message||e),'err'); }
 }
 function mfDiffOpen(id){
   const inv=findById('invoices',id); if(!inv||!inv.mfDiff) return;
@@ -8713,61 +8829,209 @@ function exportCsvCost(){
   downloadCsv(`費用表_${CUR_FY}年度`, out);
 }
 /** mode: '' = すべて / 'vendor' = 支払先だけ（BIGLIGHTがサービスを受けている会社） */
+/* ★ 2026-09-18 利用者の指示: 取引先を 得意先（お金をもらう）／支払先（お金を払う）／すべて の3タブに分ける。
+     ・データは今までどおり companies 1つ（kind: 得意先／仕入先／両方）。DB の値「仕入先」は変えない（画面の文言だけ 支払先）
+     ・両方 は 得意先・支払先 どちらのタブにも出す
+     ・区分と実際が食い違う会社（得意先 なのに 支払請求 がある など）には「両方にする？」を出す（自動では変えない）
+     ・＋ボタンは いま開いているタブの区分で作る
+   旧「支払先」画面（vendors）は このページの 支払先 タブに案内します（goto）。 */
+let COLIST_TAB = (()=>{ try{ return localStorage.getItem('fin.coTab')||'ar'; }catch(e){ return 'ar'; } })();
+function setCoTab(t){ COLIST_TAB=t; try{ localStorage.setItem('fin.coTab',t); }catch(e){} renderPage(CURRENT_PAGE); }
+const coIsAr = c => c.kind!=='仕入先';
+const coIsAp = c => c.kind==='仕入先' || c.kind==='両方';
+const coKindLabel = k => k==='仕入先'? '支払先' : (k||'得意先');
+const coKindBadge = k => `<span class="badge ${({'得意先':'b-blue','仕入先':'b-purple','両方':'b-green'})[k||'得意先']||'b-gray'}">${esc(coKindLabel(k))}</span>`;
+/** 会社ごとの「実際の動き」（区分の食い違いと 最終入金・最終支払 に使う）。表を描くたびに1回だけ作る */
+function coActivity(){
+  const m={}, g=id=>m[id]||(m[id]={ inv:0, bill:0, lastPay:'', lastOut:'' });
+  (DB.invoices||[]).forEach(i=>{ if(i.status!=='取消' && i.companyId) g(i.companyId).inv++; });
+  (DB.payments||[]).forEach(p=>{ if(p.status==='取消'||!p.companyId) return; const a=g(p.companyId); a.inv++; if(String(p.date||'')>a.lastPay) a.lastPay=String(p.date||''); });
+  (DB.bills||[]).forEach(b=>{ if(b.status!=='取消' && b.companyId) g(b.companyId).bill++; });
+  (DB.payouts||[]).forEach(p=>{ if(p.status==='取消'||!p.companyId) return; const a=g(p.companyId); a.bill++; if(String(p.date||'')>a.lastOut) a.lastOut=String(p.date||''); });
+  return id=>m[id]||{ inv:0, bill:0, lastPay:'', lastOut:'' };
+}
+/** 区分と実際が合わないとき、その理由（合っていれば ''） */
+function coKindMismatch(c, act){
+  const a=act(c.id);
+  if(c.kind==='両方') return '';
+  if(c.kind!=='仕入先' && a.bill) return '支払請求・支払があります';
+  if(c.kind==='仕入先' && a.inv) return '請求・入金があります';
+  return '';
+}
+function coMakeBoth(id){
+  const c=findById('companies',id); if(!c) return;
+  if(!canEdit('companies')){ toast('権限がありません。','err'); return; }
+  if(!confirm(`「${c.name}」の区分を「両方」（お金をもらう・払う の両方）にします。よろしいですか？`)) return;
+  commitRecord('companies',{ kind:'両方' },{ existingId:id });
+  renderPage(CURRENT_PAGE); toast('区分を「両方」にしました。','ok');
+}
 function viewCompanies(mode){
-  const vend = mode==='vendor';
-  const p = vend? 'vendors' : 'companies';
-  let all=(DB.companies||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
-  if(vend) all=all.filter(c=>c.kind==='仕入先'||c.kind==='両方');
+  if(mode==='vendor') COLIST_TAB='ap';
+  const tab = ['ar','ap','all'].includes(COLIST_TAB)? COLIST_TAB : 'ar';
+  const p = tab==='ap'? 'vendors' : (tab==='all'? 'companiesAll' : 'companies');
+  const act = coActivity();
+  const every=(DB.companies||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  const n={ ar:every.filter(coIsAr).length, ap:every.filter(coIsAp).length, all:every.length };
+  const all = tab==='ar'? every.filter(coIsAr) : tab==='ap'? every.filter(coIsAp) : every;
   const q=(SEARCH[p]||'').toLowerCase();
   let rows=q? all.filter(r=>((r.name||'')+(r.kana||'')+(r.address||'')).toLowerCase().includes(q)) : all.slice();
   rows=rows.filter(r=>fcolPass(p,r));
-  const crmN=all.filter(c=>c.source==='crm').length, manN=all.length-crmN;
-  const noRule=all.filter(c=>c.kind!=='仕入先'&&!c._gone&&!rulesOfCompany(c.id).length).length;
+  const mism=all.filter(c=>!c._gone && coKindMismatch(c, act)).length;
+  const review=coReviewCounts();
 
-  const cols=[
-    {key:'name', label:'取引先名', val:r=>`<div style="font-weight:700;">${coLink(r.id, r.kind==='仕入先'?'ap':'ar')} ${sourceTag(r)}</div>
-      ${r.address?`<div class="muted" style="font-size:10.5px;">${esc(r.address)}</div>`:''}`,
-      raw:r=>r.name||''},
-    {key:'kind', label:'区分', val:r=>statusBadge(r.kind||'得意先')},
-    ...(vend? [] : [{key:'owner', label:'BIGLIGHT担当', raw:r=>staffOf(r.owner).name,
-      val:r=>r.owner? esc(staffOf(r.owner).name) : '<span class="zero">未設定</span>'}]),
-    vend? {key:'buys', label:'この会社に払っているもの', noFilter:true, val:r=>{
-      const its=(DB.costItems||[]).filter(x=>String(x.companyId)===String(r.id));
-      const prs=(DB.properties||[]).filter(x=>String(x.companyId)===String(r.id));
-      if(!its.length && !prs.length) return '<span class="zero">—</span>';
-      return `${its.length?esc(its.slice(0,3).map(x=>x.name).join('、'))+(its.length>3?` 他${its.length-3}`:''):''}
-        ${prs.length?`<div class="muted" style="font-size:10.5px;">物件 ${prs.length}件</div>`:''}`; }}
-    : {key:'rules', label:'請求ルール', noFilter:true, val:r=>{
+  const cond = r => r.paySite!=null&&r.paySite!==''? esc(`${Number(r.closingDay||31)>=31?'末':r.closingDay}日締 / ${r.paySite}か月後 ${Number(r.payDay||31)>=31?'末':r.payDay}日`) : '<span class="zero">未設定</span>';
+  const C = {
+    name:{key:'name', label:'取引先名', val:r=>`<div style="font-weight:700;">${coLink(r.id, tab==='ap'||r.kind==='仕入先'?'ap':'ar')} ${sourceTag(r)}${r.needsReview?' <span class="badge b-amber">要確認</span>':''}</div>
+      ${r.address?`<div class="muted" style="font-size:10.5px;">${esc(r.address)}</div>`:''}`, raw:r=>r.name||''},
+    kind:{key:'kind', label:'区分', raw:r=>coKindLabel(r.kind), val:r=>{ const why=coKindMismatch(r, act);
+      return coKindBadge(r.kind) + (why? `<div style="font-size:10.5px;margin-top:2px;"><span class="minus">${esc(why)}</span>${canEdit('companies')?` <a onclick="event.stopPropagation();coMakeBoth('${attr(r.id)}')" style="cursor:pointer;color:var(--primary);">両方にする</a>`:''}</div>`:''); }},
+    owner:{key:'owner', label:'BIGLIGHT担当', raw:r=>staffOf(r.owner).name, val:r=>r.owner? esc(staffOf(r.owner).name) : '<span class="zero">未設定</span>'},
+    ar:{key:'ar', label:'売掛残', cls:'r', noFilter:true, val:r=>{const v=arBalanceOf(r.id); return v?`<b class="num minus">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
+    ap:{key:'ap', label:'買掛残', cls:'r', noFilter:true, val:r=>{const v=apBalanceOf(r.id); return v?`<b class="num">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
+    rules:{key:'rules', label:'請求ルール', noFilter:true, val:r=>{
       const rl=rulesOfCompany(r.id);
       if(!rl.length) return `<a onclick="event.stopPropagation();openRules('${r.id}')" style="cursor:pointer;color:var(--amber);font-weight:600;font-size:12px;">未設定</a>`;
       return `<a onclick="event.stopPropagation();openRules('${r.id}')" style="cursor:pointer;color:var(--primary);font-size:12px;">${rl.length}件</a>
         <div class="muted" style="font-size:10.5px;">${esc(rl.map(x=>x.kind==='per_worker'?`${moneyPlain(x.unitPrice)}/人`:(x.kind==='fixed'?`${moneyPlain(x.unitPrice)}/月`:'都度')).join('・'))}</div>`; }},
-    {key:'att', label:'添付', noFilter:true, val:r=>attBtn('companies', r.id)},
-    {key:'paySite', label:'支払条件', noFilter:true, val:r=>
-      r.paySite!=null&&r.paySite!==''? esc(`${r.closingDay||31}日締 / ${r.paySite}か月後 ${r.payDay||31}日`) : '<span class="zero">未設定</span>'},
-    {key:'perf', label:'支払いぶり', noFilter:true, val:r=>ledPerfBadge(r.id, r.kind==='仕入先'?'ap':'ar')},
-    {key:'ar', label:'売掛残', cls:'r', noFilter:true, val:r=>{const v=arBalanceOf(r.id); return v?`<b class="num minus">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
-    {key:'ap', label:'買掛残', cls:'r', noFilter:true, val:r=>{const v=apBalanceOf(r.id); return v?`<b class="num">${moneyPlain(v)}</b>`:'<span class="zero">0</span>';}},
-  ];
-  const tools=`${searchBox(p, vend?'支払先名で検索':'取引先名で検索')}${filterClearBtn(p)}
-    ${canCreate('companies')?`<button class="btn" onclick="openForm('companies',null,${vend
-      ?`{kind:'仕入先',closingDay:31,paySite:1,payDay:31,taxCat:'課税10%'}`
-      :`{kind:'得意先',closingDay:31,paySite:1,payDay:31,taxCat:'課税10%'}`})">＋ ${vend?'支払先':'取引先'}を追加</button>`:''}
-    ${toolsMenu(`${vend?'':`<button class="btn secondary" onclick="goto('crmlink')">CRMから取り込む</button><hr>`}
+    arSite:{key:'arSite', label:'入金サイト', noFilter:true, val:cond},
+    apSite:{key:'apSite', label:'支払条件', noFilter:true, val:cond},
+    site:{key:'paySite', label:'締日・サイト', noFilter:true, val:cond},
+    lastPay:{key:'lastPay', label:'最終入金', date:true, raw:r=>act(r.id).lastPay, val:r=>act(r.id).lastPay? esc(act(r.id).lastPay) : '<span class="zero">—</span>'},
+    lastOut:{key:'lastOut', label:'最終支払', date:true, raw:r=>act(r.id).lastOut, val:r=>act(r.id).lastOut? esc(act(r.id).lastOut) : '<span class="zero">—</span>'},
+    arPerf:{key:'perf', label:'入金ぶり', noFilter:true, val:r=>ledPerfBadge(r.id,'ar')},
+    apPerf:{key:'perf', label:'支払いぶり', noFilter:true, val:r=>ledPerfBadge(r.id,'ap')},
+    buys:{key:'buys', label:'この会社に払っているもの', noFilter:true, val:r=>{
+      const its=(DB.costItems||[]).filter(x=>String(x.companyId)===String(r.id));
+      const prs=(DB.properties||[]).filter(x=>String(x.companyId)===String(r.id));
+      if(!its.length && !prs.length) return '<span class="zero">—</span>';
+      return `${its.length?esc(its.slice(0,3).map(x=>x.name).join('、'))+(its.length>3?` 他${its.length-3}`:''):''}
+        ${prs.length?`<div class="muted" style="font-size:10.5px;">物件 ${prs.length}件</div>`:''}`; }},
+    att:{key:'att', label:'添付', noFilter:true, val:r=>attBtn('companies', r.id)},
+  };
+  const cols = tab==='ar'? [C.name, C.kind, C.owner, C.ar, C.rules, C.arSite, C.lastPay, C.arPerf, C.att]
+    : tab==='ap'? [C.name, C.kind, C.ap, C.apSite, C.lastOut, C.buys, C.apPerf, C.att]
+    : [C.name, C.kind, C.owner, C.ar, C.ap, C.site, C.att];
+
+  const newKind = tab==='ap'? '仕入先' : '得意先';
+  const tabs=`<div class="co-tabs" role="tablist">
+    ${[['ar','得意先','お金をもらう'],['ap','支払先','お金を払う'],['all','すべて','']].map(([k,l,sub])=>
+      `<button type="button" role="tab" aria-selected="${tab===k}" class="co-tab ${tab===k?'on':''}" onclick="setCoTab('${k}')">
+        <b>${l}</b>${sub?`<span class="muted">（${sub}）</span>`:''} <span class="co-tabn">${n[k]}</span></button>`).join('')}</div>`;
+  const tools=`${searchBox(p, tab==='ap'?'支払先名で検索':'取引先名で検索')}${filterClearBtn(p)}
+    ${canCreate('companies')?`<button class="btn" onclick="openForm('companies',null,{kind:'${newKind}',closingDay:31,paySite:1,payDay:31,taxCat:'課税10%'})">＋ ${tab==='ap'?'支払先':(tab==='ar'?'得意先':'取引先')}を追加</button>`:''}
+    ${toolsMenu(`<button class="btn secondary" onclick="goto('crmlink')">CRMから取り込む</button><hr>
       <button class="btn secondary" onclick="exportCsvTable('companies')">${IC.doc} CSV出力</button>`)}`;
+  const noRule = tab==='ar'? all.filter(c=>!c._gone&&!rulesOfCompany(c.id).length).length : 0;
+  const bars =
+    (review.queue||review.auto? `<div class="warnbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${IC.warn}
+        <span>Money Forward から来た取引先の確認が <b>${review.queue+review.auto}件</b> あります（${[review.auto?`自動で作った ${review.auto}社`:'', review.queue?`似た会社があって止めている ${review.queue}社`:''].filter(Boolean).join('・')}）。</span>
+        <button class="btn sm" style="margin-left:auto;" onclick="goto('coreview')">確認する</button></div>`:'')
+    + (mism? `<div class="infobar">区分と実際の動きが違う会社が ${mism}社あります（区分の下に理由を出しています）。「両方にする」で直せます。</div>`:'')
+    + (tab==='ap' && !all.length? `<div class="warnbar">まだ支払先がありません。「＋ 支払先を追加」から、毎月お金を払っている会社を登録してください。</div>`:'')
+    + (noRule? `<div class="warnbar">請求ルールが未設定の得意先が ${noRule}社あります。ルールを作ると毎月の請求が自動で作られます。</div>`:'');
+  return pageShell({ title:'取引先', count:all.length, shown:rows.length, tools,
+    body: tabs + bars + dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('companies','${r.id}')` }) });
+}
+/* ============================================================================
+   取引先 › 取引先の確認（2026-09-18 利用者の指示）
+   ----------------------------------------------------------------------------
+   Money Forward の請求を取り込むとき、取引先は次のように決まります（規則は backend/src/mfsync.ts）:
+     ・MF の取引先ID／名前 で当たる → そのまま
+     ・何も似ていない             → 得意先 を自動で作る（needsReview）→ ここの ② に出る
+     ・似た会社がある             → 作らずに止める（mfPartnerQueue）→ ここの ① に出る
+   ここでは人が 統合（既存の会社にまとめる）／このままでよい／新規／取り込まない を選びます。
+   書き込みはすべてサーバー（/mf/partners/*）。画面は選ばせるだけ。
+   ========================================================================== */
+const crNorm = s => arNormName(s);
+/** 自動で作った会社に「似ていそうな」既存の会社（名前が含み合う・カナが同じ）。サーバーの similarCompanies と同じ考え方 */
+function crSimilar(c){
+  const n=crNorm(c.name); if(!n) return [];
+  return (DB.companies||[]).filter(x=>x.id!==c.id && !x._gone && !x.needsReview).filter(x=>{
+    const m=crNorm(x.name); return m.length>=2 && n.length>=2 && (m.includes(n)||n.includes(m));
+  }).map(x=>String(x.id));
+}
+function crCoOptions(cands, excludeId){
+  const cos=(DB.companies||[]).filter(c=>!c._gone && String(c.id)!==String(excludeId||'')).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ja'));
+  return `<option value="">— まとめる先を選ぶ —</option>`
+    + (cands.length? `<optgroup label="似ている会社">${cands.map(id=>`<option value="${attr(id)}">★ ${esc(arCoName(id))}</option>`).join('')}</optgroup>`:'')
+    + `<optgroup label="すべての取引先">${cos.map(c=>`<option value="${attr(c.id)}">${esc(c.name)}${c.source==='crm'?'（CRM）':''}</option>`).join('')}</optgroup>`;
+}
+function viewCoReview(){
+  const mgr=myRole()==='Admin'||myRole()==='Manager';
+  const queue=(DB.mfPartnerQueue||[]).filter(q=>q.status!=='skipped').sort((a,b)=>num(b.total)-num(a.total));
+  const skipped=(DB.mfPartnerQueue||[]).filter(q=>q.status==='skipped');
+  const auto=(DB.companies||[]).filter(c=>c.needsReview && !c._gone).sort((a,b)=>String(b.autoCreatedAt||'').localeCompare(String(a.autoCreatedAt||'')));
+  const dup=coReviewCounts().dup;
+  const invOf=id=>(DB.invoices||[]).filter(i=>String(i.companyId)===String(id) && i.status!=='取消');
+  const chips=ids=>ids.length? `<div class="cr-cands">${ids.map(id=>`<span class="badge b-gray">${esc(arCoName(id))}</span>`).join('')}</div>` : '<span class="zero">—</span>';
 
-  if(vend) return pageShell({ title:'支払先', count:all.length, shown:rows.length,
-    
-    tools, body:
-      (all.length? '' : `<div class="warnbar">まだ支払先がありません。「＋ 支払先を追加」から、毎月お金を払っている会社を登録してください。<br>
-        <span style="font-weight:400;">締日・支払サイト・支払日を入れると、支払期日が自動で決まります。</span></div>`)
-      +dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('companies','${r.id}')` }) });
+  const s1 = `<section class="cr-sec"><h4>① 似た会社があるので 止めている取引先 <span class="badge ${queue.length?'b-amber':'b-gray'}">${queue.length}</span></h4>
+    <div class="fhelp" style="margin:-2px 0 6px;">この請求は まだ 回収 に入っていません。同じ会社なら「統合」、別の会社なら「新規」を押すと、その場で取り込みます。</div>
+    ${queue.length? `<div class="table-wrap"><table><thead><tr><th>MF の取引先</th><th class="r">請求</th><th class="r">合計</th><th>似ている会社</th>${mgr?'<th>どうする</th>':''}</tr></thead><tbody>
+      ${queue.map(q=>`<tr><td><b>${esc(q.partnerName||'（名前なし）')}</b>${q.partnerId?`<div class="muted" style="font-size:10.5px;">MF ID ${esc(q.partnerId)}</div>`:''}</td>
+        <td class="r num">${num(q.n)}件</td><td class="r num">${moneyPlain(q.total)}</td><td>${chips(q.candidates||[])}</td>
+        ${mgr?`<td><div class="cr-act"><select id="crq-${attr(q.id)}">${crCoOptions(q.candidates||[])}</select>
+          <button class="btn sm" onclick="crResolve('${attr(q.id)}','map')">統合</button>
+          <button class="btn secondary sm" onclick="crResolve('${attr(q.id)}','new')">新規</button>
+          <button class="btn secondary sm" onclick="crResolve('${attr(q.id)}','skip')">取り込まない</button></div></td>`:''}</tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty" style="padding:14px;">止めている取引先はありません。</div>'}</section>`;
 
-  return pageShell({ title:'取引先', count:all.length, shown:rows.length,
-    
-    tools, body:
-      (noRule? `<div class="warnbar">請求ルールが未設定の得意先が ${noRule}社あります。ルールを作ると毎月の請求が自動で作られます。</div>`:'')
-      +dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('companies','${r.id}')` }) });
+  const s2 = `<section class="cr-sec"><h4>② Money Forward から 自動で作った取引先 <span class="badge ${auto.length?'b-amber':'b-gray'}">${auto.length}</span></h4>
+    <div class="fhelp" style="margin:-2px 0 6px;">この システムに似た会社が無かったので 得意先 として作り、請求は もう 回収 に入っています。すでにある会社と同じなら「統合」、新しいお客さんなら「このままでよい」。
+      あとで CRM に同じ会社が登録されると、自動で CRM の会社になります。</div>
+    ${auto.length? `<div class="table-wrap"><table><thead><tr><th>取引先</th><th>作成</th><th class="r">請求</th><th class="r">売掛残</th><th>似ていそうな会社</th>${mgr?'<th>どうする</th>':''}</tr></thead><tbody>
+      ${auto.map(c=>{ const sim=crSimilar(c), inv=invOf(c.id);
+        return `<tr><td><b>${esc(c.name)}</b> ${sourceTag(c)}</td><td>${esc(String(c.autoCreatedAt||c.createdAt||'').slice(0,10))}</td>
+          <td class="r num">${inv.length}件</td><td class="r num">${moneyPlain(arBalanceOf(c.id))}</td><td>${chips(sim)}</td>
+          ${mgr?`<td><div class="cr-act"><select id="crc-${attr(c.id)}">${crCoOptions(sim, c.id)}</select>
+            <button class="btn secondary sm" onclick="crMerge('${attr(c.id)}')">統合</button>
+            <button class="btn sm" onclick="crOk('${attr(c.id)}')">このままでよい</button>
+            <button class="btn secondary sm" onclick="openForm('companies','${attr(c.id)}')">編集</button></div></td>`:''}</tr>`; }).join('')}
+    </tbody></table></div>` : '<div class="empty" style="padding:14px;">確認待ちの取引先はありません。</div>'}</section>`;
+
+  const s3 = skipped.length? `<section class="cr-sec"><details><summary style="cursor:pointer;"><b>取り込まない にした MF の取引先 ${skipped.length}件</b> <span class="muted">（毎朝の同期でも入れません）</span></summary>
+    <div class="table-wrap" style="margin-top:6px;"><table><thead><tr><th>MF の取引先</th><th class="r">請求</th><th class="r">合計</th>${mgr?'<th></th>':''}</tr></thead><tbody>
+      ${skipped.map(q=>`<tr><td>${esc(q.partnerName||'')}</td><td class="r num">${num(q.n)}件</td><td class="r num">${moneyPlain(q.total)}</td>
+        ${mgr?`<td><button class="btn secondary sm" onclick="crResolve('${attr(q.id)}','reopen')">戻す</button></td>`:''}</tr>`).join('')}
+    </tbody></table></div></details></section>` : '';
+
+  const s4 = dup? `<div class="warnbar" style="display:flex;align-items:center;gap:8px;">${IC.warn} <span>請求の <b>二重の疑い</b> が ${dup}件あります（同じ取引先・同じ月に 手入力の請求もある）。</span>
+      <button class="btn sm" style="margin-left:auto;" onclick="ARCF_FILT='二重の疑い';goto('arconfirm')">請求の確認で見る</button></div>` : '';
+
+  return pageShell({ title:'取引先の確認', count:queue.length+auto.length,
+    tools: mgr? `<button class="btn secondary" onclick="openMfImport('billings')">請求を取り込む</button>` : '',
+    body: s4 + s1 + s2 + s3 });
+}
+async function crResolve(id, action){
+  const q=(DB.mfPartnerQueue||[]).find(x=>x.id===id); if(!q) return;
+  let companyId='';
+  if(action==='map'){
+    companyId=(document.getElementById('crq-'+id)||{}).value||'';
+    if(!companyId){ toast('まとめる先の会社を選んでください。','err'); return; }
+    if(!confirm(`MF の「${q.partnerName}」を「${arCoName(companyId)}」として取り込みます（請求 ${q.n}件）。\n次からも この会社に当たります。よろしいですか？`)) return;
+  }
+  if(action==='new' && !confirm(`「${q.partnerName}」を 新しい得意先として作り、請求 ${q.n}件 を取り込みます。よろしいですか？`)) return;
+  if(action==='skip' && !confirm(`「${q.partnerName}」の請求は 取り込みません（毎朝の同期でも入れません）。よろしいですか？`)) return;
+  try{
+    const d=await mfCall('/mf/partners/resolve',{ id, action, companyId });
+    await pullState(); renderPage(CURRENT_PAGE);
+    const n=d.stats&&d.stats['新規'];
+    toast(action==='skip'? '取り込まない にしました。' : action==='reopen'? '確認待ちに戻しました。' : `取り込みました${n?`（請求 ${n}件）`:''}。`,'ok');
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+async function crMerge(fromId){
+  const toId=(document.getElementById('crc-'+fromId)||{}).value||'';
+  if(!toId){ toast('まとめる先の会社を選んでください。','err'); return; }
+  const cnt=k=>(DB[k]||[]).filter(r=>String(r.companyId)===String(fromId)).length;
+  if(!confirm(`「${arCoName(fromId)}」を「${arCoName(toId)}」に統合します。\n請求 ${cnt('invoices')}件・入金 ${cnt('payments')}件 などが「${arCoName(toId)}」に移り、「${arCoName(fromId)}」は消えます。\n元に戻せません。よろしいですか？`)) return;
+  try{
+    await mfCall('/mf/partners/merge',{ fromId, toId });
+    await pullState(); renderPage(CURRENT_PAGE); toast('統合しました。','ok');
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+async function crOk(id){
+  try{ await mfCall('/mf/partners/ok',{ id }); await pullState(); renderPage(CURRENT_PAGE); toast('確認済みにしました。','ok'); }
+  catch(e){ toast(String(e.message||e),'err'); }
 }
 /* ============================================================================
    取引先モーダル（得意先／支払先）— 新規登録・編集・詳細 を同じ「横3列」で
@@ -9809,6 +10073,8 @@ const PAGE_GUIDE = {
 
   companies:  { step:'①', what:'会社名・区分と <b>締日・支払サイト・支払日</b>。さらに <b>請求ルール</b>（人数×単価／月額固定／都度）',
                 effect:'入金期日・年齢表・資金繰り・台帳の色、すべてのもとになります' },
+  coreview:   { step:'①', what:'Money Forward から<b>自動で作った取引先</b>と、<b>似た会社があって止めている取引先</b>を片づける（統合／このままでよい）',
+                effect:'統合すると 請求・入金 は既存の会社にまとまり、次からは MF の取り込みも その会社に当たります' },
   vendors:    { step:'①', what:'BIGLIGHTが<b>サービスを受けている会社</b>（大家・電力・水道・通信・清掃・外注）と、その締日・支払サイト・支払日',
                 effect:'費目や物件の「支払先」で選べるようになり、支払期日が自動で決まります' },
   dunning:    { step:'⑤', what:'今日やる督促を上から。電話・訪問は「記録」で <b>約束日</b>を残す。メールは「✉」',
@@ -10697,7 +10963,7 @@ function permModal(email, role){
 function permPreset(email, kind){
   const pages=permPages().map(x=>x[0]);
   const arGroup=['dashboard','invoices','receipts','aging','companies','ledger'];
-  const costGroup=['dashboard','expenses','properties','kbunrui','companies','vendors'];
+  const costGroup=['dashboard','expenses','properties','kbunrui','companies','vendors','coreview'];
   const set={};
   pages.forEach(p=>{
     if(kind==='all')   set[p]={v:1};

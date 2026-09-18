@@ -46,20 +46,97 @@ export const closedFys = (state: any): number[] => ((state?.settings?.closedFy) 
 /** 締めた期に属する月か（画面の isClosedFy と同じ意味。authz.checkClosedPeriods とも揃えています） */
 export const isClosedYm = (state: any, ym: any) => { const f = fyOfYm(ym); return f != null && closedFys(state).includes(f) }
 
-/* ---------- 取引先の対応づけ ---------- */
-export function matchCompany(state: any, b: { partnerId?: string; partnerName?: string }, map?: Record<string, string>) {
+/* ---------- 取引先の対応づけ ----------
+   ★ 2026-09-18 利用者の指示（MF で作った新しいお客さんが 回収 に出てこない問題）:
+     ① MF の取引先ID で当たる            → そのまま使う
+     ② 名前（表記ゆれを畳んだもの）が 1社だけ同じ → 使う ＋ MF の取引先ID を覚える（次から ①）
+     ③ 似た会社がある（名前が含み合う・法人番号・カナが同じ）→ 作らない。「取引先の確認」の待ち行列へ
+     ④ 何も似ていない                     → 得意先 を自動で作る（source:'mf'・needsReview）→ 請求は 回収 にすぐ入る
+   ★ CRM が 取引先 の正（master）。あとから CRM に同じ会社が来たら、自動で作った会社は CRM の会社になる
+     （crmsync.adoptMfCompany）。 */
+export type PartnerRef = { partnerId?: string; partnerName?: string; partnerKana?: string; corpNo?: string }
+/** 会社の「名前として当ててよい表記」— 会社名・MF の取引先名・人が対応づけたときに覚えた別名 */
+export const companyNames = (c: any): string[] =>
+  [c?.name, c?.mfPartnerName, ...((Array.isArray(c?.mfAliases) ? c.mfAliases : []))].map(normName).filter(Boolean)
+const liveCos = (state: any) => arr(state, 'companies').filter((c: any) => !c._gone)
+/** 会社に結びついた MF の取引先ID（MF 側で同じ会社が2つに分かれていることがあるので 複数持てる） */
+export const partnerIdsOf = (c: any): string[] =>
+  [c?.mfPartnerId, ...(Array.isArray(c?.mfPartnerIds) ? c.mfPartnerIds : [])].map(x => String(x || '')).filter(Boolean)
+
+export function matchCompany(state: any, b: PartnerRef, map?: Record<string, string>) {
   const key = partnerKey(b)
-  if (map && map[key]) return { companyId: map[key], how: 'manual' as const }
-  const cos = arr(state, 'companies').filter((c: any) => !c._gone)
-  if (b.partnerId) { const c = cos.find((x: any) => String(x.mfPartnerId || '') === String(b.partnerId)); if (c) return { companyId: String(c.id), how: 'id' as const } }
+  if (map && map[key]) return { companyId: map[key], how: 'manual' as const, candidates: [] as string[] }
+  const skipped = arr(state, 'mfPartnerQueue').find((q: any) => q.key === key && q.status === 'skipped')
+  if (skipped) return { companyId: '__skip', how: 'manual' as const, candidates: [] as string[] }
+  const cos = liveCos(state)
+  if (b.partnerId) { const c = cos.find((x: any) => partnerIdsOf(x).includes(String(b.partnerId))); if (c) return { companyId: String(c.id), how: 'id' as const, candidates: [] as string[] } }
   const n = normName(b.partnerName)
   if (n) {
-    const hits = cos.filter((x: any) => normName(x.mfPartnerName || x.name) === n)
-    if (hits.length === 1) return { companyId: String(hits[0].id), how: 'name' as const }
+    const hits = cos.filter((x: any) => companyNames(x).includes(n)
+      /* 別の MF 取引先に結びついている会社には、名前が同じでも当てない（1つの MF 取引先 ＝ 1社） */
+      && !(b.partnerId && partnerIdsOf(x).length && !partnerIdsOf(x).includes(String(b.partnerId))))
+    if (hits.length === 1) return { companyId: String(hits[0].id), how: 'name' as const, candidates: [] as string[] }
+    if (hits.length > 1) return { companyId: '', how: 'similar' as const, candidates: hits.map((x: any) => String(x.id)) }
   }
-  return { companyId: '', how: 'none' as const }
+  const sim = similarCompanies(state, b)
+  if (sim.length) return { companyId: '', how: 'similar' as const, candidates: sim }
+  return { companyId: '', how: 'none' as const, candidates: [] as string[] }
 }
 export const partnerKey = (b: { partnerId?: string; partnerName?: string }) => b.partnerId ? 'id:' + b.partnerId : 'nm:' + normName(b.partnerName)
+
+/** 「同じ会社かもしれない」相手（自動で作ってはいけない）。
+    名前が含み合う（2文字以上）・法人番号が同じ・カナが同じ。迷ったら「似ている」に倒す
+    （似ていないのに待ち行列に入る損は 1クリック、似ているのに自動で作る損は 二重の取引先）。 */
+export function similarCompanies(state: any, b: PartnerRef): string[] {
+  const n = normName(b.partnerName), corp = String(b.corpNo || '').replace(/\D/g, ''), kana = normPayer(b.partnerKana)
+  const out: string[] = []
+  for (const c of liveCos(state)) {
+    const names = companyNames(c)
+    const byName = !!n && names.some(x => x.length >= 2 && n.length >= 2 && (x.includes(n) || n.includes(x)))
+    const byCorp = corp.length === 13 && String(c.corpNo || '').replace(/\D/g, '') === corp
+    const byKana = !!kana && kana.length >= 3 && normPayer(c.kana) === kana
+    if (byName || byCorp || byKana) out.push(String(c.id))
+  }
+  return out
+}
+
+/** 1つの MF 取引先ID は 1社だけ。つけるときは ほかの会社から外す（_gone の古い会社に残っていることがある）。 */
+export function setPartnerId(cos: any[], at: number, partnerId: string, partnerName: string, stamp: any) {
+  let touched = false
+  const pid = String(partnerId || '')
+  if (pid) cos.forEach((c: any, i: number) => {
+    if (i === at || !partnerIdsOf(c).includes(pid)) return
+    cos[i] = { ...c, mfPartnerId: String(c.mfPartnerId || '') === pid ? '' : c.mfPartnerId, mfPartnerIds: (c.mfPartnerIds || []).filter((x: any) => String(x) !== pid), ...stamp }
+    touched = true
+  })
+  const cur = cos[at]
+  if (pid && partnerIdsOf(cur).includes(pid)) return touched
+  if (pid && cur.mfPartnerId) {
+    /* もう別の MF 取引先ID を持っている → 追加で持つ（上書きすると 前の ID の請求が迷子になる） */
+    cos[at] = { ...cur, mfPartnerIds: [...(cur.mfPartnerIds || []), pid], ...stamp }
+    return true
+  }
+  const nextId = pid || String(cur.mfPartnerId || ''), nextName = String(cur.mfPartnerName || partnerName || '')
+  if (String(cur.mfPartnerId || '') === nextId && String(cur.mfPartnerName || '') === nextName) return touched
+  cos[at] = { ...cur, mfPartnerId: nextId, mfPartnerName: nextName, ...stamp }
+  return true
+}
+
+/** MF の取引先から 得意先 を作る（自動のとき needsReview:true ＝「取引先の確認」に出す） */
+export function newCompanyFromMf(p: { partnerId?: string; partnerName?: string }, opts: { actor: string; now: string; review: boolean }) {
+  return {
+    id: newId('CO'), name: String(p.partnerName || '').trim() || '（名前なし）', kind: '得意先', source: 'mf',
+    mfPartnerId: p.partnerId || '', mfPartnerName: String(p.partnerName || ''),
+    closingDay: 31, paySite: 1, payDay: 31, taxCat: '課税10%', overrides: {},
+    needsReview: opts.review, autoCreatedAt: opts.review ? opts.now : '',
+    createdAt: opts.now, createdBy: opts.actor, updatedAt: opts.now, updatedBy: opts.actor,
+  }
+}
+/** 待ち行列の id（キーから毎回同じものを作る） */
+export const queueId = (key: string) => {
+  let h = 5381; for (let i = 0; i < key.length; i++) h = ((h * 33) ^ key.charCodeAt(i)) >>> 0
+  return 'MPQ-' + h.toString(36) + '-' + key.length.toString(36)
+}
 
 /* ---------- 請求書（MF 請求書 → invoices）----------
    鍵は MF の id（mfId）だけ。請求書番号は MF 側で重複することがあるので鍵にしない。 */
@@ -115,16 +192,22 @@ export function billingToRec(state: any, b: Billing, companyId: string) {
 
 export type BillingPlan = {
   create: any[]; update: any[]; diff: any[]; same: any[]
-  unmapped: { key: string; partnerName: string; n: number; total: number }[]
+  unmapped: { key: string; partnerId: string; partnerName: string; n: number; total: number; candidates: string[]; items: Billing[] }[]
+  newPartners: { key: string; partnerId: string; partnerName: string; n: number; total: number }[]
+  learn: { companyId: string; partnerId: string; partnerName: string }[]
   drafts: number; closed: any[]; dupWarn: any[]
 }
 
-/** 取り込みの計画を立てる（画面の確認・cron・テストが同じものを見る） */
-export function planBillings(state: any, items: Billing[], map?: Record<string, string>): BillingPlan {
-  const out: BillingPlan = { create: [], update: [], diff: [], same: [], unmapped: [], drafts: 0, closed: [], dupWarn: [] }
+/** 取り込みの計画を立てる（画面の確認・cron・テストが同じものを見る）
+    opts.autoCreate=false のときは、何も似ていない取引先も 待ち行列（unmapped）に回す。 */
+export function planBillings(state: any, items: Billing[], map?: Record<string, string>, opts: { autoCreate?: boolean } = {}): BillingPlan {
+  const autoCreate = opts.autoCreate !== false
+  const out: BillingPlan = { create: [], update: [], diff: [], same: [], unmapped: [], newPartners: [], learn: [], drafts: 0, closed: [], dupWarn: [] }
   const invoices = arr(state, 'invoices')
   const byMf = new Map(invoices.filter((i: any) => i.mfId).map((i: any) => [String(i.mfId), i]))
-  const unmapped = new Map<string, { key: string; partnerName: string; n: number; total: number }>()
+  const unmapped = new Map<string, BillingPlan['unmapped'][number]>()
+  const fresh = new Map<string, BillingPlan['newPartners'][number]>()
+  const learned = new Set<string>()
 
   for (const b of items) {
     if (!b || !b.mfId) continue
@@ -133,9 +216,17 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
     if (m.companyId === '__skip') continue
     if (!m.companyId) {
       const key = partnerKey(b)
-      const g = unmapped.get(key) || { key, partnerName: String(b.partnerName || ''), n: 0, total: 0 }
-      g.n++; g.total += num(b.total); unmapped.set(key, g)
+      if (m.how === 'none' && autoCreate && normName(b.partnerName)) {
+        const g = fresh.get(key) || { key, partnerId: String(b.partnerId || ''), partnerName: String(b.partnerName || ''), n: 0, total: 0 }
+        g.n++; g.total += num(b.total); fresh.set(key, g)
+        continue
+      }
+      const g = unmapped.get(key) || { key, partnerId: String(b.partnerId || ''), partnerName: String(b.partnerName || ''), n: 0, total: 0, candidates: m.candidates, items: [] }
+      g.n++; g.total += num(b.total); g.items.push(b); unmapped.set(key, g)
       continue
+    }
+    if (m.how === 'name' && b.partnerId && !learned.has(m.companyId)) {
+      learned.add(m.companyId); out.learn.push({ companyId: m.companyId, partnerId: String(b.partnerId), partnerName: String(b.partnerName || '') })
     }
     const rec = billingToRec(state, b, m.companyId)
     const ex: any = byMf.get(String(b.mfId))
@@ -143,9 +234,11 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
     if (!ex) {
       const ruleAmt = ruleAmountOf(state, m.companyId)
       const auto = ruleAmt == null || ruleAmt === rec.total
-      out.create.push({ b, rec, auto })
-      if (invoices.some((i: any) => !i.mfId && i.status !== '取消' && i.status !== '作成中'
-        && String(i.companyId) === m.companyId && ymOf(i.bookMonth) === rec.bookMonth)) out.dupWarn.push({ b, rec })
+      /* 二重の疑い: 同じ取引先・同じ計上月に この システムで作った（MF 以外の）請求がある */
+      const dupOf = invoices.filter((i: any) => !i.mfId && i.status !== '取消' && i.status !== '作成中'
+        && String(i.companyId) === m.companyId && ymOf(i.bookMonth) === rec.bookMonth).map((i: any) => String(i.id))
+      out.create.push({ b, rec, auto, dupOf })
+      if (dupOf.length) out.dupWarn.push({ b, rec, dupOf })
       continue
     }
     if (isClosedYm(state, ex.bookMonth)) { out.closed.push({ b, rec, ex }); continue }
@@ -155,14 +248,22 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
     else out.update.push({ b, rec, ex, changed })
   }
   out.unmapped = [...unmapped.values()].sort((a, b) => b.total - a.total)
+  out.newPartners = [...fresh.values()].sort((a, b) => b.total - a.total)
   return out
 }
 
-/** 計画どおりに state を書き換える（冪等: 同じ入力を何度流しても同じ結果） */
-export function applyBillings(state: any, items: Billing[], opts: { map?: Record<string, string>; actor?: string; source?: string } = {}) {
-  const plan = planBillings(state, items, opts.map)
-  const out = { ...state, invoices: arr(state, 'invoices').slice() }
+/** 計画どおりに state を書き換える（冪等: 同じ入力を何度流しても同じ結果）
+    ① 何も似ていない取引先は 得意先 を作る → ② 請求を入れる → ③ 似ている取引先は 待ち行列（mfPartnerQueue）に置く */
+export function applyBillings(state: any, items: Billing[], opts: { map?: Record<string, string>; actor?: string; source?: string; autoCreate?: boolean } = {}) {
   const now = new Date().toISOString(), actor = opts.actor || 'mf-sync'
+  const stamp = { updatedAt: now, updatedBy: actor }
+  let base = state
+  /* ① 自動で作る取引先（作ってから計画を立て直すと、その会社に 取引先ID で当たる） */
+  const first = planBillings(state, items, opts.map, { autoCreate: opts.autoCreate })
+  const made: any[] = first.newPartners.map(g => newCompanyFromMf(g, { actor, now, review: true }))
+  if (made.length) base = { ...state, companies: arr(state, 'companies').concat(made) }
+  const plan = made.length ? planBillings(base, items, opts.map, { autoCreate: false }) : first
+  const out = { ...base, invoices: arr(base, 'invoices').slice() }
   const byId = new Map<string, number>(out.invoices.map((r: any, i: number) => [String(r.id), i] as [string, number]))
 
   for (const c of plan.create) {
@@ -171,6 +272,7 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
       id: newId('INV'), ...c.rec, items: [], status: '確定', locked: true,
       source: 'mf', mfId: String(b.mfId), mfPartnerId: b.partnerId || '', mfUpdatedAt: b.updatedAt || '',
       mfStatus: b.mfStatus || '', mfPdfUrl: b.pdfUrl || '', note: b.title || '', mfDiff: null,
+      dupOf: c.dupOf && c.dupOf.length ? c.dupOf : undefined,
       confirmStatus: c.auto ? '確定' : '未確認', confirmedAt: c.auto ? now : '', confirmedBy: c.auto ? actor : '',
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     })
@@ -190,40 +292,86 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
     for (const k of d.changed) detail[k] = { finance: d.ex[k] ?? null, mf: (d.rec as any)[k] ?? null }
     out.invoices[i] = { ...out.invoices[i], mfDiff: { at: now, fields: detail }, mfUpdatedAt: d.b.updatedAt || '', updatedAt: now, updatedBy: actor }
   }
-  /* 取引先の対応を覚える（次から自動で当たる） */
-  if (opts.map) {
-    const cos = arr(state, 'companies').slice()
+  /* 取引先の対応を覚える（次から 取引先ID で自動で当たる）: 人が選んだ分 ＋ 名前で当たった分 */
+  {
+    const cos = arr(out, 'companies').slice()
     let touched = false
-    for (const b of items) {
-      const key = partnerKey(b), cid = opts.map[key]
-      if (!cid || cid === '__skip' || !b.partnerId) continue
-      const at = cos.findIndex((c: any) => String(c.id) === String(cid))
-      if (at < 0) continue
-      if (String(cos[at].mfPartnerId || '') !== String(b.partnerId) || String(cos[at].mfPartnerName || '') !== String(b.partnerName || '')) {
-        cos[at] = { ...cos[at], mfPartnerId: b.partnerId, mfPartnerName: b.partnerName || '', updatedAt: now, updatedBy: actor }; touched = true
-      }
+    const remember = (cid: string, pid: string, pname: string) => {
+      const at = cos.findIndex((c: any) => String(c.id) === String(cid)); if (at < 0) return
+      if (setPartnerId(cos, at, pid, pname, stamp)) touched = true
+      /* ID の無い CSV でも 次から当たるよう、MF の名前を別名として覚える */
+      const n = normName(pname)
+      if (!pid && n && !companyNames(cos[at]).includes(n)) { cos[at] = { ...cos[at], mfAliases: [...(cos[at].mfAliases || []), pname], ...stamp }; touched = true }
     }
+    if (opts.map) for (const b of items) {
+      const cid = opts.map[partnerKey(b)]
+      if (cid && cid !== '__skip' && cid !== '__new') remember(cid, String(b.partnerId || ''), String(b.partnerName || ''))
+    }
+    for (const l of plan.learn) remember(l.companyId, l.partnerId, l.partnerName)
     if (touched) out.companies = cos
   }
+  /* 似ている取引先 → 待ち行列（人が 統合／新規／取り込まない を選ぶまで、請求はここで待つ） */
+  {
+    const q = arr(out, 'mfPartnerQueue').slice()
+    let touched = false
+    for (const g of plan.unmapped) {
+      const id = queueId(g.key), at = q.findIndex((x: any) => x.id === id)
+      const prev: any = at >= 0 ? q[at] : null
+      const keep = new Map<string, Billing>(((prev?.items) || []).map((b: Billing) => [String(b.mfId), b]))
+      g.items.forEach(b => keep.set(String(b.mfId), b))
+      const list = [...keep.values()]
+      const next = { id, key: g.key, partnerId: g.partnerId, partnerName: g.partnerName, candidates: g.candidates,
+        n: list.length, total: list.reduce((s, b) => s + num(b.total), 0), items: list, status: prev?.status || 'open',
+        firstAt: prev?.firstAt || now, updatedAt: now }
+      if (prev && JSON.stringify({ ...prev, updatedAt: '' }) === JSON.stringify({ ...next, updatedAt: '' })) continue
+      if (at >= 0) q[at] = next; else q.push(next)
+      touched = true
+    }
+    /* 対応がついた（または ほかで入った）ものは 行列から消す */
+    const done = new Set<string>()
+    for (const b of items) { if (plan.unmapped.some(g => g.key === partnerKey(b))) continue; done.add(queueId(partnerKey(b))) }
+    const kept = q.filter((x: any) => !(done.has(x.id) && x.status !== 'skipped'))
+    if (kept.length !== q.length) touched = true
+    if (touched) out.mfPartnerQueue = kept
+  }
   const stats = { 新規: plan.create.length, 更新: plan.update.length, 変更なし: plan.same.length, MF差異: plan.diff.length,
-    取引先未対応: plan.unmapped.reduce((s, g) => s + g.n, 0), 下書き除外: plan.drafts, 締め済みで見送り: plan.closed.length }
-  return { state: out, plan, stats }
+    取引先を自動作成: made.length, 取引先未対応: plan.unmapped.reduce((s, g) => s + g.n, 0), 二重の疑い: plan.dupWarn.length,
+    下書き除外: plan.drafts, 締め済みで見送り: plan.closed.length }
+  return { state: out, plan, made, stats }
 }
 
 /* ---------- 入金（MF 会計の入出金明細 / 銀行CSV → payments）---------- */
 export type Txn = { extId: string; date: string; amount: number; payerName?: string; raw?: any; side?: string }
 
+/** 入金の「指紋」＝ 入金日 ＋ 金額 ＋ 振込名義。
+    ★ 2026-09-18: 同じ入金が MF 会計（API・取引ID あり）と 銀行 CSV（ID なし）の両方から来ても 二重にしないため。
+      同じ日に 同じ名義・同じ金額が本当に2回ある（二重振込）こともあるので、「同じ指紋が いま何件あるか」で数える:
+      すでに2件あるなら 3件目から入れる。 */
+export const payFingerprint = (date: any, amount: any, payer: any) => dateOnly(date) + '|' + num(amount) + '|' + normPayer(payer)
+
 export function planTransactions(state: any, txns: Txn[]) {
-  const pays = arr(state, 'payments')
-  const seen = new Set(pays.filter((p: any) => p.extId).map((p: any) => String(p.extId)))
-  const create: Txn[] = [], dup: Txn[] = [], closed: Txn[] = []
+  const pays = arr(state, 'payments').filter((p: any) => p.status !== '取消')
+  const seen = new Set(arr(state, 'payments').filter((p: any) => p.extId).map((p: any) => String(p.extId)))
+  const have = new Map<string, number>()
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) || 0) + 1)
+  for (const p of pays) if (normPayer(p.payerName)) bump(have, payFingerprint(p.date, p.amount, p.payerName))
+  /* 手で入れた入金（振込名義なし）は 入金日・金額・取引先 で数える */
+  const manual = new Map<string, number>()
+  for (const p of pays) if (!normPayer(p.payerName) && p.companyId) bump(manual, dateOnly(p.date) + '|' + num(p.amount) + '|' + p.companyId)
+  const create: Txn[] = [], dup: Txn[] = [], closed: Txn[] = [], fingerprint: Txn[] = []
   for (const t of txns) {
     if (!t || !t.extId || !t.date || !num(t.amount)) continue
-    if (seen.has(String(t.extId))) { dup.push(t); continue }
+    const fp = payFingerprint(t.date, t.amount, t.payerName)
+    /* すでに入っている明細は、その1件ぶん 指紋の数を使い切る（本当の二重振込の2件目を 取りこぼさないため） */
+    if (seen.has(String(t.extId))) { dup.push(t); if ((have.get(fp) || 0) > 0) have.set(fp, have.get(fp)! - 1); continue }
     if (isClosedYm(state, ymOf(t.date))) { closed.push(t); continue }
+    if (normPayer(t.payerName) && (have.get(fp) || 0) > 0) { have.set(fp, have.get(fp)! - 1); fingerprint.push(t); continue }
+    const cid = matchCompanyByPayer(state, t.payerName).companyId
+    const mk = dateOnly(t.date) + '|' + num(t.amount) + '|' + cid
+    if (cid && (manual.get(mk) || 0) > 0) { manual.set(mk, manual.get(mk)! - 1); fingerprint.push(t); continue }
     seen.add(String(t.extId)); create.push(t)
   }
-  return { create, dup, closed }
+  return { create, dup, closed, fingerprint }
 }
 export function applyTransactions(state: any, txns: Txn[], opts: { actor?: string; source?: string } = {}) {
   const plan = planTransactions(state, txns)
@@ -238,7 +386,7 @@ export function applyTransactions(state: any, txns: Txn[], opts: { actor?: strin
       matchType: '', createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     })
   }
-  return { state: out, plan, stats: { 新規: plan.create.length, 取込済み: plan.dup.length, 締め済みで見送り: plan.closed.length } }
+  return { state: out, plan, stats: { 新規: plan.create.length, 取込済み: plan.dup.length + plan.fingerprint.length, 同じ入金が別の道で入り済み: plan.fingerprint.length, 締め済みで見送り: plan.closed.length } }
 }
 
 /** 振込名義 → 取引先。companies.bankPayerNames[] に覚えた名義、無ければ会社名で当てる */
@@ -469,6 +617,7 @@ export function parseBankCsv(text: string): { items?: Txn[]; error?: string } {
   if (miss.length) return { error: `CSV に必要な列が見つかりません：${miss.join('・')}（見つかった見出し：${head.slice(0, 12).join(' / ')}）` }
   const v = (r: string[], i: number) => i >= 0 ? String(r[i] ?? '').trim() : ''
   const items: Txn[] = []
+  const occ = new Map<string, number>()
   rows.slice(1).forEach((r, k) => {
     const date = jpDate(v(r, C.date)); if (!date) return
     let amount = C.income >= 0 ? num(v(r, C.income)) : num(v(r, C.amount))
@@ -477,7 +626,13 @@ export function parseBankCsv(text: string): { items?: Txn[]; error?: string } {
     if (amount < 0) return                                   // 出金の行（マイナス）は入金ではない
     if (!amount) return
     const payerName = v(r, C.content)
-    const extId = v(r, C.id) || `csv:${date}:${amount}:${normPayer(payerName) || k}`
+    /* ID の無い CSV: 日付・金額・名義 で鍵を作る。同じファイルに同じ行が2つあれば（二重振込）2つ目は #2 */
+    let extId = v(r, C.id)
+    if (!extId) {
+      const base = `csv:${date}:${amount}:${normPayer(payerName) || k}`
+      const n = (occ.get(base) || 0) + 1; occ.set(base, n)
+      extId = n > 1 ? base + '#' + n : base
+    }
     items.push({ extId, date, amount, payerName, side: 'INCOME', raw: null })
   })
   return items.length ? { items } : { error: '入金の行が見つかりませんでした（日付・入金金額の列をご確認ください）。' }
@@ -493,4 +648,109 @@ export function parseTrialBalanceCsv(text: string): { items?: TbRow[]; error?: s
   const v = (r: string[], i: number) => i >= 0 ? String(r[i] ?? '').trim() : ''
   const items = rows.slice(1).map(r => ({ code: v(r, C.code), name: v(r, C.name), amount: num(v(r, C.amount)) })).filter(x => x.name)
   return items.length ? { items } : { error: '取り込める行がありませんでした。' }
+}
+
+/* ---------- 取引先の確認（待ち行列・自動で作った会社・統合）----------
+   ★ 2026-09-18 利用者の指示: 自動で作った取引先と、似た会社があって止めている取引先は
+     「取引先 › 取引先の確認」に並べ、人が 統合 か このまま を選ぶ。 */
+
+/** 待ち行列の1件を片づける。
+    action: 'map'（既存の会社に結びつける）/ 'new'（新しい得意先を作る）/ 'skip'（取り込まない。次からも入れない）/ 'reopen'（skip を戻す） */
+export function resolvePartnerQueue(state: any, qid: string, action: string, companyId: string, actor: string) {
+  const now = new Date().toISOString()
+  const q = arr(state, 'mfPartnerQueue').find((x: any) => x.id === qid)
+  if (!q) throw new Error('この取引先は もう確認済みです（画面を読み直してください）。')
+  if (action === 'reopen') {
+    return { state: { ...state, mfPartnerQueue: arr(state, 'mfPartnerQueue').map((x: any) => x.id === qid ? { ...x, status: 'open', updatedAt: now } : x) }, stats: { 戻す: 1 } }
+  }
+  if (action === 'skip') {
+    return { state: { ...state, mfPartnerQueue: arr(state, 'mfPartnerQueue').map((x: any) => x.id === qid ? { ...x, status: 'skipped', updatedAt: now, resolvedBy: actor } : x) },
+      stats: { 取り込まない: q.n } }
+  }
+  let st = state, cid = companyId
+  if (action === 'new') {
+    const co = newCompanyFromMf(q, { actor, now, review: false })
+    st = { ...st, companies: arr(st, 'companies').concat([co]) }; cid = co.id
+  } else if (action === 'map') {
+    if (!arr(st, 'companies').some((c: any) => String(c.id) === String(cid) && !c._gone)) throw new Error('結びつける取引先が見つかりません。')
+  } else throw new Error('bad-action')
+  const r = applyBillings(st, q.items || [], { map: { [q.key]: cid }, actor, autoCreate: false })
+  return { state: { ...r.state, mfPartnerQueue: arr(r.state, 'mfPartnerQueue').filter((x: any) => x.id !== qid) }, stats: { ...r.stats, 取引先: cid } }
+}
+
+/** 自動で作った会社を「このままでよい」にする */
+export function markCompanyReviewed(state: any, id: string, actor: string) {
+  const now = new Date().toISOString()
+  const cos = arr(state, 'companies')
+  if (!cos.some((c: any) => String(c.id) === String(id))) throw new Error('取引先が見つかりません。')
+  return { state: { ...state, companies: cos.map((c: any) => String(c.id) === String(id) ? { ...c, needsReview: false, reviewedAt: now, reviewedBy: actor, updatedAt: now, updatedBy: actor } : c) }, stats: { 確認済み: 1 } }
+}
+
+/** 統合: from の 請求・入金・請求ルール など（companyId を持つもの すべて）を to に付け替えて、from を消す。
+    MF の取引先ID・名前・振込名義 は to に引き継ぐ（次からは to に当たる）。
+    ★ CRM から来た会社は消さない（CRM が正。消しても次の同期で戻ってくる）。 */
+export function mergeCompanies(state: any, fromId: string, toId: string, actor: string) {
+  const now = new Date().toISOString(), stamp = { updatedAt: now, updatedBy: actor }
+  if (!fromId || !toId || String(fromId) === String(toId)) throw new Error('統合する2社を選んでください。')
+  const cos = arr(state, 'companies').slice()
+  const fi = cos.findIndex((c: any) => String(c.id) === String(fromId)), ti = cos.findIndex((c: any) => String(c.id) === String(toId))
+  if (fi < 0 || ti < 0) throw new Error('取引先が見つかりません。')
+  const from = cos[fi]
+  if (from.source === 'crm' && from.crmId && !from._gone) throw new Error('CRM から来た取引先は 統合で消せません（CRM が正です）。反対向きに統合してください。')
+  let to = { ...cos[ti], ...stamp }
+  for (const pid of partnerIdsOf(from)) {
+    if (!to.mfPartnerId) to.mfPartnerId = pid
+    else if (!partnerIdsOf(to).includes(pid)) to.mfPartnerIds = [...(to.mfPartnerIds || []), pid]
+  }
+  const aliases = new Set<string>((to.mfAliases || []).map(String))
+  for (const n of [from.name, from.mfPartnerName, ...(from.mfAliases || [])]) if (n && !companyNames(to).includes(normName(n))) aliases.add(String(n))
+  if (aliases.size) to.mfAliases = [...aliases]
+  const payers = new Set<string>([...(to.bankPayerNames || []), ...(from.bankPayerNames || [])].map(String))
+  if (payers.size) to.bankPayerNames = [...payers]
+  if (to.kind && from.kind && to.kind !== from.kind && to.kind !== '両方') to.kind = '両方'
+  to.needsReview = false
+  cos[ti] = to
+  const out: any = { ...state, companies: cos.filter((_: any, i: number) => i !== fi) }
+  const moved: Record<string, number> = {}
+  for (const k of Object.keys(state)) {
+    if (k === 'companies' || !Array.isArray(state[k])) continue
+    if (!state[k].some((r: any) => r && String(r.companyId ?? '') === String(fromId))) continue
+    out[k] = state[k].map((r: any) => {
+      if (!r || String(r.companyId ?? '') !== String(fromId)) return r
+      moved[k] = (moved[k] || 0) + 1
+      return { ...r, companyId: String(toId), ...stamp }
+    })
+  }
+  /* 待ち行列の候補からも消す */
+  if (arr(out, 'mfPartnerQueue').length) out.mfPartnerQueue = arr(out, 'mfPartnerQueue').map((q: any) =>
+    (q.candidates || []).includes(String(fromId)) ? { ...q, candidates: q.candidates.filter((x: string) => x !== String(fromId)) } : q)
+  return { state: out, stats: { 統合: 1, ...moved } }
+}
+
+/** 二重の疑い（MF の請求と この システムで作った請求が 同じ取引先・同じ月）を片づける。
+    'replace' ＝ 手で作った請求を 取消 にして MF の請求を残す（充てた入金は MF の請求へ付け替え）
+    'separate'＝ 別物（両方残す） */
+export function resolveDuplicate(state: any, invoiceId: string, action: string, actor: string) {
+  const now = new Date().toISOString(), stamp = { updatedAt: now, updatedBy: actor }
+  const invs = arr(state, 'invoices')
+  const inv = invs.find((i: any) => String(i.id) === String(invoiceId))
+  if (!inv || !(inv.dupOf || []).length) throw new Error('この請求に 二重の疑い はありません。')
+  if (action === 'separate') {
+    return { state: { ...state, invoices: invs.map((i: any) => i === inv ? { ...i, dupOf: undefined, dupChecked: 'separate', ...stamp } : i) }, stats: { 別物: 1 } }
+  }
+  if (action !== 'replace') throw new Error('bad-action')
+  const olds = new Set<string>((inv.dupOf || []).map(String))
+  for (const i of invs) if (olds.has(String(i.id)) && isClosedYm(state, i.bookMonth)) throw new Error('締めた期の請求は 取消にできません。')
+  const outInv = invs.map((i: any) => {
+    if (i === inv) return { ...i, dupOf: undefined, dupChecked: 'replace', ...stamp }
+    if (olds.has(String(i.id)) && i.status !== '取消') return { ...i, status: '取消', cancelNote: 'MF の請求（' + (inv.no || inv.mfId) + '）に置き換え', ...stamp }
+    return i
+  })
+  let movedPays = 0
+  const pays = arr(state, 'payments').map((p: any) => {
+    if (!(p.allocations || []).some((a: any) => olds.has(String(a.invoiceId)))) return p
+    movedPays++
+    return { ...p, allocations: p.allocations.map((a: any) => olds.has(String(a.invoiceId)) ? { ...a, invoiceId: String(inv.id) } : a), ...stamp }
+  })
+  return { state: { ...state, invoices: outInv, payments: pays }, stats: { 取消: olds.size, 入金を付け替え: movedPays } }
 }

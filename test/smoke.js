@@ -391,15 +391,17 @@ ctx.__x.SECTIONS.forEach(sec=>{
 eq('ガイドは全画面を載せる（書き忘れ検出）',
   ctx.__x.SECTIONS.flatMap(s=>s.tabs.map(t=>t.id)).filter(id=>!ctx.__x.PAGE_GUIDE[id]), []);
 eq('メニューは7項目（特定技能者を外した）', ctx.__x.SECTIONS.length, 7);
-/* 支払先は「BIGLIGHTがサービスを受けている会社」＝得意先とは別の入口 */
-eq('支払先のタブがある', ctx.__x.SECTIONS.find(x=>x.id==='sec-co').tabs.some(t=>t.id==='vendors'), true);
+/* 支払先は「BIGLIGHTがサービスを受けている会社」＝得意先とは別の入口。
+   ★ 2026-09-18 利用者の指示: 取引先ページの中の3タブ（得意先／支払先／すべて）になった。旧 vendors は取引先へ案内 */
+eq('旧「支払先」画面は 取引先 に案内する', ctx.__x.PAGE_REDIRECT.vendors, 'companies');
+eq('取引先の確認 のタブがある', ctx.__x.SECTIONS.find(x=>x.id==='sec-co').tabs.map(t=>t.id), ['companies','coreview']);
 try{ const h=ctx.guidePromise(); const ok=h.length>200;
   console.log((ok?'  ok  ':'  NG  ')+'数字の約束  →  '+h.length+' 文字'); ok?pass++:fail++; }catch(e){ fail++; }
 
 console.log('\n― 画面が落ちずに描けるか ―');
 ['viewDashboard','viewYojitsu','viewCompare','viewMikomi','viewInvoices','viewReceipts','viewAging',
  'viewBills','viewPayouts','viewCashflow','viewOkr','viewCompanies','viewWorkers','viewExpenses',
- 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging','viewProperties','viewAccounts','viewKbunrui'].forEach(fn => {
+ 'viewCrmLink','viewUsers','viewAudit','viewSettings','viewApAging','viewProperties','viewAccounts','viewKbunrui','viewArConfirm','viewCoReview'].forEach(fn => {
   try {
     const h = ctx[fn]();
     const ok = typeof h === 'string' && h.length > 80;
@@ -407,6 +409,25 @@ console.log('\n― 画面が落ちずに描けるか ―');
     ok ? pass++ : fail++;
   } catch (e) { console.log('  NG  ' + fn + '  →  ' + e.message); fail++; }
 });
+
+console.log('\n― 取引先の3タブ・取引先の確認（2026-09-18）―');
+{
+  const keepCo=_db.companies.slice(), keepQ=_db.mfPartnerQueue, keepInv=_db.invoices.slice();
+  _db.companies.push({ id:'CO-both', name:'両方テスト商事', kind:'両方' }, { id:'CO-mf', name:'自動で作った会社', kind:'得意先', source:'mf', needsReview:true, autoCreatedAt:'2026-09-18T00:00:00Z' });
+  _db.mfPartnerQueue=[{ id:'MPQ-x', key:'id:p9', partnerId:'p9', partnerName:'似ている会社', n:2, total:220000, candidates:[_db.companies[0].id], items:[], status:'open' }];
+  _db.invoices.push({ id:'I-dup', companyId:_db.companies[0].id, bookMonth:'2026-08', total:1, status:'確定', mfId:'m', dupOf:['x'] });
+  try{
+    const ar=ctx.viewCompanies(''), ap=ctx.viewCompanies('vendor');
+    eq('得意先タブ: 両方の会社が出る・支払先の会社は出ない', [ar.includes('両方テスト商事'), ar.includes('入金サイト'), ar.includes('＋ 得意先を追加')], [true, true, true]);
+    eq('支払先タブ: 両方の会社が出る・支払先で作る', [ap.includes('両方テスト商事'), ap.includes('支払条件'), ap.includes("kind:'仕入先'")], [true, true, true]);
+    eq('確認待ちがあれば 取引先 に案内が出る', ar.includes("goto('coreview')"), true);
+    const cr=ctx.viewCoReview();
+    eq('取引先の確認: 止めている取引先・自動で作った会社 が並ぶ', [cr.includes('似ている会社'), cr.includes('自動で作った会社'), cr.includes("crResolve('MPQ-x','map')"), cr.includes("crOk('CO-mf')")], [true, true, true, true]);
+    eq('取引先の確認: 二重の疑い に案内', cr.includes('二重の疑い'), true);
+    eq('件数（待ち行列1・自動1・二重1）', ctx.coReviewCounts(), { queue:1, auto:1, dup:1, total:3 });
+  }catch(e){ console.log('  NG  取引先の画面  →  '+e.message); fail++; }
+  _db.companies=keepCo; _db.mfPartnerQueue=keepQ; _db.invoices=keepInv;
+}
 
 [['ar','history'],['ar','timeline'],['ap','history'],['ap','timeline']].forEach(([side,tab])=>{
   try{

@@ -392,6 +392,8 @@ type RouterDeps = MfDeps & {
   sync?: (kind: string, args: any, me: { email: string; role: string }) => Promise<any>
   /** いまの state（PDF の場所を請求から引くため） */
   state?: () => Promise<any>
+  /** 同期の実行中か（index.ts の印）。画面は これを見て「今すぐ同期」を止める */
+  running?: () => { since: string; by: string } | null
 }
 
 const isDate = (s: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))
@@ -423,6 +425,7 @@ export function mfRouter(d: RouterDeps) {
       lastSyncAt: last.at || '', lastResult: last.result || '', lastError: last.error || '', lastStats: last.stats || null,
       connectLast: JSON.parse((await d.cfgGet('mf_connect_last').catch(() => null)) || 'null'),
       schedule: await mfSchedule(d),
+      running: d.running ? d.running() : null,
     })
   })
 

@@ -91,8 +91,15 @@ console.log('\n― 請求書の取り込み ―');
 }
 {
   const st = baseState();
+  /* ★ 2026-09-18: 何も似ていない取引先は 得意先 を自動で作る（以前は取り込まず 一覧に出すだけ → 回収 に出てこなかった） */
   const r = S.applyBillings(st, [bill({ mfId: 'x1', partnerId: 'p9', partnerName: '知らない会社' })]);
-  eq('当てられない取引先は取り込まず、一覧に出す', [r.state.invoices.length, r.plan.unmapped[0].partnerName], [0, '知らない会社']);
+  const nc = r.state.companies.find(c => c.mfPartnerId === 'p9');
+  eq('似ていない取引先は 得意先を自動で作り、請求は回収に入る',
+    [r.state.invoices.length, nc && nc.name, nc && nc.kind, nc && nc.source, nc && nc.needsReview, r.state.invoices[0].companyId === (nc && nc.id), r.stats['取引先を自動作成']],
+    [1, '知らない会社', '得意先', 'mf', true, true, 1]);
+  const r1b = S.applyBillings(r.state, [bill({ mfId: 'x1', partnerId: 'p9', partnerName: '知らない会社' }), bill({ mfId: 'x2', partnerId: 'p9', partnerName: '知らない会社' })]);
+  eq('2回目は 作った会社に ID で当たる（会社は増えない・請求は冪等）', [r1b.state.companies.length, r1b.state.invoices.length, r1b.stats['取引先を自動作成']], [4, 2, 0]);
+  eq('autoCreate:false なら 待ち行列へ', S.applyBillings(st, [bill({ mfId: 'x1', partnerId: 'p9', partnerName: '知らない会社' })], { autoCreate: false }).state.mfPartnerQueue.length, 1);
   const r2 = S.applyBillings(st, [bill({ mfId: 'x1', partnerId: 'p9', partnerName: '知らない会社' })], { map: { 'id:p9': 'C2' } });
   eq('人が対応づけたら取り込み、次から自動で当たるよう覚える',
     [r2.state.invoices[0].companyId, r2.state.companies.find(c => c.id === 'C2').mfPartnerId], ['C2', 'p9']);
@@ -105,6 +112,91 @@ console.log('\n― 請求書の取り込み ―');
   const r = S.applyBillings(st, [bill({ total: 999999 }), bill({ mfId: 'new1', number: 'B-9', total: 55000 })]);
   eq('締め済みの月は 更新も新規も入らない', [r.state.invoices.length, r.state.invoices[0].total, r.stats['締め済みで見送り']], [1, 110000, 2]);
   eq('締めた期の月かどうかの判定', [S.isClosedYm(st, '2026-08'), S.isClosedYm(st, '2027-08'), S.isClosedYm(st, '2026-07')], [true, false, false]);
+}
+
+console.log('\n― 取引先の自動作成・待ち行列・統合（2026-09-18）―');
+{
+  const st = baseState();
+  /* 似ている（名前が含み合う）→ 作らない。待ち行列 */
+  const r = S.applyBillings(st, [bill({ mfId: 'q1', partnerId: 'p20', partnerName: '株式会社高山建設' })]);
+  eq('似た会社（高山 ⊂ 高山建設）があれば 作らず 待ち行列', [r.state.companies.length, r.state.invoices.length, (r.state.mfPartnerQueue || []).length, r.state.mfPartnerQueue[0].candidates], [3, 0, 1, ['C1']]);
+  eq('待ち行列は 冪等（同じものを流しても1件）', S.applyBillings(r.state, [bill({ mfId: 'q1', partnerId: 'p20', partnerName: '株式会社高山建設' })]).state.mfPartnerQueue.length, 1);
+  const q = r.state.mfPartnerQueue[0];
+  const m = S.resolvePartnerQueue(r.state, q.id, 'map', 'C1', 'me');
+  const c1 = m.state.companies.find(c => c.id === 'C1');
+  eq('統合（既存に結びつける）→ 請求が入り、ID を追加で覚え、行列から消える',
+    [m.state.invoices.length, m.state.invoices[0].companyId, c1.mfPartnerId, c1.mfPartnerIds, m.state.mfPartnerQueue.length], [1, 'C1', 'p1', ['p20'], 0]);
+  const again = S.applyBillings(m.state, [bill({ mfId: 'q2', partnerId: 'p20', partnerName: '株式会社高山建設' }), bill({ mfId: 'q3' })]);
+  eq('次からは どちらの ID でも C1 に当たる', again.state.invoices.map(i => i.companyId), ['C1', 'C1', 'C1']);
+  const n = S.resolvePartnerQueue(r.state, q.id, 'new', '', 'me');
+  eq('新規 → 得意先を作って 請求を入れる（確認済み扱い）', [n.state.companies.length, n.state.companies[3].needsReview, n.state.invoices[0].companyId === n.state.companies[3].id], [4, false, true]);
+  const sk = S.resolvePartnerQueue(r.state, q.id, 'skip', '', 'me');
+  const sk2 = S.applyBillings(sk.state, [bill({ mfId: 'q1', partnerId: 'p20', partnerName: '株式会社高山建設' })]);
+  eq('取り込まない → 次の同期でも入れない・会社も作らない', [sk2.state.invoices.length, sk2.state.companies.length, sk2.state.mfPartnerQueue[0].status], [0, 3, 'skipped']);
+}
+{
+  /* 名前で当たったら MF の ID を覚える */
+  const st = baseState();
+  const r = S.applyBillings(st, [bill({ mfId: 'n1', partnerId: 'p30', partnerName: 'テスト物流株式会社' })]);
+  eq('名前で当たった会社に MF の取引先ID を覚える', r.state.companies.find(c => c.id === 'C2').mfPartnerId, 'p30');
+  /* 同じ名前でも、別の MF 取引先ID を持つ会社には当てない */
+  const r2 = S.applyBillings(r.state, [bill({ mfId: 'n2', partnerId: 'p31', partnerName: 'テスト物流株式会社' })]);
+  eq('同名でも 別の MF 取引先ID の会社には当てない → 待ち行列', [r2.state.invoices.length, (r2.state.mfPartnerQueue || []).length], [1, 1]);
+}
+{
+  /* 統合: 自動で作った会社 → 既存の会社 */
+  let st = baseState();
+  st = S.applyBillings(st, [bill({ mfId: 'z1', partnerId: 'p40', partnerName: 'まったく別の商会' })]).state;
+  const auto = st.companies.find(c => c.mfPartnerId === 'p40');
+  st.payments = [{ id: 'P1', companyId: auto.id, date: '2026-09-30', amount: 110000, allocations: [] }];
+  st.billingRules = [{ id: 'R9', companyId: auto.id, kind: 'fixed', unitPrice: 1 }];
+  const m = S.mergeCompanies(st, auto.id, 'C2', 'me');
+  const c2 = m.state.companies.find(c => c.id === 'C2');
+  eq('統合で 請求・入金・請求ルール が付け替わり、自動の会社は消える',
+    [m.state.companies.length, m.state.invoices[0].companyId, m.state.payments[0].companyId, m.state.billingRules[0].companyId, c2.mfPartnerId, c2.mfAliases],
+    [3, 'C2', 'C2', 'C2', 'p40', ['まったく別の商会']]);
+  eq('統合のあと MF の取り込みは C2 に当たる', S.applyBillings(m.state, [bill({ mfId: 'z2', partnerId: 'p40', partnerName: 'まったく別の商会' })]).state.invoices.every(i => i.companyId === 'C2'), true);
+  const crm = baseState(); crm.companies[1] = { ...crm.companies[1], source: 'crm', crmId: 'X' };
+  let thrown = ''; try { S.mergeCompanies(crm, 'C2', 'C1', 'me') } catch (e) { thrown = e.message }
+  eq('CRM の会社は 統合で消せない', thrown.includes('CRM'), true);
+  const ok = S.markCompanyReviewed(st, auto.id, 'me');
+  eq('このままでよい → needsReview が消える', ok.state.companies.find(c => c.id === auto.id).needsReview, false);
+}
+{
+  /* 二重の疑い: 手で作った請求 と MF の請求 */
+  const st = baseState();
+  st.invoices = [{ id: 'I-man', companyId: 'C1', bookMonth: '2026-08', total: 110000, status: '確定' }];
+  st.payments = [{ id: 'P1', companyId: 'C1', date: '2026-09-30', amount: 110000, allocations: [{ invoiceId: 'I-man', amount: 110000 }] }];
+  const r = S.applyBillings(st, [bill({})]);
+  const mf = r.state.invoices.find(i => i.mfId);
+  eq('二重の疑い は請求に dupOf で残る', [mf.dupOf, r.stats['二重の疑い']], [['I-man'], 1]);
+  const rep = S.resolveDuplicate(r.state, mf.id, 'replace', 'me');
+  eq('置き換える → 手の請求は取消、入金は MF の請求へ',
+    [rep.state.invoices.find(i => i.id === 'I-man').status, rep.state.payments[0].allocations[0].invoiceId === mf.id, rep.state.invoices.find(i => i.id === mf.id).dupOf], ['取消', true, undefined]);
+  const sep = S.resolveDuplicate(r.state, mf.id, 'separate', 'me');
+  eq('別物 → 両方残る', [sep.state.invoices.filter(i => i.status !== '取消').length, sep.state.invoices.find(i => i.id === mf.id).dupChecked], [2, 'separate']);
+}
+
+console.log('\n― 入金の二重取り込み（指紋）―');
+{
+  const st = baseState();
+  st.payments = [{ id: 'P1', date: '2026-09-10', amount: 55000, payerName: 'ﾀｶﾔﾏ(ｶ', extId: 'mf-1', companyId: 'C1', allocations: [] }];
+  const csv = '日付,摘要,入金金額\n2026/09/10,ﾀｶﾔﾏ(ｶ,55000\n2026/09/10,ﾃｽﾄﾌﾞﾂﾘｭｳ,33000\n';
+  const t = S.parseBankCsv(csv).items;
+  const r = S.applyTransactions(st, t);
+  eq('MF で入った入金は ID の無い CSV からは入らない', [r.stats['新規'], r.stats['同じ入金が別の道で入り済み']], [1, 1]);
+  const t2 = S.parseBankCsv('日付,摘要,入金金額\n2026/09/11,ﾀｶﾔﾏ(ｶ,10000\n2026/09/11,ﾀｶﾔﾏ(ｶ,10000\n').items;
+  eq('同じファイルの 二重振込（同じ日・名義・金額）は 2件とも入る', [t2.length, t2[1].extId.endsWith('#2'), S.applyTransactions(st, t2).stats['新規']], [2, true, 2]);
+  const r2 = S.applyTransactions(S.applyTransactions(st, t2).state, t2);
+  eq('同じ CSV をもう一度 → 0件', r2.stats['新規'], 0);
+  const man = baseState();
+  man.payments = [{ id: 'PM', date: '2026-09-12', amount: 77000, companyId: 'C3', allocations: [] }];
+  const t3 = S.parseBankCsv('日付,摘要,入金金額\n2026/09/12,ｻﾝﾌﾟﾙｾｲｷ(ｶ,77000\n').items;
+  eq('手で入れた入金（名義なし）と 同じ日・金額・取引先なら入らない', S.applyTransactions(man, t3).stats['新規'], 0);
+  const mfTwo = baseState();
+  mfTwo.payments = [{ id: 'P1', date: '2026-09-10', amount: 5000, payerName: 'ﾀｶﾔﾏ(ｶ', extId: 'mf-1', allocations: [] }];
+  const api = [{ extId: 'mf-1', date: '2026-09-10', amount: 5000, payerName: 'ﾀｶﾔﾏ(ｶ' }, { extId: 'mf-2', date: '2026-09-10', amount: 5000, payerName: 'ﾀｶﾔﾏ(ｶ' }];
+  eq('API の二重振込の2件目は 指紋に食われない', S.applyTransactions(mfTwo, api).stats['新規'], 1);
 }
 
 console.log('\n― 入金の取り込み ―');
