@@ -6,10 +6,12 @@
      docker compose exec api node dist/mfcheck.js --days 90       … 期間を変える（既定 60日）
      docker compose exec api node dist/mfcheck.js --refresh       … リフレッシュトークンも試す
      docker compose exec api node dist/mfcheck.js --apply         … 実際に取り込み、もう一度流して重複0を確かめる
+     docker compose exec api node dist/mfcheck.js --connect       … 認可URLを表示（画面のボタンが使えないとき）
    ★ 秘密（ClientSecret・アクセストークン・リフレッシュトークン）は1バイトも出しません。
      出すのは 長さと先頭4文字だけ（つながっているかの確認用）。
    ★ --apply 以外では データベースに1行も書きません。MF へは常に読み取りだけ。
    ========================================================================== */
+import crypto from 'crypto'
 import { pool, cfgGet, cfgSet } from './db'
 import * as MF from './mfinvoice'
 import * as MFS from './mfsync'
@@ -46,9 +48,25 @@ async function main() {
   console.log('\n■ 2. 接続（OAuth）')
   const raw = await cfgGet('mf_token')
   const tok = raw ? JSON.parse(raw) : null
+
+  if (arg('connect')) {
+    /* 画面のボタンが使えないときの逃げ道。ここで state を作って保存し、URL を出すだけ。
+       認可そのものは「人がブラウザで許可する」しかできません（MF のログインが要るため）。 */
+    const state = crypto.randomBytes(24).toString('hex')
+    await cfgSet('mf_oauth_state', JSON.stringify({ state, by: 'cli@vps', exp: Date.now() + 10 * 60_000 }))
+    const url = MF.authorizeUrl(state, process.env, k.clientId)
+    console.log('\n■ 2b. 下の URL をブラウザで開いて、MF で「許可」してください（10分だけ有効・1回だけ使えます）\n')
+    console.log(url + '\n')
+    console.log('  許可すると ' + c.redirectUri + ' に戻り、トークンが保存されます。')
+    console.log('  そのあと もう一度:  docker compose exec api node dist/mfcheck.js --refresh\n')
+    await pool.end()
+    process.exit(0)
+  }
+
   if (!tok || !tok.access_token) {
     line('接続', '★ まだ接続していません')
-    console.log('\n→ 画面（設定 › API・AI連携）で「接続する」を押してから、もう一度この確認を流してください。\n')
+    console.log('\n→ 画面（設定 › API・AI連携）で「接続する」を押す。')
+    console.log('  画面のボタンが使えないときは:  docker compose exec api node dist/mfcheck.js --connect\n')
     process.exit(1)
   }
   line('接続', 'あり')
