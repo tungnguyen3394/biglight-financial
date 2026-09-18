@@ -30,6 +30,8 @@ services:
     environment:
       PORT: "4000"
       DATABASE_URL: "postgres://yojitsu:${DB_PASSWORD:-changeme}@db:5432/yojitsu"
+      # ★ 2026-09-18: これが無いと中は UTC。「毎朝6:00」が日本時間の15:00に動いていました。
+      TZ: Asia/Tokyo
     depends_on: [db]
     networks: [internal]
 

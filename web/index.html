@@ -4184,6 +4184,8 @@ async function mfPanelLoad(){
   const b=document.getElementById('mfPanel');
   if(!b || b.id!=='mfPanel') return;
   const mgr = myRole()==='Admin'||myRole()==='Manager';
+  MF_PANEL_ST = st;
+  const sch = st.schedule || { enabled:true, hour:6 };
   const line = st.lastSyncAt? `最後の同期 ${esc(String(st.lastSyncAt).slice(0,16).replace('T',' '))}${st.lastResult==='error'?' <span class="minus">失敗</span>':''}` : 'まだ同期していません';
   const keyLine = st.configured
     ? `<span class="badge b-green">鍵あり</span> ClientID ${esc(st.clientIdPeek||'')} ・ Secret ${st.clientSecretLen||0}文字 ・ ${esc(st.tokenAuth==='post'?'CLIENT_SECRET_POST':'CLIENT_SECRET_BASIC')}
@@ -4191,7 +4193,7 @@ async function mfPanelLoad(){
     : '<span class="badge b-amber">鍵なし</span> <span class="muted">MF アプリポータルの ClientID / ClientSecret を貼り付けてください</span>';
   b.innerHTML=`<div class="panel"><div class="panel-hd"><b>Money Forward 連携</b>
       <span class="sub">請求書と入出金明細を「読むだけ」。仕訳は経理が MF 会計で入れます</span>
-      ${mgr?`<button class="btn sm" style="margin-left:auto;" onclick="mfSyncNow()">今すぐ同期</button>`:''}</div>
+      ${mgr&&st.connected?`<button class="btn sm" style="margin-left:auto;" onclick="mfSyncNow()">今すぐ同期</button>`:''}</div>
     <div class="panel-bd" style="font-size:13px;line-height:1.9;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:6px;">
         ${keyLine}
@@ -4205,9 +4207,13 @@ async function mfPanelLoad(){
       ${!st.connected && st.connectLast? `<div class="fhelp" style="margin-top:4px;">最後の戻り：${esc(st.connectLast.at||'')} ${st.connectLast.ok?'成功':'失敗'}${st.connectLast.why? ' ／ '+esc(st.connectLast.why):''}</div>`:''}
       ${!st.connected && st.configured && !st.connectLast? '<div class="fhelp" style="margin-top:4px;">まだ一度も Money Forward から戻ってきていません（ブラウザで「許可」がまだです）。</div>':''}
       ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
-      <div class="fhelp">毎朝 6:00 に「請求 → 入金 → 自動消込」を自動で行います。手順は docs/MONEYFORWARD.md。<br>
+      <div class="fhelp">${sch.enabled
+          ? `毎日 <b>${String(sch.hour).padStart(2,'0')}:00</b>（日本時間）に「請求 → 入金 → 自動消込」を自動で行います。`
+          : '<b>自動同期は止まっています。</b>「今すぐ同期」を押したときだけ取り込みます。'}
+        ${isAdmin()?` <a onclick="mfSchedForm()" style="cursor:pointer;">設定を変える</a>`:''} ／ 手順は docs/MONEYFORWARD.md<br>
         戻り先URL：${esc(st.redirectUri||'')} ／ スコープ：${esc(st.scopes||'')}</div>
       ${mgr?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        ${st.connected?`<button class="btn sm" onclick="mfSyncNow()">今すぐ同期（請求→入金→消込）</button>`:''}
         <button class="btn secondary sm" onclick="openMfImport('billings')">請求を取り込む</button>
         <button class="btn secondary sm" onclick="openMfImport('transactions')">入金を取り込む</button>
         <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button>
@@ -4253,6 +4259,35 @@ async function mfKeyClear(){
     const r=await fetch(API_BASE+'/mf/credentials',{ method:'DELETE', headers:headers() });
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.message||('HTTP '+r.status)); }
     toast('消しました。','ok'); renderPage(CURRENT_PAGE);
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+/** 画面に出したときの状態を覚えておく（設定の小窓が初期値に使う） */
+let MF_PANEL_ST=null;
+/** 自動同期の 時刻・ON/OFF（管理者だけ）。時刻は日本時間。 */
+function mfSchedForm(){
+  if(!isAdmin()){ toast('変えられるのは管理者だけです。','err'); return; }
+  const sch=(MF_PANEL_ST&&MF_PANEL_ST.schedule)||{ enabled:true, hour:6 };
+  const opts=Array.from({length:24},(_,h)=>`<option value="${h}" ${h===Number(sch.hour)?'selected':''}>${String(h).padStart(2,'0')}:00</option>`).join('');
+  openModal(`<h3>自動同期の設定</h3>
+    <div class="mdsub">Money Forward から「請求 → 入金 → 自動消込」を、毎日きまった時刻に取り込みます。
+      Money Forward には何も書きません（読むだけ）。いつでも「今すぐ同期」で手動でも動かせます。</div>
+    <div class="form-grid">
+      <div class="full"><label><input type="checkbox" id="mfSchOn" ${sch.enabled!==false?'checked':''}> 毎日 自動で同期する</label>
+        <div class="fhelp">外すと、自動では一切動きません（手で押したときだけ）。</div></div>
+      <div><label>時刻（日本時間）</label><select id="mfSchHour">${opts}</select>
+        <div class="fhelp">前日の入金が銀行に出そろう朝が向いています（既定 06:00）。</div></div>
+    </div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn" onclick="mfSchedSave()">保存</button></div>`,'md');
+}
+async function mfSchedSave(){
+  const enabled=document.getElementById('mfSchOn').checked;
+  const hour=Number(document.getElementById('mfSchHour').value);
+  try{
+    const d=await mfCall('/mf/schedule',{ enabled, hour });
+    closeModal();
+    toast(d.schedule.enabled? `毎日 ${String(d.schedule.hour).padStart(2,'0')}:00 に自動で同期します。` : '自動同期を止めました。','ok');
+    renderPage(CURRENT_PAGE);
   }catch(e){ toast(String(e.message||e),'err'); }
 }
 async function mfSyncNow(){

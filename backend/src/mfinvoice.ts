@@ -99,6 +99,20 @@ export async function saveMfCreds(d: MfDeps, clientId: string, clientSecret: str
   if (before.clientId && before.clientId !== id) await d.cfgSet('mf_token', '')   // 別のアプリのトークンは使わない
   return { changedApp: !!before.clientId && before.clientId !== id }
 }
+/* ---------- 自動同期の予定（毎日 何時に流すか） ----------
+   既定は 毎朝6時。画面（設定 › API・AI連携）から 管理者が変えられます。
+   時刻は サーバーの時間帯＝日本時間（docker-compose の TZ）で考えます。 */
+export type MfSchedule = { enabled: boolean; hour: number }
+export const MF_SCHEDULE_DEFAULT: MfSchedule = { enabled: true, hour: 6 }
+export async function mfSchedule(d: MfDeps): Promise<MfSchedule> {
+  try {
+    const raw = await d.cfgGet('mf_schedule')
+    const j = raw ? JSON.parse(raw) : null
+    if (!j) return { ...MF_SCHEDULE_DEFAULT }
+    const h = Number(j.hour)
+    return { enabled: j.enabled !== false, hour: Number.isInteger(h) && h >= 0 && h <= 23 ? h : MF_SCHEDULE_DEFAULT.hour }
+  } catch { return { ...MF_SCHEDULE_DEFAULT } }
+}
 export const peek4 = (s: any) => { const t = String(s || ''); return t ? `${t.slice(0, 4)}…（${t.length}文字）` : '' }
 
 export function authorizeUrl(state: string, env?: Record<string, string | undefined>, clientId?: string) {
@@ -324,6 +338,7 @@ export function mfRouter(d: RouterDeps) {
       bankAccountId: (await d.cfgGet('mf_bank_account').catch(() => null)) || '',
       lastSyncAt: last.at || '', lastResult: last.result || '', lastError: last.error || '', lastStats: last.stats || null,
       connectLast: JSON.parse((await d.cfgGet('mf_connect_last').catch(() => null)) || 'null'),
+      schedule: await mfSchedule(d),
     })
   })
 
@@ -365,6 +380,18 @@ export function mfRouter(d: RouterDeps) {
       await trace(true, '接続しました', st.by)
       return back('connected')
     } catch (e: any) { const m = scrub(e?.message || e); await trace(false, m); return back('error', m) }
+  })
+
+  /* 自動同期の予定を変える（管理者だけ） */
+  r.post('/mf/schedule', async (req, res) => {
+    const me = await d.verify(req, res); if (!me) return
+    if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only', message: '自動同期を変えられるのは管理者だけです。' })
+    const h = Number(req.body?.hour)
+    if (!Number.isInteger(h) || h < 0 || h > 23) return res.status(400).json({ error: 'bad-hour', message: '時刻は 0〜23 で指定してください。' })
+    const next: MfSchedule = { enabled: req.body?.enabled !== false, hour: h }
+    await d.cfgSet('mf_schedule', JSON.stringify(next))
+    await d.audit?.(me.email, 'mf-schedule', next)
+    res.json({ ok: true, schedule: next })
   })
 
   r.post('/mf/disconnect', async (req, res) => {

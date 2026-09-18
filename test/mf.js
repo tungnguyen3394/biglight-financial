@@ -197,6 +197,16 @@ function makeDeps(opts = {}) {
     who.current = { email: 'mgr@biglight.jp', role: 'Manager' };
     eq('マネージャーも取れる', (await call('POST', '/mf/billings', { from: '2026-08-01', to: '2026-09-14' })).status, 200);
     eq('マネージャーは切断できない', (await call('POST', '/mf/disconnect')).status, 403);
+    /* 自動同期の予定（毎日 何時に流すか） */
+    eq('既定は 毎朝6時', (await call('GET', '/mf/status')).j.schedule, { enabled: true, hour: 6 });
+    eq('マネージャーは予定を変えられない', (await call('POST', '/mf/schedule', { enabled: true, hour: 9 })).status, 403);
+    who.current = { email: 'boss@biglight.jp', role: 'Admin' };
+    eq('24時は無い（0〜23）', (await call('POST', '/mf/schedule', { enabled: true, hour: 24 })).status, 400);
+    eq('時刻が数でなければ断る', (await call('POST', '/mf/schedule', { enabled: true, hour: 'あさ' })).status, 400);
+    eq('管理者は時刻を変えられる', (await call('POST', '/mf/schedule', { enabled: true, hour: 9 })).j.schedule, { enabled: true, hour: 9 });
+    eq('変えた時刻が状態に出る', (await call('GET', '/mf/status')).j.schedule, { enabled: true, hour: 9 });
+    eq('自動同期を止められる', (await call('POST', '/mf/schedule', { enabled: false, hour: 9 })).j.schedule, { enabled: false, hour: 9 });
+    who.current = { email: 'mgr@biglight.jp', role: 'Manager' };
     /* 取り込みは index.ts の sync() に渡すだけ（ここでは受け渡しだけ確かめる） */
     eq('取り込みの口は sync に渡す', (await call('POST', '/mf/sync/billings', { from: '2026-08-01', to: '2026-09-14', dryRun: true })).j,
       { kind: 'billings', args: { from: '2026-08-01', to: '2026-09-14', dryRun: true }, by: 'mgr@biglight.jp' });
