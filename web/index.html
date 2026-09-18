@@ -4305,6 +4305,7 @@ async function mfPanelLoad(){
   if(!b || b.id!=='mfPanel') return;
   const mgr = myRole()==='Admin'||myRole()==='Manager';
   MF_PANEL_ST = st;
+  if(st.accounting && st.accountingScopeOk) setTimeout(mfBankAccounts, 0);
   const sch = st.schedule || { enabled:true, hour:6 };
   const statsTxt = mfStatsText(st.lastStats);
   const unmapped = mfUnmappedCount(st.lastStats);
@@ -4326,6 +4327,19 @@ async function mfPanelLoad(){
         : (st.connected? `<span class="badge b-green">接続中</span> ${esc(String(st.connectedBy||'').split('@')[0])} ・ ${line}
             ${isAdmin()?` <a onclick="mfDisconnect()" style="cursor:pointer;color:var(--danger);">切断</a>`:''}${isAdmin()&&st.credSource==='db'?` ・ <a onclick="mfKeyClear()" style="cursor:pointer;color:var(--danger);">鍵を消す</a>`:''}`
           : `<span class="badge b-amber">未接続</span> ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}`)}
+      ${st.configured && st.connected? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
+        <b>Money Forward 会計</b> <span class="muted">— 銀行の入出金明細（あいち銀行 など MF 会計に連携済みの口座）と 試算表 を MF 会計 API で読みます（読むだけ・仕訳は書きません）</span><br>
+        ${st.accounting && st.accountingScopeOk
+          ? `<span class="badge b-green">接続中</span> <span class="muted">「入金を取り込む」「試算表を取り込む」と 毎日の自動同期で MF 会計 を使います</span>
+             <span id="mfBankSel" class="muted"></span>
+             ${isAdmin()?` ・ <a onclick="mfBankOff()" style="cursor:pointer;color:var(--danger);">MF 会計 を切る</a>`:''}`
+          : st.accounting
+            ? `<span class="badge b-amber">認可待ち</span> <span class="muted">会計のスコープがまだトークンに入っていません。</span>
+               ${isAdmin()?`<button class="btn sm" onclick="mfConnect()">もう一度「接続する」</button>`:''}`
+            : `<span class="badge b-amber">未接続</span>
+               ${isAdmin()?`<button class="btn sm" onclick="mfBankConnect()">Money Forward 会計と接続する</button>`:'<span class="muted">管理者に依頼してください。</span>'}
+               <span class="fhelp" style="display:inline;">押すと MF に戻って「許可」をもう一度求められます（請求書 ＋ 会計）。</span>`}
+      </div>`:''}
       ${!st.connected && st.connectLast? `<div class="fhelp" style="margin-top:4px;">最後の戻り：${esc(st.connectLast.at||'')} ${st.connectLast.ok?'成功':'失敗'}${st.connectLast.why? ' ／ '+esc(st.connectLast.why):''}</div>`:''}
       ${!st.connected && st.configured && !st.connectLast? '<div class="fhelp" style="margin-top:4px;">まだ一度も Money Forward から戻ってきていません（ブラウザで「許可」がまだです）。</div>':''}
       ${st.lastError? `<div class="alertbar" style="margin-top:8px;">${IC.warn} 前回のエラー：${esc(st.lastError)}</div>`:''}
@@ -4419,6 +4433,35 @@ function mfStatsText(st){
 function mfUnmappedCount(st){
   if(!st || typeof st!=='object') return 0;
   return Number((st['取引先未対応']) || (st.billings && st.billings['取引先未対応']) || 0);
+}
+/** 銀行口座と接続する: MF 会計のスコープを ON にして、もう一度 認可へ */
+async function mfBankConnect(){
+  if(!isAdmin()){ toast('接続できるのは管理者だけです。','err'); return; }
+  if(!confirm('Money Forward 会計（銀行明細・試算表）を使います。Money Forward に戻って「許可」をもう一度求められます。よろしいですか？\n（読むだけです。MF には何も書きません）')) return;
+  try{
+    const d=await mfCall('/mf/accounting/enable',{ enabled:true });
+    if(d.reconnect) return mfConnect();
+    toast('MF 会計 を ON にしました。','ok'); renderPage(CURRENT_PAGE);
+  }catch(e){ toast(String(e.message||e),'err'); }
+}
+async function mfBankOff(){
+  if(!confirm('Money Forward 会計 を切ります。CSV での取り込みは続けられます。よろしいですか？')) return;
+  try{ await mfCall('/mf/accounting/enable',{ enabled:false }); toast('切りました。','ok'); renderPage(CURRENT_PAGE); }
+  catch(e){ toast(String(e.message||e),'err'); }
+}
+/** 連携口座の一覧 → 使う口座を選ぶ（あいち銀行 など） */
+async function mfBankAccounts(){
+  const el=document.getElementById('mfBankSel'); if(!el) return;
+  try{
+    const d=await mfGet('/mf/accounting/accounts');
+    const opts=[]; (d.items||[]).forEach(a=>{ if((a.subAccounts||[]).length) a.subAccounts.forEach(x=>opts.push([x.id, a.name+' ／ '+x.name])); else opts.push([a.id, a.name]); });
+    if(!opts.length){ el.innerHTML=' ・ <span class="minus">MF 会計 に連携している口座が見つかりません（MF 会計 › 連携サービス で銀行をつないでください）</span>'; return; }
+    el.innerHTML=` ・ 使う口座: <select onchange="mfBankPick(this.value)" style="font-size:12px;"><option value="">すべて</option>${opts.map(([id,n])=>`<option value="${attr(id)}" ${String(d.selected)===String(id)?'selected':''}>${esc(n)}</option>`).join('')}</select>`;
+  }catch(e){ el.innerHTML=' ・ <span class="minus">口座を取れませんでした：'+esc(String(e.message||e))+'</span>'; }
+}
+async function mfBankPick(id){
+  try{ await mfCall('/mf/accounting/account',{ id }); toast(id? 'この口座の入金だけを取り込みます。' : 'すべての口座を取り込みます。','ok'); }
+  catch(e){ toast(String(e.message||e),'err'); }
 }
 /** 画面に出したときの状態を覚えておく（設定の小窓が初期値に使う） */
 let MF_PANEL_ST=null;

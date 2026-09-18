@@ -34,7 +34,10 @@ import crypto from 'crypto'
 export const MF_AUTHORIZE_URL = 'https://api.biz.moneyforward.com/authorize'
 export const MF_TOKEN_URL = 'https://api.biz.moneyforward.com/token'
 export const MF_SCOPE = 'mfc/invoice/data.read'
-export const MF_ACCOUNTING_SCOPE = 'mfc/accounting/data.read'
+/* MF 会計（銀行明細・試算表）のスコープ。2026-09-18 に https://api.biz.moneyforward.com/.well-known/oauth-authorization-server で確認 */
+export const MF_ACCOUNTING_SCOPES = ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read']
+export const MF_ACCOUNTING_SCOPE = MF_ACCOUNTING_SCOPES.join(' ')
+export const MF_ACCOUNTING_API_BASE = 'https://api-accounting.moneyforward.com/api/v3'
 
 export type MfDeps = {
   fetch: typeof fetch
@@ -48,13 +51,13 @@ export function mfConfig(env: Record<string, string | undefined> = process.env) 
   const publicUrl = String(env.MF_PUBLIC_URL || env.PUBLIC_URL || 'https://finance.biglight.jp').replace(/\/$/, '')
   const accounting = String(env.MF_ACCOUNTING_ENABLED || '').toLowerCase() === 'true'
   const scopes = [String(env.MF_SCOPE || MF_SCOPE)]
-  if (accounting) scopes.push(String(env.MF_ACCOUNTING_SCOPE || MF_ACCOUNTING_SCOPE))
+  if (accounting) scopes.push(...String(env.MF_ACCOUNTING_SCOPE || MF_ACCOUNTING_SCOPE).split(/\s+/).filter(Boolean))
   return {
     clientId: String(env.MF_CLIENT_ID || ''),
     clientSecret: String(env.MF_CLIENT_SECRET || ''),
     redirectUri: String(env.MF_REDIRECT_URI || publicUrl + '/api/mf/callback'),
     apiBase: String(env.MF_INVOICE_API_BASE || 'https://invoice.moneyforward.com/api/v3').replace(/\/$/, ''),
-    acctBase: String(env.MF_ACCOUNTING_API_BASE || 'https://accounting.moneyforward.com/api/v3').replace(/\/$/, ''),
+    acctBase: String(env.MF_ACCOUNTING_API_BASE || MF_ACCOUNTING_API_BASE).replace(/\/$/, ''),
     accounting,
     scope: scopes.join(' '),
     /* アプリ登録時に選んだクライアント認証方式。basic（既定）か post */
@@ -113,11 +116,25 @@ export async function mfSchedule(d: MfDeps): Promise<MfSchedule> {
     return { enabled: j.enabled !== false, hour: Number.isInteger(h) && h >= 0 && h <= 23 ? h : MF_SCHEDULE_DEFAULT.hour }
   } catch { return { ...MF_SCHEDULE_DEFAULT } }
 }
+/** 銀行明細（MF 会計）を使うか。.env の MF_ACCOUNTING_ENABLED=true か、画面で ON にした分（server_config.mf_accounting） */
+export async function mfAccountingOn(d: MfDeps): Promise<boolean> {
+  if (mfConfig(d.env).accounting) return true
+  try { return (await d.cfgGet('mf_accounting')) === 'on' } catch { return false }
+}
+/** いま認可を求めるスコープ（請求書 ＋ 銀行明細が ON なら会計） */
+export async function mfScope(d: MfDeps): Promise<string> {
+  const c = mfConfig(d.env)
+  const s = [String((d.env || process.env).MF_SCOPE || MF_SCOPE)]
+  if (await mfAccountingOn(d)) s.push(...String((d.env || process.env).MF_ACCOUNTING_SCOPE || MF_ACCOUNTING_SCOPE).split(/\s+/).filter(Boolean))
+  return [...new Set(s)].join(' ')
+}
+/** 今のトークンに 会計のスコープが入っているか（無ければ もう一度「接続する」が要る） */
+export const hasAccountingScope = (tok: any) => String(tok?.scope || '').split(/\s+/).includes('mfc/accounting/transaction.read')
 export const peek4 = (s: any) => { const t = String(s || ''); return t ? `${t.slice(0, 4)}…（${t.length}文字）` : '' }
 
-export function authorizeUrl(state: string, env?: Record<string, string | undefined>, clientId?: string) {
+export function authorizeUrl(state: string, env?: Record<string, string | undefined>, clientId?: string, scope?: string) {
   const c = mfConfig(env)
-  const q = new URLSearchParams({ response_type: 'code', client_id: clientId || c.clientId, redirect_uri: c.redirectUri, scope: c.scope, state })
+  const q = new URLSearchParams({ response_type: 'code', client_id: clientId || c.clientId, redirect_uri: c.redirectUri, scope: scope || c.scope, state })
   return MF_AUTHORIZE_URL + '?' + q.toString()
 }
 
@@ -281,47 +298,90 @@ export async function fetchBillingPdf(pdfUrl: string, d: MfDeps): Promise<{ stat
 
 /* ---------- MF 会計（入出金明細・試算表）----------
    繋がらない場合は画面の CSV 取り込みで同じことができます。エラーはそのまま画面に出します。 */
+const listOf = (j: any, ...keys: string[]) => { for (const k of ['data', ...keys]) if (Array.isArray(j?.[k])) return j[k]; return Array.isArray(j) ? j : [] }
 export async function fetchConnectedAccounts(d: MfDeps) {
   const c = mfConfig(d.env)
   const j = await getJson(`${c.acctBase}/connected_accounts`, await accessToken(d), d, '連携口座')
-  const list = Array.isArray(j.data) ? j.data : (Array.isArray(j.connected_accounts) ? j.connected_accounts : [])
+  const list = listOf(j, 'connected_accounts', 'items')
   return list.map((a: any) => ({
-    id: String(a?.id ?? ''), name: String(a?.name ?? a?.service_name ?? ''),
-    subAccounts: (a?.connected_sub_accounts || a?.sub_accounts || []).map((s: any) => ({
-      id: String(s?.id ?? ''), name: String(s?.name ?? s?.sub_account_name ?? ''), lastSyncedAt: String(s?.last_synced_at ?? ''),
+    id: String(a?.id ?? ''), name: String(a?.name ?? a?.service_name ?? a?.financial_institution_name ?? ''),
+    rawKeys: Object.keys(a || {}),
+    subAccounts: (a?.connected_sub_accounts || a?.sub_accounts || a?.walletables || []).map((s: any) => ({
+      id: String(s?.id ?? ''), name: String(s?.name ?? s?.sub_account_name ?? s?.account_name ?? ''), lastSyncedAt: String(s?.last_synced_at ?? s?.last_aggregated_at ?? ''),
     })),
   }))
 }
-export async function fetchTransactions(from: string, to: string, subAccountId: string, d: MfDeps) {
+/** MF 会計の明細 1件 → このシステムの形。項目名の違いに寛容（日付・金額・摘要・向き） */
+export function normalizeTransaction(t: any) {
+  const raw = t && t.attributes && typeof t.attributes === 'object' ? { id: t.id, ...t.attributes } : (t || {})
+  const date = dateOnly(raw.transaction_date ?? raw.date ?? raw.recognized_at ?? raw.transacted_at ?? raw.value_date)
+  const rawAmt = raw.value ?? raw.amount ?? raw.price
+  let amount = money(rawAmt)
+  const sideRaw = String(raw.side ?? raw.type ?? raw.entry_side ?? '').toLowerCase()
+  let side: 'INCOME' | 'EXPENSE' | '' = ''
+  if (/income|deposit|credit|入金|収入|in\b/.test(sideRaw)) side = 'INCOME'
+  else if (/expense|withdraw|debit|出金|支出|out\b/.test(sideRaw)) side = 'EXPENSE'
+  else if (raw.deposit_amount != null || raw.withdrawal_amount != null) {
+    const dep = money(raw.deposit_amount), wd = money(raw.withdrawal_amount)
+    if (dep > 0) { side = 'INCOME'; amount = dep } else if (wd > 0) { side = 'EXPENSE'; amount = wd }
+  } else if (amount !== 0) side = amount > 0 ? 'INCOME' : 'EXPENSE'
+  return {
+    extId: String(raw.id ?? ''), date, amount: Math.abs(amount), side,
+    payerName: String(raw.content ?? raw.description ?? raw.remark ?? raw.memo ?? ''),
+    accountId: String(raw.walletable_id ?? raw.connected_sub_account_id ?? raw.sub_account_id ?? raw.account_id ?? ''),
+    rawKeys: Object.keys(raw), raw: { id: raw.id, content: raw.content ?? raw.description, value: rawAmt },
+  }
+}
+/** 期間内の入金明細。★ 公式の絞り込みパラメータ名が確認できていないので、ページだけ送り、期間・口座・向きは こちらで選ぶ（読むだけ） */
+export async function fetchTransactions(from: string, to: string, subAccountId: string, d: MfDeps, opts: { all?: boolean } = {}) {
   const c = mfConfig(d.env)
   const token = await accessToken(d)
   const out: any[] = []
+  const seen = new Set<string>()
   for (let page = 1; page <= 200; page++) {
-    const q = new URLSearchParams({ page: String(page), per_page: '100', start_date: from, end_date: to, side: 'INCOME' })
-    if (subAccountId) q.set('connected_sub_account_id', subAccountId)
+    const q = new URLSearchParams({ page: String(page) })
     const j = await getJson(`${c.acctBase}/transactions?${q}`, token, d, '入出金明細')
-    const list = Array.isArray(j.data) ? j.data : (Array.isArray(j.transactions) ? j.transactions : [])
-    for (const t of list) {
-      out.push({
-        extId: String(t?.id ?? ''), date: dateOnly(t?.transaction_date ?? t?.recognized_at ?? t?.date),
-        amount: money(t?.value ?? t?.amount), payerName: String(t?.content ?? t?.description ?? ''),
-        side: String(t?.side ?? 'INCOME'), raw: { id: t?.id, content: t?.content, value: t?.value ?? t?.amount },
-      })
-    }
+    const list = listOf(j, 'transactions', 'items')
+    for (const t of list) { const n = normalizeTransaction(t); if (!n.extId || seen.has(n.extId)) continue; seen.add(n.extId); out.push(n) }
     if (!list.length) break
     if (!mfHasNextPage(j, page)) break
   }
-  return out.filter(t => t.extId && t.date && t.amount > 0)
+  if (opts.all) return out
+  return out.filter(t => t.date && t.date >= from && t.date <= to && t.side === 'INCOME' && t.amount > 0
+    && (!subAccountId || !t.accountId || t.accountId === String(subAccountId)))
+}
+/** 試算表の返り → { code, name, amount(期末残高) } の平らな並び。
+    公式の形（columns に位置、rows が 区分→科目→補助科目 の木、科目コードは無い）にも、平らな一覧にも対応 */
+export function parseTrialBalance(j: any): { code: string; name: string; amount: number }[] {
+  const out: { code: string; name: string; amount: number }[] = []
+  const cols: any[] = Array.isArray(j?.columns) ? j.columns : []
+  const closingIdx = cols.findIndex((c: any) => /closing/.test(String(typeof c === 'string' ? c : (c?.key ?? c?.name ?? c?.position ?? ''))))
+  const amountOf = (r: any) => {
+    if (r?.closing_balance != null) return money(r.closing_balance)
+    if (r?.balance != null) return money(r.balance)
+    const vals = r?.values ?? r?.amounts ?? r?.cells
+    if (Array.isArray(vals) && closingIdx >= 0 && vals[closingIdx] != null) return money(typeof vals[closingIdx] === 'object' ? vals[closingIdx]?.value ?? vals[closingIdx]?.amount : vals[closingIdx])
+    return money(r?.amount ?? r?.total)
+  }
+  const walk = (r: any) => {
+    if (!r || typeof r !== 'object') return
+    const name = String(r.account_name ?? r.name ?? '')
+    const kids = r.rows ?? r.children ?? r.accounts ?? r.sub_accounts ?? r.items
+    /* 自分の数字を持つ行は出す（科目でも区分でも）。数字を持たない入れ物（区分名だけ）は出さない */
+    const hasOwn = r.closing_balance != null || r.balance != null || r.amount != null || r.total != null
+      || (Array.isArray(r.values ?? r.amounts ?? r.cells) && (r.values ?? r.amounts ?? r.cells).length)
+    if (name && (hasOwn || !(Array.isArray(kids) && kids.length))) out.push({ code: String(r.account_code ?? r.code ?? ''), name, amount: amountOf(r) })
+    if (Array.isArray(kids)) kids.forEach(walk)
+  }
+  const top = Array.isArray(j?.rows) ? j.rows : listOf(j, 'items')
+  top.forEach(walk)
+  return out.filter(r => r.name)
 }
 export async function fetchTrialBalance(month: string, d: MfDeps, kind: 'pl' | 'bs' = 'bs') {
   const c = mfConfig(d.env)
   const q = new URLSearchParams({ from: month + '-01', to: month + '-31' })
   const j = await getJson(`${c.acctBase}/reports/trial_balance_${kind}?${q}`, await accessToken(d), d, '試算表')
-  const list = Array.isArray(j.data) ? j.data : (Array.isArray(j.items) ? j.items : [])
-  return list.map((r: any) => ({
-    code: String(r?.account_code ?? r?.code ?? ''), name: String(r?.account_name ?? r?.name ?? ''),
-    amount: money(r?.closing_balance ?? r?.balance ?? r?.amount ?? r?.total),
-  })).filter((r: any) => r.name)
+  return parseTrialBalance(j)
 }
 
 /* ---------- 画面・cron から呼ぶ口 ---------- */
@@ -358,7 +418,7 @@ export function mfRouter(d: RouterDeps) {
       clientSecretLen: k.clientSecret.length, tokenAuth: k.tokenAuth,
       connected: !!(tok && tok.access_token),
       connectedBy: tok?.connected_by || '', connectedAt: tok?.connected_at || '', scopes: tok?.scope || c.scope,
-      accounting: c.accounting, redirectUri: c.redirectUri,
+      accounting: await mfAccountingOn(d), accountingScopeOk: hasAccountingScope(tok), accountingBase: c.acctBase, redirectUri: c.redirectUri,
       bankAccountId: (await d.cfgGet('mf_bank_account').catch(() => null)) || '',
       lastSyncAt: last.at || '', lastResult: last.result || '', lastError: last.error || '', lastStats: last.stats || null,
       connectLast: JSON.parse((await d.cfgGet('mf_connect_last').catch(() => null)) || 'null'),
@@ -374,7 +434,7 @@ export function mfRouter(d: RouterDeps) {
     if (!k.clientId || !k.clientSecret) return res.status(503).json({ error: 'not-configured', message: 'Money Forward の鍵（ClientID / ClientSecret）がまだ入っていません。「鍵を入れる」から貼り付けてください。' })
     const state = crypto.randomBytes(24).toString('hex')
     await d.cfgSet('mf_oauth_state', JSON.stringify({ state, by: me.email, exp: (d.now || Date.now)() + 10 * 60_000 }))
-    res.json({ url: authorizeUrl(state, d.env, k.clientId) })
+    res.json({ url: authorizeUrl(state, d.env, k.clientId, await mfScope(d)) })
   })
 
   /* MF から戻ってくる所。ログインの代わりに state（10分・1回きり）で本人確認する */
@@ -492,6 +552,19 @@ export function mfRouter(d: RouterDeps) {
   syncRoute('/mf/sync/trial-balance', 'trial-balance', b => (isMonth(b.month)) ? '' : '対象月（YYYY-MM）が要ります。')
   syncRoute('/mf/reconcile', 'reconcile')
   syncRoute('/mf/sync/run', 'run')
+
+  /* --- 銀行明細（MF 会計）を使う／使わない（管理者）。ON にしたら会計のスコープ付きで もう一度「接続する」 --- */
+  r.post('/mf/accounting/enable', async (req, res) => {
+    const me = await d.verify(req, res); if (!me) return
+    if (me.role !== 'Admin') return res.status(403).json({ error: 'admin-only', message: '銀行明細の接続を変えられるのは管理者だけです。' })
+    if (mfConfig(d.env).accounting && req.body?.enabled === false) return res.status(409).json({ error: 'env-wins', message: '.env で MF_ACCOUNTING_ENABLED=true のため、画面からは切れません。' })
+    const on = req.body?.enabled !== false
+    await d.cfgSet('mf_accounting', on ? 'on' : '')
+    const raw = await d.cfgGet('mf_token').catch(() => null)
+    const tok = raw ? JSON.parse(raw) : null
+    await d.audit?.(me.email, 'mf-accounting-' + (on ? 'on' : 'off'), {})
+    res.json({ ok: true, enabled: on, reconnect: on && !hasAccountingScope(tok), scope: await mfScope(d) })
+  })
 
   /* --- 会計: 連携口座の一覧と、使う口座の記憶 --- */
   r.get('/mf/accounting/accounts', async (req, res) => {

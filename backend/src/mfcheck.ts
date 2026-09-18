@@ -7,6 +7,7 @@
      docker compose exec api node dist/mfcheck.js --refresh       … リフレッシュトークンも試す
      docker compose exec api node dist/mfcheck.js --apply         … 実際に取り込み、もう一度流して重複0を確かめる
      docker compose exec api node dist/mfcheck.js --connect       … 認可URLを表示（画面のボタンが使えないとき）
+     docker compose exec api node dist/mfcheck.js --bank          … 銀行明細（MF 会計）も確かめる
    ★ 秘密（ClientSecret・アクセストークン・リフレッシュトークン）は1バイトも出しません。
      出すのは 長さと先頭4文字だけ（つながっているかの確認用）。
    ★ --apply 以外では データベースに1行も書きません。MF へは常に読み取りだけ。
@@ -41,7 +42,7 @@ async function main() {
   line('戻り先（Redirect URI）', c.redirectUri)
   line('要求するスコープ', c.scope)
   line('請求書 API', c.apiBase)
-  line('会計 API', c.accounting ? c.acctBase : '使わない（MF_ACCOUNTING_ENABLED=false）')
+  line('会計 API（銀行明細）', (await MF.mfAccountingOn(deps)) ? c.acctBase : '使わない（画面の「銀行口座と接続する」か .env の MF_ACCOUNTING_ENABLED=true で ON）')
   if (!k.clientId || !k.clientSecret) { console.log('\n→ 鍵が無いので ここまで。画面（設定 › API・AI連携）の「鍵を入れる」か bash vps/enable-mf.sh で入れてください。\n'); process.exit(1) }
   if (c.scope.includes('write')) { console.log('\n★ 書き込みスコープが入っています。読むだけの約束に反します。'); ng++ }
 
@@ -121,6 +122,25 @@ async function main() {
       console.log(`     税抜=${yen(x.subtotal)} 税=${yen(x.tax)} 税込=${yen(x.total)} 入金状況=${x.paymentStatus || '—'} 状態=${x.mfStatus || '—'} 更新=${x.updatedAt || '—'}`)
       console.log(`     PDF=${x.pdfUrl ? 'あり' : '★ 無し（pdf_url が返っていません）'}`)
     }
+  }
+
+  if (arg('bank')) {
+    console.log('\n■ 3b. 銀行明細（MF 会計・読むだけ）')
+    line('会計のスコープ', MF.hasAccountingScope(tok) ? 'トークンに入っています' : '★ 入っていません（画面で「銀行口座と接続する」→ もう一度「接続する」）')
+    try {
+      const accts = await MF.fetchConnectedAccounts(deps)
+      line('連携口座', accts.length + ' 件')
+      if (accts[0]) console.log('   返ってきた項目名: ' + (accts[0] as any).rawKeys.join(', '))
+      for (const a of accts.slice(0, 5)) console.log(`   ・${a.name}（id=${a.id}）${a.subAccounts.map((s: any) => ' ／ ' + s.name + '（id=' + s.id + '）').join('')}`)
+    } catch (e: any) { line('連携口座', '★ NG ' + MF.scrub(e?.message || e)); ng++ }
+    try {
+      const all = await MF.fetchTransactions(from, to, '', deps, { all: true })
+      const inc = all.filter(t => t.side === 'INCOME' && t.date >= from && t.date <= to)
+      line('明細（全部）', all.length + ' 件')
+      line('うち期間内の入金', inc.length + ' 件')
+      if (all[0]) console.log('   返ってきた項目名: ' + (all[0] as any).rawKeys.join(', '))
+      for (const t of (inc.length ? inc : all).slice(0, 3)) console.log(`   ・${t.date} ${t.side || '?'} ${yen(t.amount)} 円 「${t.payerName}」 口座=${t.accountId || '—'}`)
+    } catch (e: any) { line('明細', '★ NG ' + MF.scrub(e?.message || e)); ng++ }
   }
 
   console.log('\n■ 4. 取り込みの計画（この時点ではまだ書きません）')

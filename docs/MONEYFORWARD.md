@@ -165,3 +165,21 @@ node test/mfsync.js    # 取り込み・消込・突合の規則（受け入れ�
 node test/mf.js        # MF API の口（トークン・下書き除外・権限）— 本物の MF には繋ぎません
 node test/smoke.js web/index.html
 ```
+
+## 10. Money Forward 会計 と接続する（銀行明細・試算表を API で）
+
+設定 › API・AI連携 › Money Forward 連携 › **［Money Forward 会計と接続する］**（管理者）。
+押すと 会計のスコープを足して もう一度 MF の「許可」に戻ります。読むだけで、仕訳は書きません。
+
+| 項目 | 値（2026-09-18 に公式で確認） |
+|---|---|
+| 認可・トークン | 請求書と同じ `https://api.biz.moneyforward.com/authorize` ／ `/token` |
+| スコープ | `mfc/accounting/connected_account.read` `mfc/accounting/transaction.read` `mfc/accounting/report.read`（`/.well-known/oauth-authorization-server` の一覧） |
+| 基底 URL | `https://api-accounting.moneyforward.com/api/v3` |
+| 明細 | `GET /transactions`（page だけ送り、期間・口座・入金の向きは こちらで選ぶ） |
+| 試算表 | `GET /reports/trial_balance_bs` ／ `_pl`（columns の位置 ＋ rows の木） |
+
+- 銀行（あいち銀行 など）の API は 登録済みの電子決済等代行業者にしか開いていません。銀行は MF 会計 に連携し、ここは MF 会計 を読みます。
+- 返ってくる項目名は `docker compose exec api node dist/mfcheck.js --bank` で確かめられます（先頭1件の項目名と 3件の見本）。
+- 接続後、同じ画面の「使う口座」で 取り込む口座を1つに絞れます（既定は すべて）。
+- 切るときは「MF 会計 を切る」。`.env` に `MF_ACCOUNTING_ENABLED=true` があるときは 画面からは切れません。

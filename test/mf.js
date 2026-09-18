@@ -162,7 +162,7 @@ function makeDeps(opts = {}) {
     const txns = await MF.fetchTransactions('2026-09-01', '2026-09-14', 'sub1', t.deps);
     eq('入金だけ・形をそろえて返す', txns.map(x => [x.extId, x.date, x.amount, x.payerName]), [['tx1', '2026-09-10', 110000, 'ﾌﾘｺﾐ ﾀｶﾔﾏ(ｶ']]);
     const q = new URL(t.calls.find(c => c.url.includes('/transactions')).url).searchParams;
-    eq('口座と期間と入金の指定', [q.get('connected_sub_account_id'), q.get('side'), q.get('start_date')], ['sub1', 'INCOME', '2026-09-01']);
+    eq('公式の絞り込み名が未確認なので page だけ送る（期間・口座・向きは こちらで選ぶ）', [q.get('page'), q.get('connected_sub_account_id'), q.get('side'), q.get('start_date')], ['1', null, null, null]);
     const tb = await MF.fetchTrialBalance('2026-09', t.deps);
     eq('試算表は 科目と残高', tb, [{ code: '1130', name: '売掛金', amount: 264000 }]);
   }
@@ -228,6 +228,55 @@ function makeDeps(opts = {}) {
     const r = await fetch(`http://127.0.0.1:${srv.address().port}/mf/connect`, { method: 'POST' });
     eq('未設定のまま接続しようとすると 503', r.status, 503);
     srv.close();
+  }
+
+  console.log('\n― 銀行明細（MF 会計）: 画面から ON → 会計のスコープ付きで認可 → 明細を読む ―');
+  eq('会計のスコープは 公式一覧の名前（data.read ではない）', MF.MF_ACCOUNTING_SCOPES, ['mfc/accounting/connected_account.read', 'mfc/accounting/transaction.read', 'mfc/accounting/report.read']);
+  eq('会計 API の基底 URL', MF.mfConfig({}).acctBase, 'https://api-accounting.moneyforward.com/api/v3');
+  {
+    const t = makeDeps({ env: { MF_CLIENT_ID: 'cid', MF_CLIENT_SECRET: 'sec', MF_PUBLIC_URL: 'https://finance.example.jp' } });
+    eq('既定は 請求書のスコープだけ', await MF.mfScope(t.deps), 'mfc/invoice/data.read');
+    const who = { current: { email: 'boss@biglight.jp', role: 'Admin' } };
+    const app = express(); app.use(express.json());
+    app.use(MF.mfRouter({ ...t.deps, verify: async () => who.current }));
+    const srv = await new Promise(r => { const s2 = app.listen(0, () => r(s2)) });
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const call = async (m, u, body) => { const r = await fetch(base + u, { method: m, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' }); return { status: r.status, j: await r.json().catch(() => ({})), loc: r.headers.get('location') || '' } };
+    /* まず請求書だけで接続しておく */
+    const c1 = await call('POST', '/mf/connect'); const st1 = new URL(c1.j.url).searchParams.get('state');
+    eq('請求書だけの認可 URL', new URL(c1.j.url).searchParams.get('scope'), 'mfc/invoice/data.read');
+    await call('GET', `/mf/callback?code=good&state=${st1}`);
+    eq('状態: 銀行明細は OFF・スコープ無し', [(await call('GET', '/mf/status')).j.accounting, (await call('GET', '/mf/status')).j.accountingScopeOk], [false, false]);
+    who.current = { email: 'mgr@biglight.jp', role: 'Manager' };
+    eq('マネージャーは銀行明細を ON にできない', (await call('POST', '/mf/accounting/enable', { enabled: true })).status, 403);
+    who.current = { email: 'boss@biglight.jp', role: 'Admin' };
+    const on = await call('POST', '/mf/accounting/enable', { enabled: true });
+    eq('ON にすると「もう一度 接続」が要ると返す', [on.j.enabled, on.j.reconnect], [true, true]);
+    eq('スコープに会計の3つが足される', on.j.scope, 'mfc/invoice/data.read mfc/accounting/connected_account.read mfc/accounting/transaction.read mfc/accounting/report.read');
+    const c2 = await call('POST', '/mf/connect');
+    eq('認可 URL にも会計のスコープ', new URL(c2.j.url).searchParams.get('scope').includes('mfc/accounting/transaction.read'), true);
+    /* MF がスコープ付きでトークンを返した体 */
+    t.store.mf_token = JSON.stringify({ access_token: 'AT-acc', refresh_token: 'RT', expires_at: 9_000_000, scope: 'mfc/invoice/data.read mfc/accounting/connected_account.read mfc/accounting/transaction.read mfc/accounting/report.read' });
+    eq('状態: 銀行明細 ON・スコープあり', [(await call('GET', '/mf/status')).j.accounting, (await call('GET', '/mf/status')).j.accountingScopeOk], [true, true]);
+    const acc = await call('GET', '/mf/accounting/accounts');
+    eq('連携口座が読める', [acc.status, acc.j.items[0].name, acc.j.items[0].subAccounts[0].name], [200, '【法人】あいち銀行', '山田支店 普通']);
+    eq('OFF に戻せる', (await call('POST', '/mf/accounting/enable', { enabled: false })).j.enabled, false);
+    eq('会計 API へは Bearer で（トークンは URL に出ない）', t.calls.filter(c => c.url.includes('api-accounting')).every(c => c.init.headers.authorization.startsWith('Bearer ') && !c.url.includes('AT-acc')), true);
+    srv.close();
+  }
+  {
+    /* 明細の読み方は寛容に（公式の項目名が SPA で読めないため。実物の項目名は mfcheck --bank で見る） */
+    const n = MF.normalizeTransaction;
+    eq('side + value', [n({ id: 1, transaction_date: '2026-09-10', content: 'ﾌﾘｺﾐ', value: '110000', side: 'INCOME' })].map(x => [x.extId, x.date, x.amount, x.side, x.payerName])[0], ['1', '2026-09-10', 110000, 'INCOME', 'ﾌﾘｺﾐ']);
+    eq('符号だけ（マイナス＝出金）', [n({ id: 2, date: '2026-09-11', amount: -8000, description: '電気' })].map(x => [x.amount, x.side])[0], [8000, 'EXPENSE']);
+    eq('入金額・出金額が別の列', [n({ id: 3, transacted_at: '2026-09-12T09:00:00+09:00', deposit_amount: '5000', withdrawal_amount: null, remark: 'A' })].map(x => [x.date, x.amount, x.side])[0], ['2026-09-12', 5000, 'INCOME']);
+    eq('attributes に包まれた形', n({ id: 4, attributes: { transaction_date: '2026-09-13', value: '300', side: 'income', content: 'B', walletable_id: 'w1' } }).accountId, 'w1');
+    eq('返ってきた項目名を残す', n({ id: 5, value: 1, foo: 2 }).rawKeys, ['id', 'value', 'foo']);
+    const p = MF.parseTrialBalance;
+    eq('試算表: 平らな一覧', p({ data: [{ account_code: '1130', account_name: '売掛金', closing_balance: '264000' }] }), [{ code: '1130', name: '売掛金', amount: 264000 }]);
+    eq('試算表: 公式の木（columns の位置 ＋ rows の入れ子・科目コード無し）',
+      p({ columns: ['opening_balance', 'debit', 'credit', 'closing_balance'], rows: [{ name: '流動資産', rows: [{ name: '売掛金', values: [1, 2, 3, '264000'], rows: [{ name: 'A社', values: [0, 0, 0, '100000'] }] }] }] })
+        .map(r => r.name + ':' + r.amount), ['売掛金:264000', 'A社:100000']);
   }
 
   console.log('\n― 返りの形が違っても読める・PDF はサーバー経由で開く ―');
