@@ -838,7 +838,9 @@ const CACHE_META_KEY  = 'bl_yj_cache_meta';
 const AUTH_KEY        = 'bl_yj_session_v1';
 const TOKEN_KEY       = 'bl_yj_gtoken';
 const PREF_KEY        = 'bl_yj_prefs_v1';           // 列・並び替えなど「個人の好み」
-const GOOGLE_CID      = '904648416175-3dsfs6iji7oki7jdrnks1s7vucj30m7a.apps.googleusercontent.com';
+/* ★ 2026-09-19: 既定値が本番の .env（1088711446168-…）と違っていたため、/config が取れない瞬間
+     （デプロイでサーバーが再起動している 15〜30 秒）に開くと「クライアントIDが違います」になっていた。本番と同じ値にする。 */
+const GOOGLE_CID      = '1088711446168-mr2nn6b9dltetqe9ll6asinqkq7ghug6.apps.googleusercontent.com';
 
 let DB = null;                    // 業務データ（サーバーの写し）
 let SESSION = null;               // {email,name,picture,role,status}
@@ -1661,11 +1663,19 @@ setInterval(()=>{ if(GTOKEN && document.visibilityState==='visible') pullDiff();
    食い違ったときに aud-mismatch になり、原因が見えないまま止まる。
    /config が取れないときだけ、下の既定値を使う。 */
 let GOOGLE_CID_EFF = GOOGLE_CID;
+async function fetchConfigCid(){
+  const r = await fetch(API_BASE+'/config', { cache:'no-store' });
+  if(!r.ok) throw new Error('config '+r.status);
+  const c = await r.json(); if(!c.googleClientId) throw new Error('no cid');
+  return c.googleClientId;
+}
 async function initGoogle(){
-  try{
-    const r = await fetch(API_BASE+'/config');
-    if(r.ok){ const c = await r.json(); if(c.googleClientId) GOOGLE_CID_EFF = c.googleClientId; }
-  }catch(e){ /* サーバーが落ちていても、ボタンは出す */ }
+  /* サーバーの再起動中（502）でも、最大 30 秒は待って本物の ID を取る */
+  for(let i=0;i<10;i++){
+    try{ GOOGLE_CID_EFF = await fetchConfigCid(); break; }
+    catch(e){ if(i===0){ const el=document.getElementById('loginErr'); if(el) el.textContent='サーバーに接続しています…'; } await new Promise(ok=>setTimeout(ok,3000)); }
+  }
+  const el=document.getElementById('loginErr'); if(el && el.textContent==='サーバーに接続しています…') el.textContent='';
   renderGoogleBtn();
 }
 function renderGoogleBtn(){
@@ -1680,6 +1690,10 @@ async function onGoogleCredential(resp){
     const r = await fetch(API_BASE+'/auth/google', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ credential: resp.credential }) });
     const d = await r.json();
+    if(!r.ok && d.error==='aud-mismatch' && !window.__cidRetried){
+      window.__cidRetried = true;
+      try{ const cid = await fetchConfigCid(); if(cid && cid!==GOOGLE_CID_EFF){ GOOGLE_CID_EFF = cid; renderGoogleBtn(); err.textContent='もう一度「ログイン」を押してください。'; return; } }catch(e){}
+    }
     if(!r.ok){
       // 「なぜ入れないのか」を必ず出す。管理者が調べられるよう技術的な内訳も添える。
       err.innerHTML = esc(d.message || ('ログインできません（'+(d.error||r.status)+'）'))
