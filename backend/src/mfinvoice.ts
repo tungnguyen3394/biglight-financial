@@ -9,9 +9,16 @@
        データベースへ入れる規則は mfsync.ts、入れる操作は index.ts。
    ★ 既定は停止。MF_CLIENT_ID / MF_CLIENT_SECRET を .env に入れたときだけ動きます。
      入れなくても、画面の「CSVを読み込む」だけで同じことができます（同じ規則を通ります）。
-   ★ 仕様（MF 公開の OpenAPI v3.6.0 に合わせています）:
+   ★ 仕様（2026-09-18 に公式ドキュメントで確認）:
        認可     https://api.biz.moneyforward.com/authorize
        トークン https://api.biz.moneyforward.com/token（refresh も同じ）
+         出典: developers.biz.moneyforward.com › チュートリアル「アクセストークンを取得する」
+               クライアント認証は CLIENT_SECRET_BASIC（Authorization ヘッダー）が推奨
+         スコープ: 読み取り mfc/invoice/data.read ／ 書き込み mfc/invoice/data.write
+               出典: biz.moneyforward.com/support/invoice/guide/api-guide/a03.html
+         エラーの形: { "errors": [{ "code": "...", "message": "..." }] }・429 はレート制限
+               出典: developers.biz.moneyforward.com › API共通仕様
+       ★ 書き込みスコープ（data.write）は要求しません。読むだけの連携です。
        請求書   GET /api/v3/billings?page&per_page(≤100)&range_key&from&to&status
                 status の例: 下書き / ロック中 / 未ロック → 下書き は取り込まない
        Billing: id, billing_number, partner_id, partner_name, title,
@@ -73,7 +80,7 @@ async function tokenRequest(params: Record<string, string>, d: MfDeps) {
   else { body.set('client_id', c.clientId); body.set('client_secret', c.clientSecret) }
   const r = await d.fetch(MF_TOKEN_URL, { method: 'POST', headers, body: body.toString() })
   const j: any = await r.json().catch(() => ({}))
-  if (!r.ok || !j.access_token) throw new Error(`Money Forward のトークン取得に失敗しました（HTTP ${r.status}${j.error ? ' ' + j.error : ''}）`)
+  if (!r.ok || !j.access_token) throw new Error(scrub(`Money Forward のトークン取得に失敗しました（HTTP ${r.status}${mfErrorText(j) ? ' ' + mfErrorText(j) : ''}）`))
   const now = (d.now || Date.now)()
   return {
     access_token: String(j.access_token),
@@ -103,6 +110,16 @@ export async function accessToken(d: MfDeps): Promise<string> {
   return t.access_token
 }
 
+/** ログ・保存・画面に出す前にトークンらしき文字列を消す（秘密は1バイトも外に出さない） */
+export function scrub(msg: any): string {
+  let t = String(msg == null ? '' : msg)
+  t = t.replace(/(Bearer\s+)[A-Za-z0-9._\-]{8,}/gi, '$1***')
+  t = t.replace(/(Basic\s+)[A-Za-z0-9+/=]{8,}/gi, '$1***')
+  t = t.replace(/((?:access|refresh|id)_token"?\s*[:=]\s*"?)[A-Za-z0-9._\-]{8,}/gi, '$1***')
+  t = t.replace(/(client_secret"?\s*[:=]\s*"?)[^"&\s]+/gi, '$1***')
+  return t.slice(0, 500)
+}
+
 const dateOnly = (v: any) => String(v || '').slice(0, 10)
 const money = (v: any) => { const n = Number(String(v ?? '').replace(/[^\d.-]/g, '')); return isFinite(n) ? Math.round(n) : 0 }
 
@@ -130,13 +147,31 @@ export function normalizeBilling(b: any) {
   }
 }
 
+/** 公式の API共通仕様のエラー形 { errors:[{code,message}] } を読む（旧い形も一応見る） */
+export function mfErrorText(j: any): string {
+  const e = Array.isArray(j?.errors) ? j.errors : null
+  if (e && e.length) return e.map((x: any) => [x?.code, x?.message].filter(Boolean).join(': ')).join(' / ')
+  return String(j?.message || j?.error_description || j?.error || '')
+}
+export function mfHttpMessage(status: number, j: any, what: string) {
+  const detail = mfErrorText(j)
+  if (status === 401) return `Money Forward の接続が切れています（HTTP 401）。設定 › API・AI連携 で もう一度「接続する」を押してください。${detail ? ' ' + detail : ''}`
+  if (status === 403) return `Money Forward がこの操作を許していません（HTTP 403）。アプリのスコープ（mfc/invoice/data.read）と 事業者の権限をご確認ください。${detail ? ' ' + detail : ''}`
+  if (status === 429) return `Money Forward のレート制限に当たりました（HTTP 429）。少し待ってからもう一度お試しください。${detail ? ' ' + detail : ''}`
+  return `Money Forward から${what}を取得できませんでした（HTTP ${status}${detail ? ' ' + detail : ''}）`
+}
+/** 次のページがあるか。total_pages / next_page / next_cursor のどれでも分かるようにする。 */
+export function mfHasNextPage(j: any, page: number) {
+  const p = j?.pagination || {}
+  if (p.next_page != null) return !!p.next_page
+  if (p.next_cursor != null) return !!p.next_cursor
+  if (p.total_pages != null) return Number(p.current_page || page) < Number(p.total_pages)
+  return false
+}
 async function getJson(url: string, token: string, d: MfDeps, what: string) {
   const r = await d.fetch(url, { headers: { authorization: 'Bearer ' + token, accept: 'application/json' } })
   const j: any = await r.json().catch(() => ({}))
-  if (!r.ok) {
-    const msg = j?.message || j?.error || ''
-    throw new Error(`Money Forward から${what}を取得できませんでした（HTTP ${r.status}${msg ? ' ' + msg : ''}）`)
-  }
+  if (!r.ok) throw new Error(scrub(mfHttpMessage(r.status, j, what)))
   return j
 }
 
@@ -159,8 +194,7 @@ export async function fetchBillings(from: string, to: string, d: MfDeps, opts: {
         if (status && !n.mfStatus) n.mfStatus = status
         seen.add(n.mfId); out.push(n)
       }
-      const p = j.pagination || {}
-      if (!p.total_pages || Number(p.current_page || page) >= Number(p.total_pages)) break
+      if (!mfHasNextPage(j, page)) break
     }
   }
   if (!statuses.length) { await pull(); return out }
@@ -202,9 +236,8 @@ export async function fetchTransactions(from: string, to: string, subAccountId: 
         side: String(t?.side ?? 'INCOME'), raw: { id: t?.id, content: t?.content, value: t?.value ?? t?.amount },
       })
     }
-    const p = j.pagination || {}
     if (!list.length) break
-    if (!p.total_pages || Number(p.current_page || page) >= Number(p.total_pages)) break
+    if (!mfHasNextPage(j, page)) break
   }
   return out.filter(t => t.extId && t.date && t.amount > 0)
 }
@@ -277,7 +310,7 @@ export function mfRouter(d: RouterDeps) {
       await exchangeCode(String(req.query.code || ''), st.by, d)
       await d.audit?.(st.by, 'mf-connect', {})
       return back('connected')
-    } catch (e: any) { return back('error', String(e?.message || e)) }
+    } catch (e: any) { return back('error', scrub(e?.message || e)) }
   })
 
   r.post('/mf/disconnect', async (req, res) => {
@@ -297,7 +330,7 @@ export function mfRouter(d: RouterDeps) {
       const items = await fetchBillings(from, to, d)
       await d.audit?.(me.email, 'mf-fetch', { from, to, count: items.length })
       res.json({ items, count: items.length })
-    } catch (e: any) { res.status(502).json({ error: 'mf-failed', message: String(e?.message || e) }) }
+    } catch (e: any) { res.status(502).json({ error: 'mf-failed', message: scrub(e?.message || e) }) }
   })
 
   /* --- 取り込み（計画を見る dryRun / 実行）。中身は index.ts の sync() --- */
@@ -308,7 +341,7 @@ export function mfRouter(d: RouterDeps) {
       const bad = check ? check(req.body || {}) : ''
       if (bad) return res.status(400).json({ error: 'bad-request', message: bad })
       try { res.json(await d.sync(kind, req.body || {}, me)) }
-      catch (e: any) { res.status(502).json({ error: 'sync-failed', message: String(e?.message || e) }) }
+      catch (e: any) { res.status(502).json({ error: 'sync-failed', message: scrub(e?.message || e) }) }
     })
   }
   syncRoute('/mf/sync/billings', 'billings', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? '' : '期間（from / to）か CSV が要ります。')
@@ -321,7 +354,7 @@ export function mfRouter(d: RouterDeps) {
   r.get('/mf/accounting/accounts', async (req, res) => {
     const me = await needMgr(req, res); if (!me) return
     try { res.json({ items: await fetchConnectedAccounts(d), selected: (await d.cfgGet('mf_bank_account')) || '' }) }
-    catch (e: any) { res.status(502).json({ error: 'mf-failed', message: String(e?.message || e) }) }
+    catch (e: any) { res.status(502).json({ error: 'mf-failed', message: scrub(e?.message || e) }) }
   })
   r.post('/mf/accounting/account', async (req, res) => {
     const me = await needMgr(req, res); if (!me) return

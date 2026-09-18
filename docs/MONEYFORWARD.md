@@ -34,40 +34,56 @@
 
 ---
 
-## 2. API を使う（任意）
+## 2. API を使う
 
-### 2.1 MF でアプリを作る
+### 2.1 使っているもの（2026-09-18 に公式ドキュメントで確認）
 
-1. MF の **アプリポータル**（developers.biz.moneyforward.com）でアプリを作成。
-2. **リダイレクト URI**：`https://finance.biglight.jp/api/mf/callback`
-3. **スコープ**：`mfc/invoice/data.read`（請求書・読み取りのみ）
-   会計（入出金明細・試算表）も API で取りたいときは、会計側の読み取りスコープも追加します。
-4. クライアント認証方式（`client_secret_basic` か `client_secret_post`）を控えます。
+| | 値 | 出典 |
+|---|---|---|
+| 認可 | `GET https://api.biz.moneyforward.com/authorize` | 開発者サイト「アクセストークンを取得する」 |
+| トークン | `POST https://api.biz.moneyforward.com/token`（更新も同じ） | 同上 |
+| クライアント認証 | **CLIENT_SECRET_BASIC**（`Authorization: Basic base64(ClientID:ClientSecret)`）。推奨方式 | 開発者サイト「アプリポータルの概要（OAuth）」 |
+| スコープ | **`mfc/invoice/data.read`**（読み取りのみ。書き込み `…data.write` は要求しません） | クラウド請求書サポート「請求書APIについて」 |
+| 請求書 API | `GET https://invoice.moneyforward.com/api/v3/billings`（`page` / `per_page`≤100 / `range_key` / `from` / `to` / `status`） | クラウド請求書 API v3 ドキュメント |
+| エラー | `{ "errors": [{ "code": …, "message": … }] }` ・ **429 = レート制限** | 開発者サイト「API共通仕様」 |
+| 有効期限 | トークンの `expires_in` をそのまま使い、**切れる1分前に `refresh_token` で自動更新** | 公開ドキュメントに固定値の記載なし → レスポンスに従う |
 
-### 2.2 サーバーの `.env`
+アプリ登録（MF アプリポータル）で必要なのは この2つだけです:
+リダイレクト URI `https://finance.biglight.jp/api/mf/callback` ／ スコープ `mfc/invoice/data.read`。
 
-```bash
-MF_CLIENT_ID=...
-MF_CLIENT_SECRET=...
-MF_TOKEN_AUTH=basic          # アプリ登録で post を選んだ場合は post
-# MF_REDIRECT_URI=https://finance.biglight.jp/api/mf/callback   # 既定のままで可
+### 2.2 サーバーに鍵を入れる（VPS で1回）
 
-# 会計（入出金明細・試算表）も API から取る場合だけ
-MF_ACCOUNTING_ENABLED=true
-# MF_ACCOUNTING_API_BASE=https://accounting.moneyforward.com/api/v3
-# MF_ACCOUNTING_SCOPE=mfc/accounting/data.read
-```
-
-入れたら api コンテナを作り直します（`env_file` は**作るとき**にしか読まれません）:
+ClientSecret を**どこにも貼らずに**入れるためのスクリプトを用意しています。VPS で:
 
 ```bash
-docker compose up -d --force-recreate api
+cd "$(docker inspect yojitsu-web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')" \
+  && bash vps/enable-mf.sh
 ```
 
-### 2.3 つなぐ
+ClientID は表示入力、**ClientSecret は伏字入力**。`.env` に書いて（600 権限・バックアップ付き）api コンテナを作り直し、
+最後に自己診断まで流します。やめるときは `bash vps/enable-mf.sh off`。
+
+> `env_file` はコンテナを**作るとき**にしか読まれません。`restart` では反映されないので、スクリプトは
+> `docker compose up -d --force-recreate api` を使います。
+
+会計（入出金明細・試算表）も API から取る場合だけ、`.env` に `MF_ACCOUNTING_ENABLED=true` を足します
+（未設定でも CSV で運用できます）。
+
+### 2.3 つなぐ（画面で1回）
 
 **設定 › API・AI連携** の「Money Forward 連携」で **接続する**（管理者のみ）→ MF の画面で許可 → 戻ってきたら「接続中」。
-トークンはサーバーの DB（`server_config`）に入ります。画面にも GitHub にも出しません。期限が切れる前に自動で更新します。
+トークンはサーバーの DB（`server_config`）に入ります。画面・API の返り・ログ・Git には出しません（`scrub()` で必ず消します）。
+
+### 2.4 本番で確かめる（読むだけ）
+
+```bash
+docker compose exec api node dist/mfcheck.js            # 設定・接続・請求書の取得・取り込み計画（書かない）
+docker compose exec api node dist/mfcheck.js --refresh  # リフレッシュトークンも試す
+docker compose exec api node dist/mfcheck.js --days 90  # 期間を変える（既定 60日）
+docker compose exec api node dist/mfcheck.js --apply    # 実際に取り込み、もう一度流して「重複0」を確かめる
+```
+
+トークンは**先頭4文字と長さ**だけ出ます。中身は出しません。
 
 ---
 

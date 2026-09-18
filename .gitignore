@@ -12,6 +12,7 @@ next-env.d.ts
 # 環境変数（鍵が入るので絶対にコミットしない）
 .env
 .env*.local
+.env.bak.*
 
 # ローカルDB・データ
 *.db

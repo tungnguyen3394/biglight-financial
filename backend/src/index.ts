@@ -549,7 +549,7 @@ const mfDeps = {
 }
 const loadState = async () => (await pool.query('SELECT data FROM app_state WHERE id=1')).rows[0]?.data || {}
 const mfRemember = (result: string, stats: any, error = '') =>
-  cfgSet('mf_last', JSON.stringify({ at: new Date().toISOString(), result, stats, error })).catch(() => {})
+  cfgSet('mf_last', JSON.stringify({ at: new Date().toISOString(), result, stats, error: MF.scrub(error) })).catch(() => {})
 
 /** state を安全に書き換える共通の道（CRM同期と同じ作り）。
     1行ロック → 変わった分だけ監査ログ → 履歴 → SSE。取り込みはすべてここを通る。 */
@@ -661,7 +661,7 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
     }
     throw new Error('unknown kind: ' + kind)
   } catch (e: any) {
-    await mfRemember('error', null, String(e?.message || e))
+    await mfRemember('error', null, MF.scrub(e?.message || e))
     throw e
   }
 }

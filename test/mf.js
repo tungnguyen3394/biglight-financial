@@ -104,6 +104,32 @@ function makeDeps(opts = {}) {
       [110000, 100000, 10000, '2026-08-31', '2026-09-30', '株式会社テスト']);
   }
 
+  console.log('\n― 公式仕様どおりの読み方（エラー・レート制限・ページ送り）―');
+  {
+    /* API共通仕様のエラー形 { errors:[{code,message}] } */
+    eq('公式のエラー形を読む', MF.mfErrorText({ errors: [{ code: 'INVALID_PARAMETER', message: 'from が不正です' }] }), 'INVALID_PARAMETER: from が不正です');
+    eq('古い形（message）も読む', MF.mfErrorText({ message: 'ng' }), 'ng');
+    eq('401 は 再接続を案内', MF.mfHttpMessage(401, {}, '請求書').includes('接続する'), true);
+    eq('403 はスコープを案内', MF.mfHttpMessage(403, {}, '請求書').includes('mfc/invoice/data.read'), true);
+    eq('429 はレート制限と言う', MF.mfHttpMessage(429, {}, '請求書').includes('レート制限'), true);
+    eq('それ以外は HTTP 番号を出す', MF.mfHttpMessage(500, {}, '請求書').includes('HTTP 500'), true);
+    /* ページ送りは total_pages / next_page / next_cursor のどれでも分かる */
+    eq('total_pages でページ送り', [MF.mfHasNextPage({ pagination: { current_page: 1, total_pages: 2 } }, 1), MF.mfHasNextPage({ pagination: { current_page: 2, total_pages: 2 } }, 2)], [true, false]);
+    eq('next_page でページ送り', [MF.mfHasNextPage({ pagination: { next_page: 2 } }, 1), MF.mfHasNextPage({ pagination: { next_page: null } }, 1)], [true, false]);
+    eq('next_cursor でページ送り', [MF.mfHasNextPage({ pagination: { next_cursor: 'abc' } }, 1), MF.mfHasNextPage({ pagination: { next_cursor: null } }, 1)], [true, false]);
+    eq('pagination が無ければ1ページで終わる', MF.mfHasNextPage({}, 1), false);
+  }
+
+  console.log('\n― 秘密は1バイトも外に出さない ―');
+  {
+    eq('Bearer を隠す', MF.scrub('failed with Authorization: Bearer abcdef1234567890'), 'failed with Authorization: Bearer ***');
+    eq('Basic を隠す', MF.scrub('Basic Y2lkOnNlY3JldA=='), 'Basic ***');
+    eq('access_token を隠す', MF.scrub('{"access_token":"AT-abcdefgh12345"}'), '{"access_token":"***"}');
+    eq('refresh_token を隠す', MF.scrub('refresh_token=RT-abcdefgh12345&x=1'), 'refresh_token=***&x=1');
+    eq('client_secret を隠す', MF.scrub('client_secret=supersecretvalue&grant_type=x'), 'client_secret=***&grant_type=x');
+    eq('普通の文は そのまま', MF.scrub('HTTP 429 レート制限'), 'HTTP 429 レート制限');
+  }
+
   console.log('\n― 下書きを取り込まない（status で絞る）―');
   { const t = makeDeps();
     await MF.exchangeCode('good', 'a', t.deps);
@@ -113,6 +139,15 @@ function makeDeps(opts = {}) {
     const items = await MF.fetchBillings('2026-08-01', '2026-09-14', t.deps, { statuses: [] });
     eq('status を使わない指定もできる', new URL(t.calls[t.calls.length - 1].url).searchParams.get('status'), null);
     eq('同じ請求書を2回数えない（id で重複除去）', items.length, 3);
+  }
+
+  { const t = makeDeps();
+    await MF.exchangeCode('good', 'a', t.deps);
+    t.deps.fetch = async (url) => String(url).includes('/billings')
+      ? { ok: false, status: 429, json: async () => ({ errors: [{ code: 'RATE_LIMIT_EXCEEDED', message: 'Rate limit exceeded' }] }) }
+      : { ok: true, status: 200, json: async () => ({ access_token: 'AT9', refresh_token: 'RT9', expires_in: 3600 }) };
+    let msg = ''; try { await MF.fetchBillings('2026-08-01', '2026-09-14', t.deps, { statuses: [] }) } catch (e) { msg = e.message }
+    eq('429 のときは レート制限と分かる言葉で止まる', [msg.includes('レート制限'), msg.includes('RATE_LIMIT_EXCEEDED')], [true, true]);
   }
 
   console.log('\n― 会計（入出金明細・試算表）―');
