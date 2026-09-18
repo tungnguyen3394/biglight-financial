@@ -67,14 +67,25 @@ console.log('\n― 請求書の取り込み ―');
   eq('下書きは取り込まない', [r.state.invoices.length, r.stats['下書き除外']], [1, 2]);
 }
 {
-  /* 確定済みの請求を MF が直した → こちらの数字は動かさず、差異として記録 */
+  /* ★ 2026-09-18: 新しいデータを優先。確定済みでも MF で直したら 上書きし、前後を mfChanges に残す */
   let st = baseState();
-  st = S.applyBillings(st, [bill({})]).state;
+  st = S.applyBillings(st, [bill({ updatedAt: '2026-09-01T10:00:00+09:00' })]).state;
   st.invoices[0].confirmStatus = '確定';
-  const r = S.applyBillings(st, [bill({ total: 132000, subtotal: 120000 })]);
-  eq('確定済みは上書きしない', r.state.invoices[0].total, 110000);
-  eq('差異を mfDiff に残す', r.state.invoices[0].mfDiff.fields.total, { finance: 110000, mf: 132000 });
-  eq('統計に MF差異 が出る', r.stats['MF差異'], 1);
+  const r = S.applyBillings(st, [bill({ total: 132000, subtotal: 120000, updatedAt: '2026-09-10T10:00:00+09:00' })]);
+  const iv = r.state.invoices[0];
+  eq('MF の方が新しければ 確定済みでも上書き', [iv.total, iv.confirmStatus, r.stats['更新']], [132000, '確定', 1]);
+  eq('変わった項目の前後を残し「MFで変更」にする', [iv.mfChanges[0].fields.total, iv.mfChangeSeen], [{ before: 110000, after: 132000 }, false]);
+  const again = S.applyBillings(r.state, [bill({ total: 132000, subtotal: 120000, updatedAt: '2026-09-10T10:00:00+09:00' })]);
+  eq('変わっていなければ触らない（何度押しても同じ）', [again.stats['更新'], again.stats['変更なし'], again.state.invoices[0].mfChanges.length], [0, 1, 1]);
+  const old = S.applyBillings(r.state, [bill({ total: 99000, subtotal: 90000, updatedAt: '2026-09-05T10:00:00+09:00' })]);
+  eq('MF の古いデータでは 新しいデータを上書きしない', [old.state.invoices[0].total, old.stats['古いデータで見送り']], [132000, 1]);
+  const csv = S.applyBillings(r.state, [bill({ total: 99000, subtotal: 90000, updatedAt: '' })]);
+  eq('時刻の無い CSV で API の分を上書きしない', csv.state.invoices[0].total, 132000);
+  /* 金額が下がって 充てた入金の方が多くなったら 知らせる */
+  const paidSt = JSON.parse(JSON.stringify(r.state));
+  paidSt.payments = [{ id: 'P1', date: '2026-09-30', amount: 132000, allocations: [{ invoiceId: iv.id, amount: 132000 }] }];
+  const down = S.applyBillings(paidSt, [bill({ total: 110000, subtotal: 100000, updatedAt: '2026-09-12T10:00:00+09:00' })]);
+  eq('下がって入金の方が多い → 警告', [down.state.invoices[0].mfChangeWarn !== '', down.stats['入金が請求額を超過']], [true, 1]);
   /* 未確認なら MF の新しい数字を採用 */
   let st2 = baseState();
   st2 = S.applyBillings(st2, [bill({})]).state;
@@ -175,6 +186,18 @@ console.log('\n― 取引先の自動作成・待ち行列・統合（2026-09-18
     [rep.state.invoices.find(i => i.id === 'I-man').status, rep.state.payments[0].allocations[0].invoiceId === mf.id, rep.state.invoices.find(i => i.id === mf.id).dupOf], ['取消', true, undefined]);
   const sep = S.resolveDuplicate(r.state, mf.id, 'separate', 'me');
   eq('別物 → 両方残る', [sep.state.invoices.filter(i => i.status !== '取消').length, sep.state.invoices.find(i => i.id === mf.id).dupChecked], [2, 'separate']);
+}
+
+console.log('\n― MF の取引先の行き先（なぜ 取引先 に無いか）―');
+{
+  const st = baseState();
+  const items = [bill({}), bill({ mfId: 'r2', partnerId: 'p50', partnerName: '株式会社奥田スチール' }),
+    bill({ mfId: 'r3', partnerId: 'p51', partnerName: '高山建設' }), bill({ mfId: 'r4', partnerId: 'p52', partnerName: '島田業務', mfStatus: '下書き' })];
+  const r = S.applyBillings(st, items);
+  const rep = S.partnerReport(r.state, items);
+  const by = n => rep.find(x => x.partnerName.includes(n)) || {};
+  eq('当たった／自動で作った／似ていて待ち／下書きだけ が分かる',
+    [by('高山').result, by('奥田').result, by('高山建設').result, by('島田').result], ['matched', 'created', 'queued', 'draft']);
 }
 
 console.log('\n― 入金の二重取り込み（指紋）―');

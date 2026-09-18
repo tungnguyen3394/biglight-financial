@@ -190,19 +190,26 @@ export function billingToRec(state: any, b: Billing, companyId: string) {
   return rec
 }
 
+/** 取り込もうとしている MF の請求が、すでに入っている分より古いか */
+export function isStale(b: Billing, ex: any) {
+  const eu = Date.parse(String(ex?.mfUpdatedAt || '')), bu = Date.parse(String(b?.updatedAt || ''))
+  if (!isFinite(eu)) return false                 // 今ある分に時刻が無い（CSV で入れた）→ 比べられないので 新しい方を採る
+  if (!isFinite(bu)) return true                  // 時刻の無い CSV で、API から入った分を上書きしない
+  return bu < eu
+}
 export type BillingPlan = {
   create: any[]; update: any[]; diff: any[]; same: any[]
   unmapped: { key: string; partnerId: string; partnerName: string; n: number; total: number; candidates: string[]; items: Billing[] }[]
   newPartners: { key: string; partnerId: string; partnerName: string; n: number; total: number }[]
   learn: { companyId: string; partnerId: string; partnerName: string }[]
-  drafts: number; closed: any[]; dupWarn: any[]
+  drafts: number; closed: any[]; dupWarn: any[]; stale: any[]
 }
 
 /** 取り込みの計画を立てる（画面の確認・cron・テストが同じものを見る）
     opts.autoCreate=false のときは、何も似ていない取引先も 待ち行列（unmapped）に回す。 */
 export function planBillings(state: any, items: Billing[], map?: Record<string, string>, opts: { autoCreate?: boolean } = {}): BillingPlan {
   const autoCreate = opts.autoCreate !== false
-  const out: BillingPlan = { create: [], update: [], diff: [], same: [], unmapped: [], newPartners: [], learn: [], drafts: 0, closed: [], dupWarn: [] }
+  const out: BillingPlan = { create: [], update: [], diff: [], same: [], unmapped: [], newPartners: [], learn: [], drafts: 0, closed: [], dupWarn: [], stale: [] }
   const invoices = arr(state, 'invoices')
   const byMf = new Map(invoices.filter((i: any) => i.mfId).map((i: any) => [String(i.mfId), i]))
   const unmapped = new Map<string, BillingPlan['unmapped'][number]>()
@@ -244,8 +251,14 @@ export function planBillings(state: any, items: Billing[], map?: Record<string, 
     if (isClosedYm(state, ex.bookMonth)) { out.closed.push({ b, rec, ex }); continue }
     const changed = INV_KEYS.filter(k => String(ex[k] ?? '') !== String((rec as any)[k] ?? ''))
     if (!changed.length) { out.same.push({ b, rec, ex }); continue }
-    if (ex.confirmStatus === '確定') out.diff.push({ b, rec, ex, changed })
-    else out.update.push({ b, rec, ex, changed })
+    /* ★ 2026-09-18 利用者の指示: 「新しいデータを優先。MF で変わったものは変わったと見せる。変わらないものは触らない」
+       以前は 確定済み を上書きせず mfDiff に差を残すだけだった。MF の請求はほぼ自動で確定になるため、
+       MF で直しても こちらの数字がずっと古いままになっていた。いまは:
+         ・MF の更新時刻が 今ある分より新しい → 上書きし、前後の値を mfChanges に残す（画面に「MFで変更」）
+         ・MF の更新時刻が 古い／時刻の無い CSV で API の分を上書きしようとした → 見送り（古いデータで新しいデータを消さない）
+         ・締めた期 → 上の closed（動かさない） */
+    if (isStale(b, ex)) { out.stale.push({ b, rec, ex, changed }); continue }
+    out.update.push({ b, rec, ex, changed })
   }
   out.unmapped = [...unmapped.values()].sort((a, b) => b.total - a.total)
   out.newPartners = [...fresh.values()].sort((a, b) => b.total - a.total)
@@ -277,9 +290,18 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
       createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor,
     })
   }
+  let overPaid = 0
   for (const u of plan.update) {
     const i = byId.get(String(u.ex.id)); if (i == null) continue
-    out.invoices[i] = { ...out.invoices[i], ...u.rec, mfUpdatedAt: u.b.updatedAt || '', mfStatus: u.b.mfStatus || '', mfPdfUrl: u.b.pdfUrl || out.invoices[i].mfPdfUrl || '', mfDiff: null, updatedAt: now, updatedBy: actor }
+    const cur = out.invoices[i]
+    const fields: any = {}
+    for (const k of u.changed) fields[k] = { before: cur[k] ?? null, after: (u.rec as any)[k] ?? null }
+    const next: any = { ...cur, ...u.rec, mfUpdatedAt: u.b.updatedAt || '', mfStatus: u.b.mfStatus || '', mfPdfUrl: u.b.pdfUrl || cur.mfPdfUrl || '', mfDiff: null,
+      mfChanges: [...(Array.isArray(cur.mfChanges) ? cur.mfChanges : []), { at: now, by: actor, fields }].slice(-10),
+      mfChangedAt: now, mfChangeSeen: false, mfChangeWarn: '', updatedAt: now, updatedBy: actor }
+    /* 金額が下がって、もう充てた入金の方が多くなった → 知らせる（入金の充当は人が直す） */
+    if (u.changed.includes('total') && invoiceBalance(base, next) < 0) { next.mfChangeWarn = '充てた入金が 新しい請求額を超えています'; overPaid++ }
+    out.invoices[i] = next
   }
   /* 変更なしでも PDF の場所が無い古い取り込み分には補う（金額には触らない） */
   for (const x of plan.same) {
@@ -335,6 +357,7 @@ export function applyBillings(state: any, items: Billing[], opts: { map?: Record
     if (touched) out.mfPartnerQueue = kept
   }
   const stats = { 新規: plan.create.length, 更新: plan.update.length, 変更なし: plan.same.length, MF差異: plan.diff.length,
+    古いデータで見送り: plan.stale.length, 入金が請求額を超過: overPaid,
     取引先を自動作成: made.length, 取引先未対応: plan.unmapped.reduce((s, g) => s + g.n, 0), 二重の疑い: plan.dupWarn.length,
     下書き除外: plan.drafts, 締め済みで見送り: plan.closed.length }
   return { state: out, plan, made, stats }
@@ -753,4 +776,35 @@ export function resolveDuplicate(state: any, invoiceId: string, action: string, 
     return { ...p, allocations: p.allocations.map((a: any) => olds.has(String(a.invoiceId)) ? { ...a, invoiceId: String(inv.id) } : a), ...stamp }
   })
   return { state: { ...state, invoices: outInv, payments: pays }, stats: { 取消: olds.size, 入金を付け替え: movedPays } }
+}
+
+/* ---------- MF の取引先の「行き先」（2026-09-18 利用者の指示: 「奥田スチール が 取引先 に無いのはなぜ?」に画面で答える）----------
+   取り込みのたびに、MF の取引先ごとに 何件来て どこへ行ったかを残す。
+   result: 'matched'（既存の会社に当たった）/ 'created'（自動で作った）/ 'queued'（似た会社があり 取引先の確認 で待ち）
+           / 'skipped'（取り込まない にした）/ 'draft'（下書きしか無い＝取り込まない） */
+export function partnerReport(state: any, items: Billing[], map?: Record<string, string>) {
+  const g = new Map<string, any>()
+  const cos = new Map(arr(state, 'companies').map((c: any) => [String(c.id), c]))
+  for (const b of items) {
+    if (!b || !b.mfId) continue
+    const key = partnerKey(b)
+    const r = g.get(key) || { key, partnerId: String(b.partnerId || ''), partnerName: String(b.partnerName || ''), n: 0, drafts: 0, total: 0, first: '', last: '', result: '', companyId: '', companyName: '' }
+    const d = dateOnly(b.billingDate || b.salesDate)
+    if (d && (!r.first || d < r.first)) r.first = d
+    if (d && d > r.last) r.last = d
+    if (isDraft(b)) { r.drafts++; g.set(key, r); continue }
+    r.n++; r.total += num(b.total)
+    if (!r.result) {
+      const m = matchCompany(state, b, map)
+      if (m.companyId === '__skip') r.result = 'skipped'
+      else if (m.companyId) {
+        const c: any = cos.get(String(m.companyId))
+        r.companyId = String(m.companyId); r.companyName = String(c?.name || '')
+        r.result = c && c.source === 'mf' && c.needsReview ? 'created' : 'matched'
+      } else r.result = 'queued'
+    }
+    g.set(key, r)
+  }
+  for (const r of g.values()) if (!r.result) r.result = 'draft'
+  return [...g.values()].sort((a, b) => String(a.partnerName).localeCompare(String(b.partnerName), 'ja'))
 }

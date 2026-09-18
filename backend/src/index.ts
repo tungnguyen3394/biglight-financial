@@ -589,7 +589,9 @@ async function mutateState(actor: string, reason: string, fn: (state: any) => { 
 const slimPlan = (p: any) => ({
   新規: p.create.length, 更新: p.update.length, 変更なし: p.same.length, MF差異: p.diff.length,
   下書き除外: p.drafts, 締め済みで見送り: p.closed.length, 二重の疑い: p.dupWarn.length,
-  取引先を自動作成: (p.newPartners || []).length,
+  取引先を自動作成: (p.newPartners || []).length, 古いデータで見送り: (p.stale || []).length,
+  updateSample: p.update.slice(0, 80).map((x: any) => ({ id: x.ex.id, no: x.ex.no, companyId: x.ex.companyId, changed: x.changed,
+    before: Object.fromEntries(x.changed.map((k: string) => [k, x.ex[k] ?? null])), after: Object.fromEntries(x.changed.map((k: string) => [k, x.rec[k] ?? null])) })),
   unmapped: p.unmapped.map((g: any) => ({ key: g.key, partnerId: g.partnerId, partnerName: g.partnerName, n: g.n, total: g.total, candidates: g.candidates })),
   newPartners: p.newPartners || [],
   createSample: p.create.slice(0, 80).map((x: any) => ({ ...x.rec, mfId: x.b.mfId, partnerName: x.b.partnerName, auto: x.auto })),
@@ -617,10 +619,15 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       else items = await MF.fetchBillings(String(args.from), String(args.to), mfDeps)
       const plan = MFS.planBillings(await loadState(), items, args?.map)
       if (dry) return { ok: true, dryRun: true, plan: slimPlan(plan), count: items.length }
+      let report: any[] = []
       const out = await mutateState(me.email, 'mf-billings', (st) => {
         const r = MFS.applyBillings(st, items, { map: args?.map, actor: me.email, source: csvText ? 'csv' : 'api' })
+        report = MFS.partnerReport(r.state, items, args?.map)
         return { state: r.state, stats: r.stats }
       })
+      /* MF の取引先ごとの行き先（取引先の確認 の「MF の取引先の行き先」に出す） */
+      await cfgSet('mf_partners', JSON.stringify({ at: new Date().toISOString(), by: me.email, source: csvText ? 'csv' : 'api',
+        from: csvText ? '' : String(args.from || ''), to: csvText ? '' : String(args.to || ''), count: items.length, partners: report })).catch(() => {})
       await mfRemember('ok', out.stats)
       return { ok: true, plan: slimPlan(plan), stats: out.stats, count: items.length }
     }
@@ -666,7 +673,12 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       if (busy) throw Object.assign(new Error(`いま同期中です（${busy.by.split('@')[0]} が ${busy.since.slice(11, 16)} に開始）。終わってからもう一度押してください。`), { busy: true })
       MF_RUN = { since: new Date().toISOString(), by: me.email, at: Date.now() }
       try {
-      const from = args?.from || new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10)
+      /* ★ 2026-09-18: 以前は「60日前から」だけ見ていたため、それより前の請求しか無い取引先（例: 奥田スチール）は
+         自動同期では永久に入らず、古い請求を MF で直しても こちらに届かなかった。
+         いまは「前の期の初め（8月1日）から」見る。締めた期は mfsync 側で動かさない。 */
+      const jst = new Date(Date.now() + 9 * 3600_000)
+      const fy = jst.getUTCMonth() + 1 >= MFS.FY_START_MONTH ? jst.getUTCFullYear() : jst.getUTCFullYear() - 1
+      const from = args?.from || `${fy - 1}-${String(MFS.FY_START_MONTH).padStart(2, '0')}-01`
       const to = args?.to || new Date().toISOString().slice(0, 10)
       const stats: any = {}
       stats.billings = (await mfSync('billings', { from, to }, me)).stats
@@ -699,6 +711,24 @@ const mfReview = (path: string, reason: string, fn: (st: any, body: any, me: any
       res.json(out)
     } catch (e: any) { res.status(400).json({ error: 'bad-request', message: String(e?.message || e) }) }
   })
+app.get('/mf/partners', async (req, res) => {
+  const me = await requireActive(req, res); if (!me) return
+  const raw = await cfgGet('mf_partners').catch(() => null)
+  const d = raw ? JSON.parse(raw) : null
+  if (!d) return res.json({ at: '', partners: [] })
+  /* いまの state で もう一度 当て直す（取り込みのあとで 統合・対応づけ をしていれば、その結果を見せる） */
+  const st = await loadState()
+  const cos = new Map((st.companies || []).map((c: any) => [String(c.id), c]))
+  d.partners = (d.partners || []).map((p: any) => {
+    if (p.result === 'draft') return p
+    const m = MFS.matchCompany(st, { partnerId: p.partnerId, partnerName: p.partnerName })
+    if (m.companyId === '__skip') return { ...p, result: 'skipped', companyId: '', companyName: '' }
+    if (!m.companyId) return { ...p, result: 'queued', companyId: '', companyName: '' }
+    const c: any = cos.get(String(m.companyId))
+    return { ...p, companyId: String(m.companyId), companyName: String(c?.name || ''), result: c && c.source === 'mf' && c.needsReview ? 'created' : 'matched' }
+  })
+  res.json(d)
+})
 mfReview('/mf/partners/resolve', 'mf-partner-resolve', (st, b, me) => MFS.resolvePartnerQueue(st, String(b.id || ''), String(b.action || ''), String(b.companyId || ''), me.email))
 mfReview('/mf/partners/merge', 'mf-partner-merge', (st, b, me) => MFS.mergeCompanies(st, String(b.fromId || ''), String(b.toId || ''), me.email))
 mfReview('/mf/partners/ok', 'mf-partner-ok', (st, b, me) => MFS.markCompanyReviewed(st, String(b.id || ''), me.email))

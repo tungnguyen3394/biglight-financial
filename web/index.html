@@ -4230,7 +4230,7 @@ function mfDraw(){
     <div id="mfPrev" style="margin-top:12px;">${MFI.plan? mfPlanHtml() : (MFI.busy?'<div class="empty">取得しています…</div>':'')}</div>
     <div class="modal-actions">
       <button class="btn secondary" onclick="MFI=null;closeModal()">閉じる</button>
-      ${MFI.plan? `<button class="btn" onclick="mfApply()">この内容で取り込む</button>`:''}
+      ${MFI.plan? `<button class="btn" onclick="mfApply(this)">この内容で取り込む</button>`:''}
     </div>`,'xl');
 }
 async function mfConnect(){
@@ -4292,6 +4292,7 @@ function mfBillingPlanHtml(p){
       ${p['MF差異']?`<span class="minus">確定済みとの差異 ${p['MF差異']}</span>`:''}
       ${p['締め済みで見送り']?`<span class="minus">締め済みで見送り ${p['締め済みで見送り']}</span>`:''}
       ${(p.newPartners||[]).length?`<span>取引先を自動作成 <b>${p.newPartners.length}</b>社</span>`:''}
+      ${p['古いデータで見送り']?`<span class="muted">古いデータで見送り ${p['古いデータで見送り']}</span>`:''}
       ${unmapped.length?`<span class="minus">似た会社があり止める ${unmapped.reduce((s,g)=>s+g.n,0)}件</span>`:''}</div>
     ${p['二重の疑い']?`<div class="warnbar">${IC.warn} 同じ取引先・同じ計上月に この システムで作った請求がすでにある分が ${p['二重の疑い']}件あります。二重計上にならないか確認してください。</div>`:''}
     ${(p.newPartners||[]).length?`<div class="form-section" style="margin-top:10px;">新しく作る得意先（この システムに似た会社がないため）</div>
@@ -4315,6 +4316,10 @@ function mfBillingPlanHtml(p){
         <tbody>${p.createSample.map(x=>`<tr><td>${esc(x.partnerName||arCoName(x.companyId))}</td><td>${esc(x.bookMonth||'')}</td><td>${esc(x.issueDate||'')}</td>
           <td>${esc(x.dueDate||'')}</td><td class="r num">${moneyPlain(x.total)}</td>
           <td>${x.auto?'<span class="mf-st s-ok">自動で確定</span>':'<span class="mf-st s-open">要確認</span>'}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${(p.updateSample||[]).length?`<div class="form-section" style="margin-top:10px;">MF で変わった請求（新しい数字で上書きします。変わっていない請求には触りません）</div>
+      <div class="table-wrap" style="max-height:26vh;"><table><thead><tr><th>請求番号</th><th>取引先</th><th>項目</th><th class="r">いま</th><th class="r">MF（新）</th></tr></thead>
+        <tbody>${p.updateSample.map(x=>(x.changed||[]).map((k,n)=>`<tr><td>${n?'':esc(x.no||'')}</td><td>${n?'':esc(arCoName(x.companyId))}</td><td>${esc(MF_FIELD_LABEL[k]||k)}</td>
+          <td class="r num muted">${esc(mfFieldVal(k,x.before[k]))}</td><td class="r num"><b>${esc(mfFieldVal(k,x.after[k]))}</b></td></tr>`).join('')).join('')}</tbody></table></div>`:''}
     ${(p.diffSample||[]).length?`<div class="form-section" style="margin-top:10px;">確定済みなのに MF 側が変わったもの（この システムの数字は変えません）</div>
       <div class="table-wrap" style="max-height:24vh;"><table><thead><tr><th>請求番号</th><th>取引先</th><th>違う項目</th><th class="r">この システム</th><th class="r">MF</th></tr></thead>
         <tbody>${p.diffSample.map(x=>`<tr><td>${esc(x.no||'')}</td><td>${esc(arCoName(x.companyId))}</td><td>${esc((x.changed||[]).join('・'))}</td>
@@ -4332,8 +4337,10 @@ function mfCreateCompanies(){
   });
   return n;
 }
-async function mfApply(){
-  if(!MFI) return;
+async function mfApply(btn){
+  if(!MFI || MFI.applying) return;
+  /* 二度押しで2回送らない（送ってもサーバーは同じ結果になりますが、待ち時間が倍になるため） */
+  MFI.applying=true; if(btn){ btn.disabled=true; btn.textContent='取り込んでいます…'; }
   if(MFI.kind==='billings' && mfCreateCompanies()) await pushDelta();
   try{
     const d=await mfCall(MF_KINDS[MFI.kind].path, mfArgs(false));
@@ -4341,7 +4348,7 @@ async function mfApply(){
     MFI=null; closeModal(); renderPage(CURRENT_PAGE);
     const done=Object.entries(d.stats||{}).filter(([,v])=>typeof v==='number'&&v).map(([k,v])=>`${k} ${v}`).join(' ／ ');
     toast(done? '取り込みました：'+done : '取り込む変更はありませんでした。','ok');
-  }catch(e){ toast(String(e.message||e),'err'); }
+  }catch(e){ toast(String(e.message||e),'err'); if(MFI){ MFI.applying=false; mfDraw(); } }
 }
 
 /* ---------- 設定 › API・AI連携 に出す Money Forward の箱 ---------- */
@@ -4590,11 +4597,13 @@ async function mfSyncNow(btn){
 
 /* ---------- 請求の確認（未確認・MF差異・取引先未対応）---------- */
 const mfIsDup = i => (i.dupOf||[]).length>0;
-const mfNeedsCheck = i => AR_LIVE(i) && (i.confirmStatus==='未確認' || i.mfDiff || !i.companyId || mfIsDup(i));
+/* ★ 2026-09-18: MF で直された請求は 新しい数字で上書きし（mfsync.ts）、ここで「MFで変更」として見せる。見たら「確認した」 */
+const mfIsChanged = i => i.mfChangeSeen===false;
+const mfNeedsCheck = i => AR_LIVE(i) && (i.confirmStatus==='未確認' || i.mfDiff || !i.companyId || mfIsDup(i) || mfIsChanged(i));
 function mfCheckCounts(){
   const list=(DB.invoices||[]).filter(AR_LIVE);
   return { 未確認:list.filter(i=>i.confirmStatus==='未確認').length, MF差異:list.filter(i=>i.mfDiff).length,
-    取引先未対応:list.filter(i=>!i.companyId).length, 二重の疑い:list.filter(mfIsDup).length, 確定:list.filter(i=>i.confirmStatus==='確定').length, all:list.length };
+    取引先未対応:list.filter(i=>!i.companyId).length, 二重の疑い:list.filter(mfIsDup).length, MFで変更:list.filter(mfIsChanged).length, 確定:list.filter(i=>i.confirmStatus==='確定').length, all:list.length };
 }
 let ARCF_FILT='要対応';
 function arcfFilt(v){ ARCF_FILT=v; renderPage('arconfirm'); }
@@ -4610,13 +4619,14 @@ function viewArConfirm(){
     if(ARCF_FILT==='MF差異' && !i.mfDiff) return false;
     if(ARCF_FILT==='取引先未対応' && i.companyId) return false;
     if(ARCF_FILT==='二重の疑い' && !mfIsDup(i)) return false;
+    if(ARCF_FILT==='MFで変更' && !mfIsChanged(i)) return false;
     if(q && !((arCoName(i.companyId)+(i.no||'')+(i.note||'')).toLowerCase().includes(q))) return false;
     return true;
   });
   const chip=(k,n)=>`<button type="button" class="btn ${ARCF_FILT===k?'':'secondary'} sm" onclick="arcfFilt('${k}')">${k}${n!=null?` (${n})`:''}</button>`;
   const kpis=`<div class="kpi-grid">
     <div class="kpi"><div class="lbl">確認待ち</div><div class="num ${C['未確認']?'minus':''}">${C['未確認']}</div><div class="sub">MF から入った請求のうち、まだ見ていないもの</div></div>
-    <div class="kpi"><div class="lbl">MF と差異</div><div class="num ${C['MF差異']?'minus':''}">${C['MF差異']}</div><div class="sub">確定後に MF 側が変わった</div></div>
+    <div class="kpi"><div class="lbl">MFで変更</div><div class="num ${C['MFで変更']?'minus':''}">${C['MFで変更']}</div><div class="sub">MF で直された請求（新しい数字に更新済み）</div></div>
     <div class="kpi"><div class="lbl">二重の疑い</div><div class="num ${C['二重の疑い']?'minus':''}">${C['二重の疑い']}</div><div class="sub">同じ取引先・同じ月に 手で作った請求もある</div></div>
     <div class="kpi"><div class="lbl">確定済み</div><div class="num">${C['確定']}</div><div class="sub">売掛金・予実に入っています</div></div>
   </div>`;
@@ -4633,7 +4643,8 @@ function viewArConfirm(){
       ? `<span class="mf-st s-ok">確定</span>${r.confirmedBy?`<div class="muted" style="font-size:10.5px;">${esc(String(r.confirmedBy).split('@')[0])}</div>`:''}`
       : '<span class="mf-st s-open">未確認</span>'},
     {key:'mfDiff', label:'MF差異', noFilter:true, val:r=>(r.mfDiff? `<a class="pillbtn pill-del" onclick="event.stopPropagation();mfDiffOpen('${attr(r.id)}')">差異を見る</a>`:'')
-      + (mfIsDup(r)? ` <a class="pillbtn pill-del" onclick="event.stopPropagation();mfDupOpen('${attr(r.id)}')">二重の疑い</a>`:'')},
+      + (mfIsDup(r)? ` <a class="pillbtn pill-del" onclick="event.stopPropagation();mfDupOpen('${attr(r.id)}')">二重の疑い</a>`:'')
+      + ((r.mfChanges||[]).length? ` <a class="pillbtn ${mfIsChanged(r)?'pill-del':''}" onclick="event.stopPropagation();mfChangeOpen('${attr(r.id)}')">${mfIsChanged(r)?'MFで変更':'変更履歴'}</a>`:'')},
     {key:'act', label:'', noFilter:true, val:r=>r.confirmStatus==='確定'||!canEdit('invoices')? '' :
       `<a class="pillbtn pill-save" onclick="event.stopPropagation();mfConfirm(['${attr(r.id)}'])">確定</a>`},
   ];
@@ -4645,7 +4656,7 @@ function viewArConfirm(){
   return pageShell({ title:'請求の確認', count:all.length, shown:rows.length,
     sub:'Money Forward から入った請求を確認して確定します。確定した請求だけが 自動消込 の相手になります。',
     tools, body: kpis
-      + `<div class="mf-chips">${['要対応','未確認','確定','MF差異','二重の疑い','取引先未対応','すべて'].map(k=>chip(k, k==='すべて'?all.length:(k==='要対応'?all.filter(mfNeedsCheck).length:C[k]))).join(' ')}</div>`
+      + `<div class="mf-chips">${['要対応','未確認','確定','MFで変更','MF差異','二重の疑い','取引先未対応','すべて'].map(k=>chip(k, k==='すべて'?all.length:(k==='要対応'?all.filter(mfNeedsCheck).length:C[k]))).join(' ')}</div>`
       + dataTable(p, rows, cols, { allRows:all, onRow:r=>`openDetail('invoices','${r.id}')` }) });
 }
 function mfConfirmChecked(){
@@ -4689,6 +4700,27 @@ function mfSetCompanyGo(id){
     if(c && !has.includes(pid)) commitRecord('companies', c.mfPartnerId? { mfPartnerIds:[...(c.mfPartnerIds||[]), pid] } : { mfPartnerId:pid, mfPartnerName:inv.mfPartnerName||'' },{ existingId:cid });
   }
   closeModal(); renderPage(CURRENT_PAGE); toast('取引先を設定しました。','ok');
+}
+/** MF で直された請求の 前後（新しい数字はもう入っています）。見たら「確認した」 */
+const MF_FIELD_LABEL={ total:'請求額', subtotal:'税抜', dueDate:'入金期日', bookMonth:'計上月', issueDate:'請求日', companyId:'取引先', no:'請求番号', taxCat:'税区分' };
+function mfFieldVal(k,v){ if(v==null||v==='') return '-'; if(k==='companyId') return arCoName(v); if(k==='total'||k==='subtotal') return moneyPlain(v); return String(v); }
+function mfChangeOpen(id){
+  const inv=findById('invoices',id); if(!inv) return;
+  const hist=(inv.mfChanges||[]).slice().reverse();
+  openModal(`<h3>Money Forward で変更 — ${esc(inv.no||'')} ${esc(arCoName(inv.companyId))}</h3>
+    <div class="mdsub">MF で直された内容です。<b>新しい数字はもう入っています</b>（新しいデータを優先）。変わっていない項目には触っていません。</div>
+    ${inv.mfChangeWarn?`<div class="alertbar">${IC.warn} ${esc(inv.mfChangeWarn)}。入金の充当を直してください。</div>`:''}
+    <div class="table-wrap"><table><thead><tr><th>日時</th><th>項目</th><th class="r">前</th><th class="r">後（いま）</th></tr></thead><tbody>
+      ${hist.map(h=>Object.entries(h.fields||{}).map(([k,v],n)=>`<tr><td>${n?'':esc(String(h.at||'').slice(0,16).replace('T',' '))}</td><td>${esc(MF_FIELD_LABEL[k]||k)}</td>
+        <td class="r num muted">${esc(mfFieldVal(k,v.before))}</td><td class="r num"><b>${esc(mfFieldVal(k,v.after))}</b></td></tr>`).join('')).join('')}
+    </tbody></table></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">閉じる</button>
+      ${mfIsChanged(inv)&&canEdit('invoices')?`<button class="btn" onclick="mfChangeSeen('${attr(id)}')">確認した</button>`:''}</div>`,'lg');
+}
+function mfChangeSeen(id){
+  const inv=findById('invoices',id); if(!inv) return;
+  inv.mfChangeSeen=true; inv.updatedAt=new Date().toISOString(); markDirty('invoices', inv);
+  closeModal(); renderPage(CURRENT_PAGE); toast('確認済みにしました。','ok');
 }
 /** 二重の疑い: MF の請求 と この システムで作った請求（同じ取引先・同じ計上月）を並べて、どちらを残すか決める */
 function mfDupOpen(id){
@@ -8999,9 +9031,45 @@ function viewCoReview(){
   const s4 = dup? `<div class="warnbar" style="display:flex;align-items:center;gap:8px;">${IC.warn} <span>請求の <b>二重の疑い</b> が ${dup}件あります（同じ取引先・同じ月に 手入力の請求もある）。</span>
       <button class="btn sm" style="margin-left:auto;" onclick="ARCF_FILT='二重の疑い';goto('arconfirm')">請求の確認で見る</button></div>` : '';
 
+  setTimeout(crPartnersLoad, 0);
   return pageShell({ title:'取引先の確認', count:queue.length+auto.length,
     tools: mgr? `<button class="btn secondary" onclick="openMfImport('billings')">請求を取り込む</button>` : '',
-    body: s4 + s1 + s2 + s3 });
+    body: s4 + s1 + s2 + s3 + `<section class="cr-sec" id="crPartners">${crPartnersHtml()}</section>` });
+}
+/* ── MF の取引先の行き先（2026-09-18 利用者の指示:「奥田スチール が 取引先 に無いのはなぜ?」に画面で答える）──
+   最後に 請求を取り込んだとき、MF の取引先ごとに 何件来て どこへ行ったか。サーバーが いまの取引先で当て直して返します。 */
+let CR_PARTNERS=null, CR_Q='';
+const CR_RESULT={ matched:['b-green','既存の取引先に入った'], created:['b-amber','自動で作った（②）'], queued:['b-amber','似た会社があり待ち（①）'],
+  skipped:['b-gray','取り込まない にした'], draft:['b-gray','下書きしか無い（取り込まない）'] };
+async function crPartnersLoad(){
+  try{ CR_PARTNERS=await mfGet('/mf/partners'); }catch(e){ CR_PARTNERS={ error:String(e.message||e), partners:[] }; }
+  const el=document.getElementById('crPartners'); if(el) el.innerHTML=crPartnersHtml();
+}
+function crPartnersQ(v){
+  CR_Q=v; const el=document.getElementById('crPartners'); if(!el) return;
+  el.innerHTML=crPartnersHtml();
+  const i=document.getElementById('crPq'); if(i){ i.focus(); i.setSelectionRange(v.length,v.length); }
+}
+function crPartnersHtml(){
+  const d=CR_PARTNERS;
+  const head=`<h4>③ Money Forward の取引先の行き先 ${d&&d.partners?`<span class="badge b-gray">${d.partners.length}</span>`:''}</h4>`;
+  if(!d) return head+'<div class="empty" style="padding:14px;">読み込んでいます…</div>';
+  if(d.error) return head+`<div class="alertbar">${esc(d.error)}</div>`;
+  if(!d.at) return head+'<div class="empty" style="padding:14px;">まだ 請求を取り込んでいません。「請求を取り込む」か「今すぐ同期」のあとに、ここに MF の取引先ごとの行き先が出ます。</div>';
+  const q=arNormName(CR_Q);
+  const list=(d.partners||[]).filter(p=>!q || arNormName(p.partnerName).includes(q) || arNormName(p.companyName).includes(q));
+  const cnt=k=>(d.partners||[]).filter(p=>p.result===k).length;
+  return head+`<div class="fhelp" style="margin:-2px 0 6px;">最後の取り込み：${esc(String(d.at).slice(0,16).replace('T',' '))}（${esc(String(d.by||'').split('@')[0])}・${d.source==='csv'?'CSV':'API'}${d.from?` ・ 請求日 ${esc(d.from)}〜${esc(d.to)}`:''}・請求 ${num(d.count)}件）。
+      <b>この期間に請求が無い会社は ここに出ません</b>（期間を広げて「請求を取り込む」を押してください）。</div>
+    <div class="cr-act" style="margin-bottom:6px;"><input id="crPq" value="${attr(CR_Q)}" oninput="crPartnersQ(this.value)" placeholder="MF の取引先名で探す（例: 奥田）" style="padding:6px 10px;border:1px solid var(--border-strong);border-radius:8px;min-width:240px;">
+      ${Object.entries(CR_RESULT).map(([k,[c,l]])=>cnt(k)?`<span class="badge ${c}">${esc(l)} ${cnt(k)}</span>`:'').join(' ')}</div>
+    <div class="table-wrap" style="max-height:50vh;"><table><thead><tr><th>MF の取引先</th><th class="r">請求</th><th class="r">合計</th><th>請求日</th><th>行き先</th><th>この システムの取引先</th></tr></thead><tbody>
+      ${list.map(p=>{ const [c,l]=CR_RESULT[p.result]||['b-gray',p.result];
+        return `<tr><td>${esc(p.partnerName||'（名前なし）')}</td><td class="r num">${num(p.n)}件${p.drafts?`<div class="muted" style="font-size:10.5px;">下書き ${p.drafts}</div>`:''}</td>
+          <td class="r num">${moneyPlain(p.total)}</td><td style="font-size:11.5px;">${esc(p.first||'')}${p.last&&p.last!==p.first?' 〜 '+esc(p.last):''}</td>
+          <td><span class="badge ${c}">${esc(l)}</span></td>
+          <td>${p.companyId? coLink(p.companyId,'ar') : '<span class="zero">—</span>'}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">見つかりません。この期間の MF の請求に その会社はありません。</td></tr>'}
+    </tbody></table></div>`;
 }
 async function crResolve(id, action){
   const q=(DB.mfPartnerQueue||[]).find(x=>x.id===id); if(!q) return;
