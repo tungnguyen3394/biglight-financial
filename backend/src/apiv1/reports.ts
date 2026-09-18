@@ -75,9 +75,15 @@ export function receivablesReport(st: any, o: ArOpts = {}) {
   const totalsByBucket = Object.fromEntries(F.AGING_BUCKETS.map(b =>
     [b, open.filter((i: any) => F.agingBucket(i, st) === b).reduce((s: number, i: any) => s + F.balanceOfInvoice(st, i), 0)]))
 
+  /* ★ 2026-09-18: 未回収の合計は 画面（回収・取引先・督促）と同じ「前月残高＋請求−入金」（会社ごと・消込に頼らない）。
+     年齢表は 請求ごと（消込頼み）なので、その合計は aging_total として別に返す。消込が済んでいれば両者は一致する。 */
+  const openTotal = o.companyId ? F.arBalanceOf(st, o.companyId) : F.arTotal(st)
+  const agingTotal = open.reduce((s: number, i: any) => s + F.balanceOfInvoice(st, i), 0)
   return {
     as_of: t,
-    open_total: open.reduce((s: number, i: any) => s + F.balanceOfInvoice(st, i), 0), open_count: open.length,
+    open_total: openTotal, open_count: open.length,
+    aging_total: agingTotal,
+    balance_note: openTotal !== agingTotal ? '未回収の合計（open_total）と年齢表の合計（aging_total）が違います。消込（入金と請求の対応づけ）が済んでいない入金がある印です。' : '',
     overdue_total: overdue.reduce((s: number, i: any) => s + F.balanceOfInvoice(st, i), 0), overdue_count: overdue.length,
     unapplied_payments: (Array.isArray(st.payments) ? st.payments : []).filter((p: any) => p.status !== '取消')
       .reduce((s: number, p: any) => s + Math.max(0, F.num(p.amount) - (p.allocations || []).reduce((t2: number, a: any) => t2 + F.num(a.amount), 0)), 0),

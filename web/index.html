@@ -1903,10 +1903,10 @@ function invoiceStatus(inv){
   return '確定';
 }
 function openInvoices(){ return (DB.invoices||[]).filter(i=>i.status!=='取消'&&i.status!=='作成中'&&balanceOfInvoice(i)>0); }
-function arBalanceOf(companyId){
-  return openInvoices().filter(i=>String(i.companyId)===String(companyId)).reduce((s,i)=>s+balanceOfInvoice(i),0);
-}
-function arTotal(){ return openInvoices().reduce((s,i)=>s+balanceOfInvoice(i),0); }
+/** 会社の売掛残高（今月末時点）＝ 前月残高 ＋ 請求 − 入金。回収（売掛金）の表と同じ式（arMonthly）。
+    ★ 2026-09-18: 以前は「未回収の請求の合計（消込頼み）」で、回収の表と数字が食い違っていた。 */
+function arBalanceOf(companyId){ return arMonthly(companyId,[thisMonth()])[0].closing; }
+function arTotal(){ return arCompanyIds().reduce((s,id)=>s+arBalanceOf(id),0); }
 /** 年齢区分: 期日からの経過日数 */
 function agingBucket(inv){
   const d = effDue(inv) ? daysBetween(effDue(inv), today()) : 0;
@@ -3188,13 +3188,73 @@ function viewMikomi(){
      請求は invoices（MF から取り込んだものは source:'mf'）、入金は payments（source で出どころを持つ）。
    ========================================================================== */
 const AR_LIVE = inv => !!inv && inv.status!=='取消' && inv.status!=='作成中';
-const arYmOfInv = inv => ymOfDoc(inv) || String(inv.issueDate||'').slice(0,7);
+/** 請求の「月」: 計上月 → 請求日 → 期日 → 作った日。★ どれも無い請求は 回収に出ない（データ点検で見つける） */
+function arYmOfInv(inv){ return ymOfDoc(inv) || String(inv.issueDate||'').slice(0,7) || String(inv.dueDate||'').slice(0,7) || String(inv.createdAt||'').slice(0,7); }
 const arCoName = id => String(companyName(id)).replace(/<[^>]+>/g,'') || '-';
 let AR_FILT = { open:false, over:false, owner:'', sort:'over' };
 /* ★ 2026-09-17: 並び順と担当の絞り込み。ツールのパネルで選ぶ */
 const AR_SORTS = [['over','期限超過が上'],['bal','残高が大きい順'],['name','取引先名順'],['owner','担当者順']];
 let TOOLS_KEEP=false;          // 選んだあと ツールのパネルを開いたままにする
 
+/** 回収（売掛金）のデータ点検。「同期したのに数字が出ない」ときに、どの行が なぜ数えられていないかを見せる。
+    数字は変えない（見るだけ）。 */
+function arDataCheckFacts(){
+  const co = id => findById('companies', id);
+  const inv=(DB.invoices||[]), pay=(DB.payments||[]);
+  const live=inv.filter(AR_LIVE);
+  const f = {
+    total: inv.length, live: live.length,
+    fromMf: live.filter(i=>i.source==='mf').length,
+    fromCsv: live.filter(i=>i.source==='csv').length,
+    draftOrCancel: inv.length-live.length,
+    noDate: live.filter(i=>!arYmOfInv(i)),
+    zeroTotal: live.filter(i=>!docTotal(i)),
+    noCompany: live.filter(i=>!i.companyId),
+    lostCompany: live.filter(i=>i.companyId && !co(i.companyId)),
+    unconfirmed: live.filter(i=>i.source==='mf' && i.confirmStatus==='未確認').length,
+    payTotal: pay.filter(p=>p.status!=='取消').length,
+    payNoCompany: pay.filter(p=>p.status!=='取消' && !p.companyId),
+    payLostCompany: pay.filter(p=>p.status!=='取消' && p.companyId && !co(p.companyId)),
+    payNoDate: pay.filter(p=>p.status!=='取消' && !p.date),
+    payUnalloc: pay.filter(p=>p.status!=='取消' && !(p.allocations||[]).length),
+    byMonth: {},
+  };
+  live.forEach(i=>{ const ym=arYmOfInv(i)||'（月なし）'; const b=f.byMonth[ym]||(f.byMonth[ym]={ n:0, total:0 }); b.n++; b.total+=docTotal(i); });
+  return f;
+}
+function arDataCheck(){
+  const f=arDataCheckFacts();
+  const row=(label, list, fmt)=>`<tr><td>${label}</td><td class="r num ${list.length?'minus':''}">${list.length}</td>
+    <td class="muted" style="font-size:12px;">${list.slice(0,6).map(fmt).join('、')}${list.length>6?' …':''}</td></tr>`;
+  const invF = i => esc((i.no||i.id||'')+(i.companyId? '／'+arCoName(i.companyId):'')+'／'+moneyPlain(docTotal(i)));
+  const payF = p => esc((p.date||'日付なし')+'／'+(p.payerName||arCoName(p.companyId)||'-')+'／'+moneyPlain(received(p)));
+  const months=Object.keys(f.byMonth).sort();
+  openModal(`<h3>データ点検（回収・売掛金）</h3>
+    <div class="mdsub">回収（売掛金）の表は「請求（作成中・取消を除く）」と「入金」を 会社ごと・月ごとに足し引きしています。
+      ここに出る行は その計算から外れている、または 数字がゼロになる原因です。数字は変えません。</div>
+    <div class="kpi-grid" style="margin-bottom:10px;">
+      <div class="kpi"><div class="lbl">請求（数える分）</div><div class="num">${f.live}</div><div class="sub">全 ${f.total} 件・作成中/取消 ${f.draftOrCancel}・MF ${f.fromMf}・CSV ${f.fromCsv}</div></div>
+      <div class="kpi"><div class="lbl">入金（数える分）</div><div class="num">${f.payTotal}</div><div class="sub">消込なし ${f.payUnalloc.length}（残高には影響しません）</div></div>
+      <div class="kpi"><div class="lbl">MF から来て未確認</div><div class="num ${f.unconfirmed?'minus':''}">${f.unconfirmed}</div><div class="sub">残高には入っています。確認は 請求の確認 で</div></div>
+      <div class="kpi"><div class="lbl">売掛金残高（今月末）</div><div class="num">¥${arAmt(arTotal())}</div><div class="sub">取引先の一覧・督促と同じ数字</div></div>
+    </div>
+    <div class="form-section">回収から外れている・ゼロになる原因</div>
+    <div class="table-wrap" style="max-height:34vh;"><table><thead><tr><th>原因</th><th class="r">件数</th><th>例</th></tr></thead><tbody>
+      ${row('請求に日付が無い（計上月・請求日・期日・作成日 すべて無し）', f.noDate, invF)}
+      ${row('請求の金額が 0', f.zeroTotal, invF)}
+      ${row('請求に取引先が無い', f.noCompany, invF)}
+      ${row('請求の取引先が 取引先一覧に存在しない（消された・CRMのIDが変わった）', f.lostCompany, invF)}
+      ${row('入金に取引先が無い（振込名義の対応づけ待ち）', f.payNoCompany, payF)}
+      ${row('入金の取引先が 取引先一覧に存在しない', f.payLostCompany, payF)}
+      ${row('入金に日付が無い', f.payNoDate, payF)}
+    </tbody></table></div>
+    <div class="form-section" style="margin-top:10px;">請求の月ごとの件数（表のどの列に入るか）</div>
+    <div class="table-wrap" style="max-height:26vh;"><table><thead><tr><th>月</th><th class="r">件数</th><th class="r">税込合計</th></tr></thead><tbody>
+      ${months.map(m=>`<tr><td>${esc(m)}</td><td class="r num">${f.byMonth[m].n}</td><td class="r num">${moneyPlain(f.byMonth[m].total)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">請求がありません</td></tr>'}
+    </tbody></table></div>
+    <div class="fhelp" style="margin-top:8px;">今の期（${esc(fyShort(CUR_FY))}）に入るのは ${esc(fyMonths(CUR_FY)[0])} 〜 ${esc(fyMonths(CUR_FY)[11])} の請求です。それより前の月の請求は「前月残高」として繰り越されます。</div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">閉じる</button></div>`,'lg');
+}
 /** 1社ぶんの材料 — 請求と入金を月に振り分けたもの */
 function arFacts(companyId){
   const id=String(companyId), bills=[], pays=[];
@@ -3402,9 +3462,10 @@ function viewArBook(){
       <button class="btn secondary" onclick="arCsvTemplate()">${IC.doc} CSVテンプレート</button>
       <label class="btn secondary tp-file">${IC.doc} CSVを取り込む<input type="file" accept=".csv,text/csv" onchange="arCsvUpload(this.files[0]);this.value=''"></label>
       ${mgr? `<button class="btn secondary" onclick="openMfImport('billings')">Money Forward から取り込む</button>` : ''}` : ''}
-      <div class="tp-h">出力</div>
+      <div class="tp-h">出力・点検</div>
       <div class="tp-two"><button class="btn secondary" onclick="exportArBookCsv()">${IC.doc} CSV出力</button>
         <button class="btn secondary" onclick="window.print()">${IC.print} 印刷</button></div>
+      <button class="btn secondary" onclick="arDataCheck()">データ点検（回収に出てこない理由）</button>
     </div>`)}`;
   return pageShell({ title:'回収（売掛金）', count:all.length, shown:rows.length,
     

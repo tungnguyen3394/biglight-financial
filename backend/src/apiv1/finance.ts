@@ -158,8 +158,33 @@ export function invoiceStatus(st: any, inv: any): string {
   return '確定'
 }
 export const openInvoices = (st: any) => arr(st, 'invoices').filter((i: any) => i.status !== '取消' && i.status !== '作成中' && balanceOfInvoice(st, i) > 0)
-export const arBalanceOf = (st: any, companyId: any) => openInvoices(st).filter((i: any) => String(i.companyId) === String(companyId)).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
-export const arTotal = (st: any) => openInvoices(st).reduce((s, i) => s + balanceOfInvoice(st, i), 0)
+
+/* ★ 2026-09-18: 売掛残高は「前月残高 ＋ 請求 − 入金」（会社ごと・消込に頼らない）。
+   画面の 回収（売掛金）arMonthly と同じ式。以前は「未回収の請求の合計（消込頼み）」で、
+   画面の表と連携の数字が食い違っていた。openInvoices は 期日別の資金繰り・年齢表にだけ使う。 */
+export const AR_LIVE = (i: any) => !!i && i.status !== '取消' && i.status !== '作成中'
+/** 請求の「月」: 計上月 → 請求日 → 期日 → 作った日（web/index.html の arYmOfInv と同じ） */
+export const arYmOfInv = (i: any) => ymOfDoc(i) || String((i && i.issueDate) || '').slice(0, 7) || String((i && i.dueDate) || '').slice(0, 7) || String((i && i.createdAt) || '').slice(0, 7)
+/** 入金1件の受取額（振込手数料・調整を含む。web/index.html の received と同じ） */
+export const received = (p: any) => num(p.amount) + num(p.fee) + (Array.isArray(p.adjust) ? p.adjust : []).reduce((s: number, a: any) => s + num(a.amount), 0)
+/** 会社の月末残高（ym 末時点） */
+export function arClosingAt(st: any, companyId: any, ym: string): number {
+  const id = String(companyId)
+  const billed = arr(st, 'invoices').filter((i: any) => String(i.companyId) === id && AR_LIVE(i) && arYmOfInv(i) && arYmOfInv(i) <= ym)
+    .reduce((s: number, i: any) => s + docTotal(i), 0)
+  const recv = arr(st, 'payments').filter((p: any) => String(p.companyId) === id && p.status !== '取消' && p.date && String(p.date).slice(0, 7) <= ym)
+    .reduce((s: number, p: any) => s + received(p), 0)
+  return billed - recv
+}
+/** 売掛金の動きがある取引先（請求か入金が1件でもある会社） */
+export function arCompanyIds(st: any): string[] {
+  const ids = new Set<string>()
+  arr(st, 'invoices').forEach((i: any) => { if (AR_LIVE(i) && i.companyId) ids.add(String(i.companyId)) })
+  arr(st, 'payments').forEach((p: any) => { if (p.status !== '取消' && p.companyId) ids.add(String(p.companyId)) })
+  return [...ids]
+}
+export const arBalanceOf = (st: any, companyId: any) => arClosingAt(st, companyId, thisMonth())
+export const arTotal = (st: any) => arCompanyIds(st).reduce((s, id) => s + arBalanceOf(st, id), 0)
 
 export const AGING_BUCKETS = ['未到来', '1〜30日', '31〜60日', '61〜90日', '90日超']
 export function agingBucket(inv: any, st?: any): string {

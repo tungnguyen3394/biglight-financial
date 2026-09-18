@@ -605,6 +605,32 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   _db.invoices[0].confirmStatus='未確認'; _db.invoices[0].source='mf';
   _db.invoices[1].confirmStatus='確定';
   _db.invoices[2].mfDiff={ at:'2026-09-18T00:00:00Z', fields:{ total:{ finance:100000, mf:120000 } } };
+  /* 回収（売掛金）から外れる請求の扱いと データ点検 */
+  eq('請求の月: 計上月 → 請求日 → 期日 → 作った日 の順', [
+    ctx.arYmOfInv({ bookMonth:'2026-08', issueDate:'2026-09-01' }), ctx.arYmOfInv({ issueDate:'2026-09-01' }),
+    ctx.arYmOfInv({ dueDate:'2026-10-31' }), ctx.arYmOfInv({ createdAt:'2026-09-18T01:00:00Z' }), ctx.arYmOfInv({}) ],
+    ['2026-08','2026-09','2026-10','2026-09','']);
+  {
+    const d=ctx.__x.DB(); const nInv=d.invoices.length, nPay=d.payments.length;   // 足した分だけ あとで戻す（DB の器は替えない）
+    d.invoices.push({ id:'CHK1', companyId:'C1', status:'確定', total:5000 });                       // 日付なし
+    d.invoices.push({ id:'CHK2', companyId:'C1', status:'確定', total:0, bookMonth:'2026-09' });     // 金額0
+    d.invoices.push({ id:'CHK3', companyId:'NOPE', status:'確定', total:7000, bookMonth:'2026-09' }); // 取引先が無い
+    d.invoices.push({ id:'CHK4', companyId:'C1', status:'下書き', total:9000, bookMonth:'2026-09', source:'mf', confirmStatus:'未確認' });
+    d.payments.push({ id:'PCHK', companyId:'', payerName:'ﾌﾘｺﾐ ﾀﾞﾚｶ', date:'2026-09-10', amount:1000, allocations:[] });
+    const f=ctx.arDataCheckFacts();
+    eq('日付の無い請求を見つける', f.noDate.map(i=>i.id), ['CHK1']);
+    eq('金額0の請求を見つける', f.zeroTotal.map(i=>i.id), ['CHK2']);
+    eq('存在しない取引先を指す請求を見つける', f.lostCompany.map(i=>i.id), ['CHK3']);
+    eq('取引先の無い入金を見つける', f.payNoCompany.map(p=>p.id), ['PCHK']);
+    eq('作成中/取消 は数えない側に入る（点検の内訳）', f.draftOrCancel>=0 && f.live<=f.total, true);
+    const h=ctx.arDataCheck.toString().length>0 && (ctx.arDataCheck(), (ctx.document.getElementById('modalBody')||{}).innerHTML||'');
+    eq('データ点検の画面に 原因の表と 月ごとの件数が出る', ['原因','請求に日付が無い','請求の月ごとの件数','売掛金残高（今月末）'].every(x=>String(h).includes(x)), true);
+    ctx.closeModal && ctx.closeModal();
+    d.invoices.length=nInv; d.payments.length=nPay;
+  }
+  /* 売掛残高は どこで見ても 回収（売掛金）の式（前月残高＋請求−入金） */
+  eq('取引先の売掛残 ＝ 回収の表の今月末残高', ctx.arBalanceOf('C1'), ctx.arMonthly('C1',[ctx.thisMonth()])[0].closing);
+  eq('売掛残高の合計 ＝ 会社ごとの今月末残高の合計', ctx.arTotal(), ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[ctx.thisMonth()])[0].closing,0));
   /* 同期の結果（数字）の見せ方。0 は出さない・入れ子（run）もほどく */
   eq('同期の結果を1行にする', ctx.mfStatsText({ billings:{ 新規:3, 更新:0, 取引先未対応:2 }, reconcile:{ 消込:1 } }),
     'billings：新規 3・取引先未対応 2 ／ reconcile：消込 1');

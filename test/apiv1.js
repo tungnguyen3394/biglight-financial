@@ -228,7 +228,9 @@ console.log('\n■ まとめの数字（REST と MCP が同じ関数を使う）
   ok('未回収の合計が finance.ts と一致', ar.open_total === F.arTotal(state));
   ok('延滞の件数', ar.overdue_count === 2, `overdue_count=${ar.overdue_count}`);
   ok('未消込の入金を見つける', ar.unapplied_payments === 50000, `=${ar.unapplied_payments}`);
-  ok('年齢表の合計 = 未回収の合計', Object.values(ar.aging_totals).reduce((s, v) => s + v, 0) === ar.open_total);
+  ok('年齢表の合計 = aging_total（請求ごとの式）', Object.values(ar.aging_totals).reduce((s, v) => s + v, 0) === ar.aging_total);
+  ok('未回収の合計は 会社ごとの式（前月残高＋請求−入金）で、消込に頼らない', ar.open_total === F.arCompanyIds(state).reduce((s, id) => s + F.arBalanceOf(state, id), 0));
+  ok('消込が済んでいない入金があるときは その旨を返す', (ar.open_total === ar.aging_total) === (ar.balance_note === ''));
   ok('年齢表は残高の大きい会社が先', ar.aging_by_company[0].total >= ar.aging_by_company[1].total);
   const arOver = R.receivablesReport(state, { overdueOnly: true });
   ok('overdue_only は期日超過だけ', arOver.items.every(x => x.days_overdue > 0) && arOver.items.length === 2);
