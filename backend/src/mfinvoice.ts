@@ -408,6 +408,13 @@ export function parseTrialBalance(j: any): { code: string; name: string; amount:
   top.forEach(walk)
   return out.filter(r => r.name)
 }
+/** 試算表（損益）の生の返り（予実の実績に使う。mfpl.parsePlReport が読む） */
+export async function fetchPlReport(month: string, d: MfDeps) {
+  const c = mfConfig(d.env)
+  const [y, m] = month.split('-').map(Number)
+  const q = new URLSearchParams({ start_date: month + '-01', end_date: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) })
+  return getJson(`${c.acctBase}/reports/trial_balance_pl?${q}`, await accessToken(d), d, '試算表（損益）')
+}
 export async function fetchTrialBalance(month: string, d: MfDeps, kind: 'pl' | 'bs' = 'bs') {
   const c = mfConfig(d.env)
   /* ★ 2026-09-19: 会計 API は 期間を start_date / end_date で受け取る（入出金明細で 400 が出て判明）。月末は その月の本当の末日 */
@@ -587,6 +594,7 @@ export function mfRouter(d: RouterDeps) {
   syncRoute('/mf/sync/transactions', 'transactions', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? '' : '期間（from / to）か CSV が要ります。')
   syncRoute('/mf/sync/trial-balance', 'trial-balance', b => (isMonth(b.month)) ? '' : '対象月（YYYY-MM）が要ります。')
   syncRoute('/mf/sync/journals', 'journals', b => (isDate(b.from) && isDate(b.to)) ? '' : '期間（from / to）が要ります。')
+  syncRoute('/mf/sync/pl', 'pl', b => (b.from && b.to) ? '' : '期間（from / to）が要ります。')
   syncRoute('/mf/reconcile', 'reconcile')
   syncRoute('/mf/sync/run', 'run')
 

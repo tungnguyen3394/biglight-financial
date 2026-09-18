@@ -233,12 +233,19 @@ export function actualSeries(st: any, fy: number, kind: string): number[] {
   const out = Array(12).fill(0)
   const addTo = (ym: string, amount: number) => { const i = idx[ym]; if (i != null) out[i] += amount }
 
+  /* ★ 2026-09-19: MF 会計 の試算表から実績が入った月（actuals.source==='mf'）は、売上も その数字（MF が正）。
+     無い月は今までどおり 請求書から。web/index.html の actualSeries と同じ。 */
+  const mfMonths = new Set<number>(arr(st, 'actuals').filter((a: any) => Number(a.fy) === Number(fy) && a.source === 'mf').map((a: any) => Number(a.mIndex)))
   if (kind === 'revenue') {
     arr(st, 'invoices').forEach((inv: any) => {
       if (inv.status === '取消') return
-      const ym = ymOfDoc(inv); if (idx[ym] == null) return
+      const ym = ymOfDoc(inv); if (idx[ym] == null || mfMonths.has(idx[ym])) return
       ;(inv.items || []).forEach((it: any) => { if (accountKind(st, it.accountCode) === 'revenue') addTo(ym, itemAmount(it)) })
       if (!(inv.items || []).length) addTo(ym, docNet(inv, st))
+    })
+    arr(st, 'actuals').forEach((a: any) => {
+      if (Number(a.fy) !== Number(fy) || a.source !== 'mf' || accountKind(st, a.accountCode) !== 'revenue') return
+      const i = Number(a.mIndex); if (i >= 0 && i < 12) out[i] += num(a.amount)
     })
   } else {
     /* ★ 2026-09-16: 費用の実績は actuals（会計事務所の試算表からの手入力・税抜）だけ。

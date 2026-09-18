@@ -417,6 +417,18 @@ try{
   eq('支払請求の 計上月 は 予実の費用 と言わない', ctx.__x.ENTITIES.bills.fields.find(x=>x.name==='bookMonth').help.includes('予実の費用に入る月'), false);
 }catch(e){ console.log('  NG  4か所  →  '+e.message); fail++; }
 
+console.log('\n― 予実の実績: MF 会計 の試算表が来た月は 売上も MF の数字（2026-09-19）―');
+try{
+  const fy=ctx.__x.CUR_FY, keep=_db.actuals.slice();
+  const before=ctx.actualSeries(fy,'revenue');
+  const mi=before.findIndex(v=>v>0);
+  const revCode=ctx.__x.accountRoots().length? ctx.accountsOfKind('revenue')[0].code : '4100';
+  _db.actuals.push({ id:'AT-mf', fy, mIndex:mi, accountCode:revCode, amount:123456, source:'mf' });
+  const after=ctx.actualSeries(fy,'revenue');
+  eq('MF の月は 請求書ではなく MF の数字、ほかの月はそのまま', [after[mi], after.filter((v,i)=>i!==mi).join(','), before[mi]!==123456], [123456, before.filter((v,i)=>i!==mi).join(','), true]);
+  _db.actuals=keep;
+}catch(e){ console.log('  NG  予実の実績  →  '+e.message); fail++; }
+
 console.log('\n― 取引先の3タブ・取引先の確認（2026-09-18）―');
 {
   const keepCo=_db.companies.slice(), keepQ=_db.mfPartnerQueue, keepInv=_db.invoices.slice();

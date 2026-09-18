@@ -19,6 +19,7 @@ import { loadStateCached } from './statecache'
 import * as MF from './mfinvoice'
 import { mfRouter } from './mfinvoice'
 import * as MFS from './mfsync'
+import * as MFP from './mfpl'
 /* CSV_MAP_WORKER / CSV_MAP_ASSIGN は crmsync.ts に残してあります（人を扱う必要が戻ったら
    この import と下の map の分岐を足すだけ。公式 §16「使わなくなってもコードは消さない」）。 */
 import { fetchFromCrm, applyCrmPayload, logCrmSync, parseCsv, csvToRecords, CSV_MAP_COMPANY } from './crmsync'
@@ -657,6 +658,21 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       await mfRemember('ok', out.stats)
       return { ok: true, plan: slim, stats: out.stats, count: items.length }
     }
+    if (kind === 'pl') {
+      /* 予実の実績: MF 会計 の試算表（損益）を 月ごとに。from/to は日付でも月でもよい */
+      const ymFrom = String(args.from || '').slice(0, 7), ymTo = String(args.to || '').slice(0, 7)
+      if (!/^\d{4}-\d{2}$/.test(ymFrom) || !/^\d{4}-\d{2}$/.test(ymTo) || ymFrom > ymTo) throw new Error('期間（from / to）を指定してください。')
+      const months: string[] = []
+      for (let [y, m] = ymFrom.split('-').map(Number); months.length < 120; ) { const ym = y + '-' + String(m).padStart(2, '0'); if (ym > ymTo) break; months.push(ym); m++; if (m > 12) { m = 1; y++ } }
+      const reports: { ym: string; rows: MFP.PlRow[] }[] = []
+      for (const ym of months) reports.push({ ym, rows: MFP.parsePlReport(await MF.fetchPlReport(ym, mfDeps)) })
+      const preview = (st: any) => { let cur = st; const per: any[] = []; for (const r of reports) { const o = MFP.applyPl(cur, r.ym, r.rows, { actor: me.email }); cur = o.state; per.push({ ...o.stats, created: o.created, skipped: o.skipped.slice(0, 20) }) } return { state: cur, per } }
+      if (dry) { const p = preview(await loadState()); return { ok: true, dryRun: true, months: p.per, count: months.length } }
+      let per: any[] = []
+      const out = await mutateState(me.email, 'mf-pl', (st) => { const p = preview(st); per = p.per; return { state: p.state, stats: { 月: per.length, 新しい科目: per.reduce((s, x) => s + x['新しい科目'], 0), 手入力を置き換え: per.reduce((s, x) => s + x['手入力を置き換え'], 0) } } })
+      await mfRemember('ok', out.stats)
+      return { ok: true, stats: out.stats, months: per, count: months.length }
+    }
     if (kind === 'reconcile') {
       const res = MFS.reconcile(await loadState(), { paymentIds: args?.paymentIds })
       if (dry) return { ok: true, dryRun: true, ...slimMatch(res) }
@@ -698,6 +714,11 @@ async function mfSync(kind: string, args: any, me: { email: string; role: string
       try { stats.journals = (await mfSync('journals', { from, to }, me)).stats }
       catch (e: any) { stats.journals = { エラー: String(e?.message || e) } }
       stats.reconcile = (await mfSync('reconcile', {}, me)).stats
+      /* 予実の実績（試算表・損益）は 直近2か月ぶんを毎朝写す（経理が仕訳を足すと前月も動くため）。古い月は 手で期間を指定して取る */
+      try { const t2 = new Date(Date.now() + 9 * 3600_000); const y = t2.getUTCFullYear(), m = t2.getUTCMonth() + 1
+        const prev = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0')
+        stats.pl = (await mfSync('pl', { from: prev, to: y + '-' + String(m).padStart(2, '0') }, me)).stats }
+      catch (e: any) { stats.pl = { エラー: String(e?.message || e) } }
       await mfRemember('ok', stats)
       return { ok: true, stats }
       } finally { MF_RUN = null }

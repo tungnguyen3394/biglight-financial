@@ -2093,12 +2093,19 @@ function actualSeries(fy, kind, opt){
   const out = Array(12).fill(0);
   const addTo = (ym, amount) => { const i=idx[ym]; if(i!=null) out[i]+=amount; };
 
+  /* ★ 2026-09-19: MF 会計 の試算表から実績が入った月（actuals.source==='mf'）は、売上も その数字（MF が正）。
+     無い月は今までどおり 請求書から。backend/src/apiv1/finance.ts の actualSeries と同じ。 */
+  const mfMonths = mfActualMonths(fy);
   if(kind==='revenue'){
     (DB.invoices||[]).forEach(inv=>{
       if(inv.status==='取消') return;
       if(opt.confirmedOnly && inv.status==='作成中') return;
-      const ym=ymOfDoc(inv); if(idx[ym]==null) return;
+      const ym=ymOfDoc(inv); if(idx[ym]==null || mfMonths.has(idx[ym])) return;
       addTo(ym, invRevenue(inv));
+    });
+    (DB.actuals||[]).forEach(a=>{
+      if(Number(a.fy)!==Number(fy) || a.source!=='mf' || accountKind(a.accountCode)!=='revenue') return;
+      const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount);
     });
   } else {
     /* ★ 2026-09-16 利用者の指示: 費用の実績は「会計事務所の試算表」から手で入れた数字（actuals・税抜）だけ。
@@ -2117,6 +2124,10 @@ function actualSeries(fy, kind, opt){
     const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount);
   });
   return out;
+}
+/** MF 会計 の試算表から実績が入っている月（その月は 売上も費用も MF の数字だけ） */
+function mfActualMonths(fy){
+  const s=new Set(); (DB.actuals||[]).forEach(a=>{ if(Number(a.fy)===Number(fy)&&a.source==='mf') s.add(Number(a.mIndex)); }); return s;
 }
 /** 予算/見込: budgets・forecasts から kind 別12か月 */
 function planSeries(fy, kind, which){
@@ -2141,10 +2152,12 @@ function seriesByAccount(fy, accountCode, source){
     return out;
   }
   /* 実績: 売上は請求書から、費用は actuals（試算表からの手入力）から。actualSeries と同じ拾い方でなければならない。 */
-  const kind = accountKind(accountCode);
+  const kind = accountKind(accountCode), mfM=mfActualMonths(fy);
   if(kind==='revenue'){
-    (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const i=idx[ymOfDoc(inv)]; if(i==null) return;
+    (DB.invoices||[]).forEach(inv=>{ if(inv.status==='取消') return; const i=idx[ymOfDoc(inv)]; if(i==null||mfM.has(i)) return;
       (inv.items||[]).forEach(it=>{ if(it.accountCode===accountCode) out[i]+=itemAmount(it); }); });
+    (DB.actuals||[]).forEach(a=>{ if(Number(a.fy)!==Number(fy)||a.source!=='mf'||a.accountCode!==accountCode) return;
+      const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount); });
   }else{
     (DB.actuals||[]).forEach(a=>{ if(Number(a.fy)!==Number(fy)||a.accountCode!==accountCode) return;
       const i=Number(a.mIndex); if(i>=0&&i<12) out[i]+=num(a.amount); });
@@ -2928,7 +2941,14 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
     }
     if(YJ_VIEW==='actual')   return money(a);
     if(YJ_VIEW==='budget')   return money(b);
-    if(YJ_VIEW==='forecast') return money(f||b);
+    if(YJ_VIEW==='forecast'){
+      /* ★ 2026-09-19 利用者の指示: 見込 にも 予算との比較（差・達成率）を出す */
+      const v=f||b; if(!v && !b) return '<span class="zero">—</span>';
+      const d=v-b, g=row.good===false? d<0 : d>0;
+      return `<div class="num" style="line-height:1.35;">${money(v)}${f?'':'<span class="muted" style="font-size:9.5px;"> 予</span>'}
+        <div style="font-size:10.5px;color:var(--muted);">予 ${moneyPlain(b)}</div>
+        ${b?`<div style="font-size:10.5px;" class="${Math.abs(d)<1?'zero':(g?'plus':'minus')}">${d>0?'+':''}${moneyPlain(d)} ・ ${(v/b*100).toFixed(0)}%</div>`:''}</div>`;
+    }
     /* ★ 2026-09-17 利用者の指示: 予実対比でも 見込 が見えるように。
        実績のまだ無い月（最後の実績月より後）は 実績0 ではなく「見 見込（無ければ予算）」を出す。 */
     if(mi>lastIdx && !a && !(f||b)) return '<span class="zero">—</span>';
@@ -2960,7 +2980,8 @@ function yjPlTable(fy, act, bud, fc, prev, lastIdx){
     const a=sum12(act[row.key]), b=sum12(bud[row.key]);
     if(YJ_VIEW==='actual') return `<b class="num">${moneyPlain(a)}</b>`;
     if(YJ_VIEW==='budget') return `<b class="num">${moneyPlain(b)}</b>`;
-    if(YJ_VIEW==='forecast') return `<b class="num">${moneyPlain(fc[row.key].reduce((t,v,i)=>t+(v||bud[row.key][i]||0),0))}</b>`;
+    if(YJ_VIEW==='forecast'){ const v=fc[row.key].reduce((t,x,i)=>t+(x||bud[row.key][i]||0),0);
+      return `<div class="num"><b>${moneyPlain(v)}</b><div style="font-size:10.5px;color:var(--muted);">予 ${moneyPlain(b)}</div>${b?`<div style="font-size:10.5px;" class="rate">${(v/b*100).toFixed(0)}%</div>`:''}</div>`; }
     return `<div class="num"><b>${moneyPlain(a)}</b>
       <div style="font-size:10.5px;color:var(--muted);">予 ${moneyPlain(b)}</div>
       ${b?`<div style="font-size:10.5px;" class="rate">${(a/b*100).toFixed(0)}%</div>`:''}</div>`;
@@ -3031,7 +3052,7 @@ function yjInputTable(fy){
     budget:  `<b>予算</b>＝この年度の計画。年度のはじめに1回入れます。
       「年額をまとめて入力（12等分）」や ツール › 前年実績から予算を作成 が使えます。金額は<b>税抜</b>。`,
     forecast:`<b>見込</b>＝今の見通し（着地見込）。月が進むたびに直します。予算は動かしません。金額は<b>税抜</b>。`,
-    actual:  `<b>実績</b>＝会計事務所の<b>試算表</b>の数字。毎月 試算表が届いたら、費用の行（売上原価・販管費・営業外）を
+    actual:  `<b>実績</b>＝<b>MF 会計 の試算表</b>の数字（設定 › API・AI連携 › 会計 › 予実の実績 で取り込み。取り込んだ月は 売上も費用も MF の数字で、ここでは直せません）。取り込んでいない月は 会計事務所の<b>試算表</b>の数字。毎月 試算表が届いたら、費用の行（売上原価・販管費・営業外）を
       その月のマスに<b>税抜</b>で打ちます。<b>売上の行は請求書から自動</b>なので灰色で、ここでは直せません。
       費用表（予定）や 支払請求 は「約束」であって会計の数字ではないので、実績には入りません。`,
   }[which];
@@ -3039,6 +3060,7 @@ function yjInputTable(fy){
   const rows = ['revenue','cogs','sga','nonop'].map(kind=>{
     const accs=accountsOfKind(kind);
     const ro = which==='actual' && kind==='revenue';        // 収益の実績は請求書から（直せない）
+    const mfM = which==='actual'? mfActualMonths(fy) : new Set();   // MF 会計 から来た月は読むだけ（MF が正）
     /* ★ colspan + sticky は 横スクロールで右にかぶさる（費用表と同じ理由）。1列目だけにする。 */
     return `<tr class="totrow"><td>${esc(KIND_LABEL[kind])}${ro?' <span class="muted" style="font-weight:400;">請求書から</span>':''}</td>${'<td></td>'.repeat(13)}</tr>`+
       accs.map(a=>{
@@ -3046,6 +3068,7 @@ function yjInputTable(fy){
         const cells = FY_MONTH_LABELS.map((_,mi)=>{
           if(ro) return `<td class="r"><input class="cellin ro" value="${auto[mi]?moneyPlain(auto[mi]):''}" readonly tabindex="-1"></td>`;
           const v = planCell(which, fy, mi, a.code);
+          if(mfM.has(mi)) return `<td class="r"><input class="cellin ro" value="${v?moneyPlain(v):''}" readonly tabindex="-1" title="MF 会計 の試算表から"></td>`;
           if(isClosedFy(fy)) return `<td class="r"><input class="cellin ro" value="${v?moneyPlain(v):''}" readonly tabindex="-1"></td>`;
           return `<td class="r"><input class="cellin ed" value="${v?moneyPlain(v):''}"
             oninput="onPlanInput(this,'${which}',${mi},'${attr(a.code)}')" placeholder="0"></td>`;
@@ -4231,6 +4254,9 @@ const MF_KINDS = {
   transactions:   { title:'入金を仮に取り込む（銀行の入出金明細・仕訳前）', path:'/mf/sync/transactions',
                     sub:'まだ仕訳していない銀行の明細を「仮」で入れます（取引先はこちらで推測）。あとで MF 会計 で仕訳すると、同じ入金は 仕訳の方に付け替わります。',
                     csvHelp:'MF 会計の入出金明細、または銀行からダウンロードした CSV' },
+  pl:             { title:'予実の実績を取り込む（MF 会計 の試算表・損益）', path:'/mf/sync/pl', noCsv:true,
+                    sub:'月ごとの 売上から費用まで を MF 会計 の試算表（損益）から写します。MF の数字が来た月は その月の実績は MF だけ（手で入れた実績は置き換え）。科目が無ければ 自動で作ります。',
+                    csvHelp:'' },
   'trial-balance':{ title:'試算表を取り込む（突合用）', path:'/mf/sync/trial-balance',
                     sub:'予実の実績は今までどおりです。試算表は「突合のための外の数字」として別に置くだけです。',
                     csvHelp:'MF 会計の試算表（貸借対照表）を CSV 出力したもの' },
@@ -4306,6 +4332,16 @@ function mfArgs(dry){
 function mfPlanHtml(){
   const p=MFI.plan;
   if(MFI.kind==='billings') return mfBillingPlanHtml(p);
+  if(MFI.kind==='pl'){
+    const ms=(p.months||[]);
+    const created=[...new Set(ms.flatMap(m=>m.created||[]))], skipped=[...new Set(ms.flatMap(m=>m.skipped||[]))];
+    return `<div class="mf-sum"><span>対象 <b>${ms.length}</b>か月</span><span>新しい科目 <b>${created.length}</b></span></div>
+      ${created.length?`<div class="fhelp">自動で作る科目：${esc(created.join('、'))}</div>`:''}
+      ${skipped.length?`<div class="fhelp muted">読まない行（合計・利益の行）：${esc(skipped.slice(0,8).join('、'))}${skipped.length>8?' ほか':''}</div>`:''}
+      <div class="table-wrap" style="max-height:44vh;"><table><thead><tr><th>月</th><th class="r">科目</th><th class="r">売上</th><th class="r">費用</th><th class="r">利益</th><th class="r">手入力を置き換え</th></tr></thead>
+        <tbody>${ms.map(m=>`<tr><td>${esc(m['対象月'])}</td><td class="r num">${m['科目']}</td><td class="r num">${moneyPlain(m['売上'])}</td><td class="r num">${moneyPlain(m['費用'])}</td>
+          <td class="r num"><b>${moneyPlain(num(m['売上'])-num(m['費用']))}</b></td><td class="r num muted">${m['手入力を置き換え']||''}</td></tr>`).join('')}</tbody></table></div>`;
+  }
   if(MFI.kind==='journals'){
     const items=(p.items||[]);
     return `<div class="mf-sum"><span>仕訳の入金 <b>${MFI.count||0}</b>件</span><span>新規 <b>${p['新規']||0}</b></span>${p['銀行明細から付け替え']?`<span>銀行明細から付け替え ${p['銀行明細から付け替え']}</span>`:''}
@@ -4465,12 +4501,13 @@ async function mfPanelLoad(){
         </section>
         <section class="mfp-card">
           <div class="mfp-hd">${IC.yen||''} 会計 <span class="muted">MF クラウド会計</span></div>
-          <div class="mfp-what">読むもの：仕訳（取引先つきの入金）・試算表・銀行明細</div>
+          <div class="mfp-what">読むもの：仕訳（取引先つきの入金）・試算表（損益＝予実の実績）・銀行明細</div>
           <div class="mfp-st">${accSt}</div>
           <div class="mfp-btns">${accBtn}</div>
           <div class="mfp-ops">
             ${mgr?`<div class="mfp-btns"><button class="btn secondary sm" onclick="openMfImport('journals')">入金を取り込む（仕訳）</button>
-              <button class="btn secondary sm" onclick="openMfImport('trial-balance')">試算表を取り込む</button>
+              <button class="btn secondary sm" onclick="openMfImport('pl')">予実の実績（損益）</button>
+              <button class="btn secondary sm" onclick="openMfImport('trial-balance')">突合用の試算表</button>
               <button class="btn secondary sm" onclick="openMfImport('transactions')" title="まだ仕訳していない銀行の明細を仮で入れる">銀行明細（仮）</button></div>`:''}
             <div class="fhelp">${accOn? '使う口座：<span id="mfBankSel">読み込み中…</span>' : 'API が無くても CSV で取り込めます'}</div>
           </div>
