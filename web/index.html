@@ -4293,18 +4293,24 @@ async function openMfImport(kind){
   try{ MFI.status = await mfGet('/mf/status'); }catch(e){ MFI.status={ configured:false, connected:false, error:String(e.message||e) }; }
   mfDraw();
 }
+/** 回収・支払（invoices/payments）に直接書く取り込みかどうか。この3つだけ「同じ期の中」に絞る。
+    損益・試算表（複数の期をまたぐのが普通）は対象外。 */
+const MF_PERIOD_SCOPED = ['billings','journals','transactions'];
 function mfDraw(){
   if(!MFI) return;
   const K=MF_KINDS[MFI.kind], s=MFI.status;
+  const scoped = MF_PERIOD_SCOPED.includes(MFI.kind);
+  const dMin = scoped? fyStartDate(CUR_FY) : '', dMax = scoped? fyEndDate(CUR_FY) : '';
   const api = !s ? '<div class="muted">接続の状態を確認しています…</div>'
     : !s.configured ? `<div class="muted">API は未設定です（サーバーの .env に MF_CLIENT_ID / MF_CLIENT_SECRET）。右の CSV で同じことができます。</div>`
     : !s.connected ? `<div>Money Forward と未接続です。${isAdmin()?`<button class="btn sm" onclick="mfConnect()">接続する</button>`:'管理者に接続を依頼してください。'}</div>`
     : MFI.kind==='trial-balance'
       ? `<div class="mf-row">対象月 <input type="month" value="${attr(MFI.month)}" onchange="MFI.month=this.value">
           <button class="btn" onclick="mfFetch()">取得する</button></div>`
-      : `<div class="mf-row">期間 <input type="date" value="${attr(MFI.from)}" onchange="MFI.from=this.value"> 〜
-          <input type="date" value="${attr(MFI.to)}" onchange="MFI.to=this.value">
-          <button class="btn" onclick="mfFetch()">取得する</button></div>`;
+      : `<div class="mf-row">期間 <input type="date" value="${attr(MFI.from)}" ${scoped?`min="${dMin}" max="${dMax}"`:''} onchange="mfSetRange('from',this.value)"> 〜
+          <input type="date" value="${attr(MFI.to)}" ${scoped?`min="${dMin}" max="${dMax}"`:''} onchange="mfSetRange('to',this.value)">
+          <button class="btn" onclick="mfFetch()">取得する</button></div>
+          ${scoped?`<div class="fhelp">${esc(fyLabel(CUR_FY))}の中だけ選べます（前の期のものは 期を切り替えてから、別に取り込んでください）。</div>`:''}`;
   openModal(`<h3>${esc(K.title)}</h3>
     <div class="mdsub">${esc(K.sub)}</div>
     <div class="mf-src">
@@ -4328,6 +4334,16 @@ async function mfDisconnect(){
   if(!confirm('Money Forward との接続を切ります。よろしいですか？')) return;
   try{ await mfCall('/mf/disconnect'); toast('接続を切りました。','ok'); }catch(e){ toast(String(e.message||e),'err'); }
   renderPage(CURRENT_PAGE);
+}
+/** 期間の日付を変える。回収・支払（invoices/payments）に書く取り込みは、はみ出した分を その期の中に戻す
+    （手入力・古いブラウザなど min/max が効かない経路への保険）。 */
+function mfSetRange(which, v){
+  if(!MFI) return;
+  if(MF_PERIOD_SCOPED.includes(MFI.kind)){
+    const min=fyStartDate(CUR_FY), max=fyEndDate(CUR_FY);
+    if(v && v<min) v=min; if(v && v>max) v=max;
+  }
+  MFI[which]=v; mfDraw();
 }
 async function mfPickCsv(file){
   if(!file || !MFI) return;

@@ -607,10 +607,19 @@ export function mfRouter(d: RouterDeps) {
       catch (e: any) { res.status(502).json({ error: 'sync-failed', message: scrub(e?.message || e) }) }
     })
   }
-  syncRoute('/mf/sync/billings', 'billings', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? '' : '期間（from / to）か CSV が要ります。')
-  syncRoute('/mf/sync/transactions', 'transactions', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? '' : '期間（from / to）か CSV が要ります。')
+  /* ★ 2026-09-19 利用者の指示: 回収・支払（invoices/payments）に書く取り込みは、人が期間を選ぶときは
+     必ず「同じ期（8月〜翌7月）の中」に収める。前の期のものを混ぜて取り込ませない（画面の日付欄も同じ期しか選べない）。
+     ★ 自動同期（毎朝の 'run'）はこの Express の口を通らず 直接 mfSync() を呼ぶので、ここでは影響しない
+       （'run' は importFromYm の規則で 別に安全を保っている）。 */
+  /* 期（8月始まり）が同じか。mfsync.ts の fyOfYm と同じ式（FY_START_MONTH=8） */
+  const fyOf = (ym: string): number | null => { const t = String(ym || ''); if (!/^[0-9]{4}-[0-9]{2}/.test(t)) return null
+    const y = Number(t.slice(0, 4)), m = Number(t.slice(5, 7)); return m >= 8 ? y : y - 1 }
+  const samePeriod = (from: string, to: string) => { const f = fyOf(from); return f != null && f === fyOf(to) }
+  const periodCheck = (b: any) => (isDate(b.from) && isDate(b.to) && !samePeriod(b.from, b.to)) ? '期間は 同じ期（8月〜翌7月）の中で指定してください。前の期のものは 期を切り替えて 別に取り込んでください。' : ''
+  syncRoute('/mf/sync/billings', 'billings', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? periodCheck(b) : '期間（from / to）か CSV が要ります。')
+  syncRoute('/mf/sync/transactions', 'transactions', b => (b.csv || (isDate(b.from) && isDate(b.to))) ? periodCheck(b) : '期間（from / to）か CSV が要ります。')
   syncRoute('/mf/sync/trial-balance', 'trial-balance', b => (isMonth(b.month)) ? '' : '対象月（YYYY-MM）が要ります。')
-  syncRoute('/mf/sync/journals', 'journals', b => (isDate(b.from) && isDate(b.to)) ? '' : '期間（from / to）が要ります。')
+  syncRoute('/mf/sync/journals', 'journals', b => (isDate(b.from) && isDate(b.to)) ? periodCheck(b) : '期間（from / to）が要ります。')
   syncRoute('/mf/sync/pl', 'pl', b => (b.from && b.to) ? '' : '期間（from / to）が要ります。')
   syncRoute('/mf/reconcile', 'reconcile')
   syncRoute('/mf/sync/run', 'run')

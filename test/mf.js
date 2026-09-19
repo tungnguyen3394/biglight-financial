@@ -253,6 +253,13 @@ function makeDeps(opts = {}) {
       { kind: 'billings', args: { from: '2026-08-01', to: '2026-09-14', dryRun: true }, by: 'mgr@biglight.jp' });
     eq('CSV だけでも受け付ける（期間なし）', (await call('POST', '/mf/sync/billings', { csv: 'a,b' })).status, 200);
     eq('期間も CSV も無ければ 400', (await call('POST', '/mf/sync/billings', {})).status, 400);
+    /* ★ 2026-09-19 利用者の指示: 回収・支払に書く取り込みは 期をまたがせない */
+    eq('7月から8月（期をまたぐ）は断る', (await call('POST', '/mf/sync/billings', { from: '2026-07-25', to: '2026-08-05' })).status, 400);
+    eq('断ったときの言葉', (await call('POST', '/mf/sync/billings', { from: '2026-07-25', to: '2026-08-05' })).j.message, '期間は 同じ期（8月〜翌7月）の中で指定してください。前の期のものは 期を切り替えて 別に取り込んでください。');
+    eq('前の期の中だけなら通る（期を切り替えて取り込むとき）', (await call('POST', '/mf/sync/billings', { from: '2026-06-01', to: '2026-07-31', dryRun: true })).status, 200);
+    eq('銀行明細も同じ規則', (await call('POST', '/mf/sync/transactions', { from: '2026-07-25', to: '2026-08-05' })).status, 400);
+    eq('MF 会計 の元帳も同じ規則', (await call('POST', '/mf/sync/journals', { from: '2026-07-25', to: '2026-08-05' })).status, 400);
+    eq('損益（複数の期をまたぐのが普通）は規則の対象外', (await call('POST', '/mf/sync/pl', { from: '2025-08-01', to: '2026-09-01', dryRun: true })).status, 200);
     eq('試算表は対象月が要る', (await call('POST', '/mf/sync/trial-balance', {})).status, 400);
     who.current = { email: 'staff@biglight.jp', role: 'Staff' };
     eq('スタッフは取り込みの口も使えない', (await call('POST', '/mf/sync/billings', { csv: 'a,b' })).status, 403);
