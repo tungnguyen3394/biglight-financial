@@ -683,6 +683,15 @@ console.log('\n― 回収（売掛金）: 前月残高＋請求−入金＝月�
   /* 売掛残高は どこで見ても 回収（売掛金）の式（前月残高＋請求−入金） */
   eq('取引先の売掛残 ＝ 回収の表の今月末残高', ctx.arBalanceOf('C1'), ctx.arMonthly('C1',[ctx.thisMonth()])[0].closing);
   eq('売掛残高の合計 ＝ 会社ごとの今月末残高の合計', ctx.arTotal(), ctx.arCompanyIds().reduce((t,id)=>t+ctx.arMonthly(id,[ctx.thisMonth()])[0].closing,0));
+  /* 前期繰越の列: 期首時点の残高＝前の期までの未回収 */
+  {
+    const h=ctx.viewArBook();
+    const id=ctx.arCompanyIds()[0], months=ctx.fyMonths(ctx.__x.CUR_FY);
+    eq('表に「前期繰越」の列がある（会社名の右・最初の月の左）', h.indexOf('ar-open')>0 && h.indexOf('ar-open')<h.indexOf('title="'+months[0]+'〜'), true);
+    const sum=ctx.arCompanyIds().reduce((u,c)=>u+ctx.arMonthly(c, months)[0].opening, 0);
+    eq('合計の行の前期繰越 ＝ 会社ごとの期首残高の合計', h.includes('<td class="r num ar-open">'+(sum<0?'−':'')+ctx.__x.moneyPlain(Math.abs(sum))+'</td>'), true);
+    eq('支払（買掛金）にも前期繰越', ctx.viewApBook().includes('前期繰越'), true);
+  }
   /* 会社の行を ▶ で開くと 請求・入金 が月ごとに見える（回収・支払 共通） */
   {
     const h0=ctx.viewArBook();

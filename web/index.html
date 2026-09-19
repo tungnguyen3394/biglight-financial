@@ -548,6 +548,8 @@ window.addEventListener('DOMContentLoaded',function(){var b=document.getElementB
   .ar-tbl .ar-tg:hover{color:var(--primary);}
   .ar-tbl .ar-tgall{font-size:10.5px; font-weight:500; color:var(--primary); cursor:pointer; margin-left:8px; white-space:nowrap;}
   .ar-tbl td.ar-flat{opacity:.5;}
+  .ar-tbl th.ar-open,.ar-tbl td.ar-open{background:var(--surface-2); border-right:1px solid var(--border); min-width:92px;}
+  .ar-tbl td.ar-open{cursor:pointer;}
   .ar-tbl tr.ar-sub td{font-size:11.5px; padding-top:2px; padding-bottom:2px; background:var(--surface-2); color:var(--text-muted); border-bottom:0;}
   .ar-tbl tr.ar-sub td.ar-co{padding-left:30px; font-weight:500; background:var(--surface-2);}
   .ar-tbl tr.ar-sub td.num.plus{color:var(--plus);} .ar-tbl tr.ar-sub td.num.minus{color:var(--minus);}
@@ -3469,7 +3471,8 @@ function bookGrid(o){
   const lastIdx = b => { for(let i=b.e;i>=b.s;i--) if(months[i]<=tm) return i; return -1; };
   const isCur = b => months.slice(b.s,b.e+1).includes(tm);
   const side=o.pop;
-  const head=`<tr><th class="ar-co">${o.first}${rows.length?`<a class="ar-tgall" onclick="bookToggleAll('${side}')">${BOOK_OPEN.all[side]?'全部閉じる':'全部開く'}</a>`:''}</th>${B.map(b=>{
+  const fyNo = fyShort(fyOf(months[0]));
+  const head=`<tr><th class="ar-co">${o.first}${rows.length?`<a class="ar-tgall" onclick="bookToggleAll('${side}')">${BOOK_OPEN.all[side]?'全部閉じる':'全部開く'}</a>`:''}</th><th class="r ar-open" title="${fyNo}の期首（${months[0]}）時点の残高＝前の期までの未回収"><span class="ar-y">${fyNo} 期首</span>前期繰越</th>${B.map(b=>{
       const top = per==='month'
         ? ((b.s===0||months[b.s].endsWith('-01'))? `<span class="ar-y">${months[b.s].slice(0,4)}</span>` : '')
         : `<span class="ar-y">${esc(b.sub)}</span>`;
@@ -3490,28 +3493,30 @@ function bookGrid(o){
     const go = per==='month'? `${o.pop}(event,'${attr(r.id)}','${r.m[k].ym}')` : `${o.ledger}('${attr(r.id)}')`;
     return `<td class="r num ar-c ${v? sign : 'zero'}${isCur(b)?' ar-cur':''}" onclick="${go}">${v? (sign==='minus'?'−':'＋')+moneyPlain(v) : '0'}</td>`;
   };
-  const subRow=(r,key,label,sign,last)=>`<tr class="ar-sub${last?' ar-sub-last':''}"><td class="ar-co">${label}${cum?'（累計）':''}</td>
+  const subRow=(r,key,label,sign,last)=>`<tr class="ar-sub${last?' ar-sub-last':''}"><td class="ar-co">${label}${cum?'（累計）':''}</td><td class="ar-open"></td>
       ${B.map(b=>subCell(r,b,key,sign)).join('')}
       <td class="r num ar-now"><span class="ar-y">年度計</span>${moneyPlain(r.m.reduce((u,x)=>u+(x.future?0:x[key]),0))}</td></tr>`;
+  const openCell = r => { const v=r.m[0].opening; return `<td class="r num ar-open ${v>0?'ar-pos':(v<0?'ar-neg':'zero')}" onclick="${o.ledger}('${attr(r.id)}')" title="前の期までの未回収（前期繰越）">${arAmt(v)}</td>`; };
   const body=rows.map(r=>{ const open=bookIsOpen(side,r.id); return `<tr>
       <td class="ar-co"><span class="ar-tg" onclick="bookToggle('${side}','${attr(r.id)}')" title="${open?'閉じる':'請求・入金を月ごとに見る'}">${open?'▼':'▶'}</span><a class="ar-name" onclick="${o.ledger}('${attr(r.id)}')" title="${o.ledgerTitle}">${esc(r.name)}</a>${o.badge(r.st)}</td>
+      ${openCell(r)}
       ${B.map(b=>cell(r,b)).join('')}
       <td class="r num ar-now ${r.over>0?'ar-over':(r.bal>0?'ar-pos':(r.bal<0?'ar-neg':'zero'))}" onclick="${o.ledger}('${attr(r.id)}')">${arAmt(r.bal)}</td></tr>`
       + (open? subRow(r,'billed',o.flow[0].replace(/^[＋+]\s*/,''),'plus',false) + subRow(r,'payment',o.flow[1].replace(/^[−\-]\s*/,''),'minus',true) : ''); }).join('');
-  if(!rows.length) return { head, body:'', foot:'', ncol:B.length+2 };
-  const tot=`<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td>${B.map(b=>{
+  if(!rows.length) return { head, body:'', foot:'', ncol:B.length+3 };
+  const tot=`<tr class="totrow"><td class="ar-co">合計（${rows.length}社）</td><td class="r num ar-open">${arAmt(rows.reduce((t,r)=>t+r.m[0].opening,0))}</td>${B.map(b=>{
       const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
       const v=rows.reduce((t,r)=>t+r.m[k].closing,0);
       return `<td class="r num">${arAmt(v)}${P? cmpHtml(v, P.closing[k], G.closing) : ''}</td>`; }).join('')}
       <td class="r num ar-now">${arAmt(rows.reduce((t,r)=>t+r.bal,0))}</td></tr>`;
   /* 合計の下の2行 — 残高を作る「動き」。売上（予実）とは別もの（全明細・税込）なので「売上」とは書かない */
-  const flow=(key,label)=>`<tr class="ar-flow"><td class="ar-co">${label}${cum?'（累計）':''}</td>${B.map(b=>{
+  const flow=(key,label)=>`<tr class="ar-flow"><td class="ar-co">${label}${cum?'（累計）':''}</td><td class="ar-open"></td>${B.map(b=>{
       const k=lastIdx(b); if(k<0) return '<td class="r ar-fut">—</td>';
       let v=0; for(let i=(cum?0:b.s); i<=k; i++) rows.forEach(r=>{ v+=r.m[i][key]; });
       let pvv=0; if(P) for(let i=(cum?0:b.s); i<=k; i++) pvv+=P[key][i];
       return `<td class="r num">${v? moneyPlain(v) : '<span class="zero">0</span>'}${P && (v||pvv)? cmpHtml(v, pvv, G[key]) : ''}</td>`; }).join('')}
     <td class="r num ar-now"><span class="ar-y">年度計</span>${moneyPlain(rows.reduce((t,r)=>t+r.m.reduce((u,x)=>u+(x.future?0:x[key]),0),0))}</td></tr>`;
-  return { head, body, foot: tot+flow('billed',o.flow[0])+flow('payment',o.flow[1]), ncol:B.length+2 };
+  return { head, body, foot: tot+flow('billed',o.flow[0])+flow('payment',o.flow[1]), ncol:B.length+3 };
 }
 /** 全社合計（KPI）。ym を省くと今月。 */
 function arTotals(ym){
