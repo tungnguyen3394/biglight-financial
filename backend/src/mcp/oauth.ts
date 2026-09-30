@@ -281,6 +281,12 @@ export interface TokenCheck { ok: boolean; integration?: Integration; scopes?: s
 export async function verifyAccessToken(pool: Pool, cfg: McpConfig, header: string): Promise<TokenCheck> {
   const m = /^Bearer\s+(.+)$/i.exec(String(header || ''))
   if (!m) return { ok: false, reason: 'missing' }
+  /* 機械用: APIキー（bl_live_…）をそのまま Bearer に載せる ── CRM の MCP 一括窓口（crm.biglight.jp/mcp）が
+     server-to-server で呼ぶ道。スコープは鍵の今のスコープそのまま（JOB の bl_job_・Admin の blad_ と同じ扱い）。 */
+  if (m[1].trim().startsWith(KEY_PREFIX)) {
+    const integ = await resolveApiKey(pool, m[1].trim())
+    return integ ? { ok: true, integration: integ, scopes: integ.scopes.slice(), jti: '' } : { ok: false, reason: 'invalid' }
+  }
   const p = open(cfg.secret, 'mcpat', m[1].trim()) as TokenPayload | null
   if (!p || p.typ !== 'at') return { ok: false, reason: 'invalid' }
   if (p.aud !== cfg.publicUrl) return { ok: false, reason: 'audience' }
