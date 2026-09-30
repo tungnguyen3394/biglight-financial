@@ -21,6 +21,14 @@ services:
     labels:
       caddy: finance.biglight.jp
       caddy.reverse_proxy: "{{upstreams 80}}"
+      # 2026-09-30 (audit hạ tầng): nén + header an toàn đặt ở MỘT tầng Caddy, giống CRM/Academy.
+      # Nén: commit 21/9 ở máy Mac chưa bao giờ được đẩy lên, nên host này vẫn chưa nén (đo 30/9: 881KB trần).
+      # Header: quét 17 tên miền 30/9, finance thiếu cả 4. Dấu "?" = chỉ đặt khi app chưa tự đặt (không đè).
+      caddy.encode: zstd gzip
+      caddy.header.Strict-Transport-Security: "max-age=31536000"
+      caddy.header.?X-Content-Type-Options: nosniff
+      caddy.header.?X-Frame-Options: SAMEORIGIN
+      caddy.header.?Referrer-Policy: strict-origin-when-cross-origin
 
   api:
     build: ./backend
